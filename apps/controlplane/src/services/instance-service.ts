@@ -158,8 +158,33 @@ export function createInstanceService(deps: {
     },
 
     async stopManagedInstance(id: string): Promise<ManagedInstanceRecord> {
-      getRequiredInstance(db, id)
-      const response = await workerClient.stopInstance(id)
+      const row = getRequiredInstance(db, id)
+
+      if (row.runtimeHandle == null) {
+        updateInstanceLifecycle(db, {
+          id,
+          desiredState: "stopped",
+          observedState: "stopped",
+          runtimeHandle: null,
+          lastError: null,
+        })
+        return toManagedInstance(getRequiredInstance(db, id))
+      }
+
+      let response: Awaited<ReturnType<typeof workerClient.stopInstance>>
+      try {
+        response = await workerClient.stopInstance(id)
+      } catch (error) {
+        // Worker no longer has the handle — treat as already stopped
+        updateInstanceLifecycle(db, {
+          id,
+          desiredState: "stopped",
+          observedState: "stopped",
+          runtimeHandle: null,
+          lastError: null,
+        })
+        return toManagedInstance(getRequiredInstance(db, id))
+      }
 
       updateInstanceLifecycle(db, {
         id,

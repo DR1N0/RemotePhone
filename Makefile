@@ -56,9 +56,7 @@ run-worker: ## Run the worker application
 
 .PHONY: run
 run: ## Run both frontend and worker applications
-	@set -e; \
-	trap 'echo "Stopping..."; kill -- -$$PGID 2>/dev/null' INT TERM EXIT; \
-	PGID=$$PPID; \
-	$(MAKE) run-worker & \
-	$(MAKE) run-frontend & \
-	wait
+	@$(MAKE) run-worker & WORKER=$$!; \
+	$(MAKE) run-frontend & FRONTEND=$$!; \
+	trap 'echo "Stopping..."; kill $$WORKER $$FRONTEND 2>/dev/null' INT TERM; \
+	wait $$WORKER $$FRONTEND
