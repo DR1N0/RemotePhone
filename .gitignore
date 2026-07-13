@@ -1,0 +1,12 @@
+# Agents
+.claude
+docs/superpowers
+
+# Binaries and data
+.bin
+*.db
+
+# Frontend
+node_modules/
+dist/
+

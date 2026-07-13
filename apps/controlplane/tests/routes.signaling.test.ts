@@ -1,0 +1,219 @@
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+import { createTestDb, resetTestDb } from "../src/persistence/db.js"
+import { createServer } from "../src/server.js"
+import { createInstanceService } from "../src/services/instance-service.js"
+import { createSessionService } from "../src/services/session-service.js"
+
+function createWorkerClient() {
+  return {
+    listWorkers: vi.fn().mockResolvedValue([
+      {
+        id: "local",
+        kind: "local",
+        hostOs: "macos",
+        arch: "arm64",
+        health: "ok",
+        installedRuntimes: [
+          {
+            runtimeClass: "android-studio-emulator",
+            displayName: "Android Studio Emulator",
+          },
+        ],
+      },
+    ]),
+    listTemplates: vi.fn().mockResolvedValue([
+      {
+        templateId: "macos-android-studio:Medium_Phone",
+        runtimeClass: "android-studio-emulator",
+        displayName: "Medium Phone",
+        metadata: {
+          avdName: "Medium_Phone",
+        },
+      },
+    ]),
+    startInstance: vi.fn().mockImplementation(async (input: { instanceId: string; templateId: string; runtimeClass: string }) => ({
+      state: "starting",
+      handle: {
+        instanceId: input.instanceId,
+        templateId: input.templateId,
+        runtimeClass: input.runtimeClass,
+        workerId: "local",
+        pid: 4321,
+        consolePort: 5600,
+        adbPort: 5601,
+        grpcPort: 8554,
+      },
+    })),
+    inspectInstance: vi.fn(),
+    stopInstance: vi.fn(),
+    createTransportSession: vi.fn().mockImplementation(async (input: { sessionId: string; attachmentId: string; instanceId: string; runtimeClass: string }) => ({
+      sessionId: input.sessionId,
+      attachmentId: input.attachmentId,
+      instanceId: input.instanceId,
+      runtimeClass: input.runtimeClass,
+      mode: "prototype-webrtc",
+      status: "stub",
+      workerBaseUrl: "http://127.0.0.1:7780",
+      sessionToken: `stub-${input.sessionId}-${input.attachmentId}`,
+    })),
+  }
+}
+
+describe("signaling route", () => {
+  beforeEach(() => {
+    resetTestDb()
+  })
+
+  it("returns prototype transport metadata for a started session attachment", async () => {
+    const db = createTestDb()
+    const workerClient = createWorkerClient()
+    const instanceService = createInstanceService({ db, workerClient })
+    const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
+    const app = createServer({ workerClient, instanceService, sessionService })
+
+    const createInstanceRes = await app.request("/api/v1/instances", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "phone-1",
+        templateId: "macos-android-studio:Medium_Phone",
+        placement: { kind: "local-only" },
+        resourceProfile: {
+          cpuMillicores: 1000,
+          memoryMb: 4096,
+          diskMb: 8192,
+          accelerationMode: "auto",
+          streamProfile: "prototype",
+        },
+        launchConfig: {
+          headless: true,
+          readOnly: true,
+          wipeData: false,
+        },
+      }),
+    })
+    const createInstanceBody = await createInstanceRes.json() as { instance: { id: string } }
+
+    const startInstanceRes = await app.request(`/api/v1/instances/${createInstanceBody.instance.id}/start`, {
+      method: "POST",
+    })
+    expect(startInstanceRes.status).toBe(200)
+
+    const createSessionRes = await app.request("/api/v1/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: createInstanceBody.instance.id,
+        ownerClientId: "owner-1",
+      }),
+    })
+    expect(createSessionRes.status).toBe(201)
+    const createSessionBody = await createSessionRes.json() as {
+      session: {
+        id: string
+        attachments: Array<{ id: string }>
+      }
+    }
+    const ownerAttachment = createSessionBody.session.attachments[0]
+    if (ownerAttachment == null) {
+      throw new Error("expected owner attachment")
+    }
+
+    const res = await app.request("/api/v1/signaling/session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: createSessionBody.session.id,
+        attachmentId: ownerAttachment.id,
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      transport: {
+        sessionId: createSessionBody.session.id,
+        attachmentId: ownerAttachment.id,
+        instanceId: createInstanceBody.instance.id,
+        runtimeClass: "android-studio-emulator",
+        mode: "prototype-webrtc",
+        status: "stub",
+        workerBaseUrl: "http://127.0.0.1:7780",
+        sessionToken: `stub-${createSessionBody.session.id}-${ownerAttachment.id}`,
+      },
+    })
+    expect(workerClient.createTransportSession).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: createSessionBody.session.id,
+      attachmentId: ownerAttachment.id,
+      instanceId: createInstanceBody.instance.id,
+      runtimeClass: "android-studio-emulator",
+      runtimeHandle: expect.objectContaining({
+        workerId: "local",
+        pid: 4321,
+        consolePort: 5600,
+        adbPort: 5601,
+        grpcPort: 8554,
+      }),
+    }))
+  })
+
+  it("rejects signaling for an attachment that is not part of the session", async () => {
+    const db = createTestDb()
+    const workerClient = createWorkerClient()
+    const instanceService = createInstanceService({ db, workerClient })
+    const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
+    const app = createServer({ workerClient, instanceService, sessionService })
+
+    const createInstanceRes = await app.request("/api/v1/instances", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "phone-1",
+        templateId: "macos-android-studio:Medium_Phone",
+        placement: { kind: "local-only" },
+        resourceProfile: {
+          cpuMillicores: 1000,
+          memoryMb: 4096,
+          diskMb: 8192,
+          accelerationMode: "auto",
+          streamProfile: "prototype",
+        },
+        launchConfig: {
+          headless: true,
+          readOnly: true,
+          wipeData: false,
+        },
+      }),
+    })
+    const createInstanceBody = await createInstanceRes.json() as { instance: { id: string } }
+
+    await app.request(`/api/v1/instances/${createInstanceBody.instance.id}/start`, {
+      method: "POST",
+    })
+
+    const createSessionRes = await app.request("/api/v1/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: createInstanceBody.instance.id,
+        ownerClientId: "owner-1",
+      }),
+    })
+    const createSessionBody = await createSessionRes.json() as { session: { id: string } }
+
+    const res = await app.request("/api/v1/signaling/session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: createSessionBody.session.id,
+        attachmentId: "missing-attachment",
+      }),
+    })
+
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({
+      error: "attachment not found: missing-attachment",
+    })
+    expect(workerClient.createTransportSession).not.toHaveBeenCalled()
+  })
+})
