@@ -9,6 +9,7 @@ import { registerTemplateRoutes } from "./routes/templates.js"
 import { registerWorkerRoutes } from "./routes/workers.js"
 import type { InstanceService } from "./services/instance-service.js"
 import type { SessionService } from "./services/session-service.js"
+import { createSignalingService } from "./services/signaling-service.js"
 import type { DiscoveryWorkerClient, ManagedInstanceWorkerClient } from "./services/worker-client.js"
 
 export type ServerDependencies = {
@@ -133,9 +134,10 @@ export function createServer(deps: ServerDependencies): Hono {
     registerSessionRoutes(app, deps.sessionService)
   }
 
-  if (deps.instanceService != null && deps.sessionService != null && "createTransportSession" in deps.workerClient) {
+  if (deps.instanceService != null && deps.sessionService != null && "forwardOffer" in deps.workerClient) {
+    const signalingService = createSignalingService(deps.workerClient as ManagedInstanceWorkerClient)
     registerSignalingRoutes(app, {
-      workerClient: deps.workerClient as ManagedInstanceWorkerClient,
+      signalingService,
       instanceService: deps.instanceService,
       sessionService: deps.sessionService,
     })

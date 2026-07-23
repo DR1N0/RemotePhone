@@ -1,37 +1,40 @@
 import type { Context, Hono } from "hono"
+import { z } from "zod"
 
-import { createSignalingSessionRequestSchema } from "../domain/schemas.js"
-import {
-  InstanceNotFoundError,
-  type InstanceService,
-} from "../services/instance-service.js"
+import type { InstanceService } from "../services/instance-service.js"
 import {
   AttachmentNotFoundError,
   SessionInvalidRequestError,
   SessionNotFoundError,
   type SessionService,
 } from "../services/session-service.js"
-import type { ManagedInstanceWorkerClient } from "../services/worker-client.js"
+import { InstanceNotFoundError } from "../services/instance-service.js"
+import type { SignalingService } from "../services/signaling-service.js"
+
+const signalingSessionSchema = z.object({
+  sessionId: z.string().min(1),
+  attachmentId: z.string().min(1),
+  sdpOffer: z.string().min(1),
+})
+
+const iceCandidateSchema = z.object({
+  sessionId: z.string().min(1),
+  attachmentId: z.string().min(1),
+  candidate: z.string(),
+})
 
 function errorStatus(error: unknown): 400 | 404 | 500 {
-  if (error instanceof SessionInvalidRequestError) {
-    return 400
-  }
+  if (error instanceof SessionInvalidRequestError) return 400
   if (
     error instanceof SessionNotFoundError
     || error instanceof AttachmentNotFoundError
     || error instanceof InstanceNotFoundError
-  ) {
-    return 404
-  }
+  ) return 404
   return 500
 }
 
 function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-  return "unexpected error"
+  return error instanceof Error ? error.message : "unexpected error"
 }
 
 function jsonError(c: Context, error: unknown) {
@@ -44,32 +47,51 @@ export function registerSignalingRoutes(
   deps: {
     sessionService: SessionService
     instanceService: InstanceService
-    workerClient: ManagedInstanceWorkerClient
+    signalingService: SignalingService
   },
 ): void {
   app.post("/api/v1/signaling/session", async (c) => {
     try {
-      const input = createSignalingSessionRequestSchema.parse(await c.req.json())
+      const input = signalingSessionSchema.parse(await c.req.json())
       const session = await deps.sessionService.getSession(input.sessionId)
-      const attachment = session.attachments.find((candidate) => candidate.id === input.attachmentId)
+      const attachment = session.attachments.find((a) => a.id === input.attachmentId)
       if (attachment == null) {
         throw new AttachmentNotFoundError(`attachment not found: ${input.attachmentId}`)
       }
-
       const instance = await deps.instanceService.getManagedInstance(session.instanceId)
       if (instance.runtimeHandle == null) {
-        throw new SessionInvalidRequestError(`managed instance is not started: ${instance.id}`)
+        throw new SessionInvalidRequestError(`instance is not running: ${instance.id}`)
       }
-
-      const transport = await deps.workerClient.createTransportSession({
-        sessionId: session.id,
-        attachmentId: attachment.id,
+      const { sdpAnswer } = await deps.signalingService.relayOffer({
         instanceId: instance.id,
-        runtimeClass: instance.runtimeClass,
-        runtimeHandle: instance.runtimeHandle,
+        attachmentId: attachment.id,
+        role: attachment.role,
+        sdpOffer: input.sdpOffer,
       })
+      return c.json({ sdpAnswer })
+    } catch (error) {
+      return jsonError(c, error)
+    }
+  })
 
-      return c.json({ transport })
+  app.post("/api/v1/signaling/ice-candidate", async (c) => {
+    try {
+      const input = iceCandidateSchema.parse(await c.req.json())
+      const session = await deps.sessionService.getSession(input.sessionId)
+      const attachment = session.attachments.find((a) => a.id === input.attachmentId)
+      if (attachment == null) {
+        throw new AttachmentNotFoundError(`attachment not found: ${input.attachmentId}`)
+      }
+      const instance = await deps.instanceService.getManagedInstance(session.instanceId)
+      if (instance.runtimeHandle == null) {
+        throw new SessionInvalidRequestError(`instance is not running: ${instance.id}`)
+      }
+      await deps.signalingService.relayICECandidate({
+        instanceId: instance.id,
+        attachmentId: attachment.id,
+        candidate: input.candidate,
+      })
+      return c.json({ status: "ok" })
     } catch (error) {
       return jsonError(c, error)
     }
