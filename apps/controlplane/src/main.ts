@@ -22,7 +22,7 @@ export function main(): void {
     idleTtlMs: env.sessionIdleTtlMs,
   })
   const baseUrl = `http://localhost:${env.port}`
-  const adminDistPath = path.resolve(new URL(".", import.meta.url).pathname, "../../../admin/dist")
+  const adminDistPath = path.resolve(new URL(".", import.meta.url).pathname, "../../admin/dist")
   const app = createServer({
     workerClient,
     instanceService,

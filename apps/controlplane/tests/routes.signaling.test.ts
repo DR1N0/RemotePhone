@@ -203,6 +203,99 @@ describe("signaling route", () => {
     expect(workerClient.forwardOffer).not.toHaveBeenCalled()
   })
 
+  describe("POST /api/v1/signaling/ice-candidate", () => {
+    async function createAppWithSessionAndAttachment() {
+      const db = createTestDb()
+      const workerClient = createWorkerClient()
+      const instanceService = createInstanceService({ db, workerClient })
+      const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
+      const app = createServer({ workerClient, instanceService, sessionService })
+
+      const createInstanceRes = await app.request("/api/v1/instances", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "phone-ice",
+          templateId: "macos-android-studio:Medium_Phone",
+          placement: { kind: "local-only" },
+          resourceProfile: {
+            cpuMillicores: 1000,
+            memoryMb: 4096,
+            diskMb: 8192,
+            accelerationMode: "auto",
+            streamProfile: "prototype",
+          },
+          launchConfig: {
+            headless: true,
+            readOnly: true,
+            wipeData: false,
+          },
+        }),
+      })
+      const createInstanceBody = await createInstanceRes.json() as { instance: { id: string } }
+
+      await app.request(`/api/v1/instances/${createInstanceBody.instance.id}/start`, {
+        method: "POST",
+      })
+
+      const createSessionRes = await app.request("/api/v1/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          instanceId: createInstanceBody.instance.id,
+          ownerClientId: "owner-ice",
+        }),
+      })
+      const createSessionBody = await createSessionRes.json() as {
+        session: { id: string; attachments: Array<{ id: string; role: string }> }
+      }
+      const ownerAttachment = createSessionBody.session.attachments[0]
+      if (ownerAttachment == null) throw new Error("expected owner attachment")
+
+      return { app, workerClient, instanceId: createInstanceBody.instance.id, sessionId: createSessionBody.session.id, attachment: ownerAttachment }
+    }
+
+    it("happy path: returns { status: 'ok' } and calls forwardICECandidate with correct args", async () => {
+      const { app, workerClient, instanceId, sessionId, attachment } = await createAppWithSessionAndAttachment()
+
+      const res = await app.request("/api/v1/signaling/ice-candidate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          attachmentId: attachment.id,
+          candidate: "candidate:1 1 UDP 2122252543 192.168.1.1 54321 typ host",
+        }),
+      })
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ status: "ok" })
+      expect(workerClient.forwardICECandidate).toHaveBeenCalledWith({
+        instanceId,
+        attachmentId: attachment.id,
+        candidate: "candidate:1 1 UDP 2122252543 192.168.1.1 54321 typ host",
+      })
+    })
+
+    it("unknown attachment: returns 404", async () => {
+      const { app, workerClient, sessionId } = await createAppWithSessionAndAttachment()
+
+      const res = await app.request("/api/v1/signaling/ice-candidate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          attachmentId: "missing",
+          candidate: "candidate:1 1 UDP 2122252543 192.168.1.1 54321 typ host",
+        }),
+      })
+
+      expect(res.status).toBe(404)
+      expect(await res.json()).toEqual({ error: "attachment not found: missing" })
+      expect(workerClient.forwardICECandidate).not.toHaveBeenCalled()
+    })
+  })
+
   it("POST /api/v1/signaling/session forwards offer with correct instanceId, attachmentId, role, and sdpOffer", async () => {
     const db = createTestDb()
     const workerClient = createWorkerClient()

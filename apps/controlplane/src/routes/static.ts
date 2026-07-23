@@ -11,6 +11,9 @@ export function registerStaticRoutes(app: Hono, adminDistPath: string): void {
   // Resolve relative paths for serveStatic (it expects paths relative to cwd)
   const relPath = path.relative(process.cwd(), adminDistPath)
 
-  app.use("/admin/*", serveStatic({ root: relPath }))
+  app.use("/admin/*", serveStatic({
+    root: relPath,
+    rewriteRequestPath: (p) => p.replace(/^\/admin/, ""),
+  }))
   app.use("/admin", serveStatic({ path: path.join(relPath, "index.html") }))
 }
