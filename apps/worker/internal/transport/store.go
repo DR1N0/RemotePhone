@@ -1,6 +1,9 @@
 package transport
 
-import "sync"
+import (
+	"strings"
+	"sync"
+)
 
 // Store holds active TransportAdapter instances keyed by "instanceID:attachmentID".
 type Store struct {
@@ -29,4 +32,25 @@ func (s *Store) Delete(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.adapters, key)
+}
+
+// StopAndDeleteByPrefix stops and removes all adapters whose key has the given prefix.
+func (s *Store) StopAndDeleteByPrefix(prefix string) {
+	s.mu.Lock()
+	var toStop []Adapter
+	var toDelete []string
+	for k, a := range s.adapters {
+		if strings.HasPrefix(k, prefix) {
+			toStop = append(toStop, a)
+			toDelete = append(toDelete, k)
+		}
+	}
+	for _, k := range toDelete {
+		delete(s.adapters, k)
+	}
+	s.mu.Unlock()
+	// Stop adapters outside the lock to avoid holding it during Stop() calls.
+	for _, a := range toStop {
+		_ = a.Stop()
+	}
 }

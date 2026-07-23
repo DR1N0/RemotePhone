@@ -131,6 +131,13 @@ func (a *Adapter) Stop(instanceID string) (runtime.InstanceStatus, error) {
 		a.store.Delete(instanceID)
 	}
 
+	// Clean up any active transport adapter for this instance.
+	// We don't know the attachmentID here, so scan for any key prefixed with instanceID.
+	if a.transportStore != nil {
+		prefix := instanceID + ":"
+		a.transportStore.StopAndDeleteByPrefix(prefix)
+	}
+
 	return runtime.InstanceStatus{
 		State:     "stopped",
 		Handle:    handle,
