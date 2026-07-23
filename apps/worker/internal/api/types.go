@@ -61,3 +61,20 @@ type HostInventory struct {
 	HostOS string
 	Arch   string
 }
+
+type TransportOfferRequest struct {
+	InstanceID   string `json:"instanceId"`
+	AttachmentID string `json:"attachmentId"`
+	Role         string `json:"role"`
+	SdpOffer     string `json:"sdpOffer"`
+}
+
+type TransportOfferResponse struct {
+	SdpAnswer string `json:"sdpAnswer"`
+}
+
+type ICECandidateRequest struct {
+	InstanceID   string `json:"instanceId"`
+	AttachmentID string `json:"attachmentId"`
+	Candidate    string `json:"candidate"`
+}

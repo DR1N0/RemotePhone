@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimepkg "mako-worker/internal/runtime"
+	"mako-worker/internal/transport"
 )
 
 type Dependencies struct {
@@ -14,6 +15,7 @@ type Dependencies struct {
 	ListenBaseURL   string
 	HostInventory   HostInventory
 	RuntimeRegistry *runtimepkg.Registry
+	TransportStore  *transport.Store
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -178,6 +180,53 @@ func NewRouter(deps Dependencies) http.Handler {
 			WorkerBaseURL: transportSession.WorkerBaseURL,
 			SessionToken:  transportSession.SessionToken,
 		})
+	})
+
+	mux.HandleFunc("POST /v1/transport/offer", func(w http.ResponseWriter, r *http.Request) {
+		var req TransportOfferRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErrorMessage(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		if deps.TransportStore == nil {
+			writeErrorMessage(w, http.StatusBadRequest, "transport store not configured")
+			return
+		}
+		key := req.InstanceID + ":" + req.AttachmentID
+		adapter, ok := deps.TransportStore.Get(key)
+		if !ok {
+			writeErrorMessage(w, http.StatusNotFound, "transport adapter not found for instance/attachment")
+			return
+		}
+		answer, err := adapter.HandleOffer(req.InstanceID, req.AttachmentID, req.Role, req.SdpOffer)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, TransportOfferResponse{SdpAnswer: answer})
+	})
+
+	mux.HandleFunc("POST /v1/transport/ice-candidate", func(w http.ResponseWriter, r *http.Request) {
+		var req ICECandidateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErrorMessage(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		if deps.TransportStore == nil {
+			writeErrorMessage(w, http.StatusBadRequest, "transport store not configured")
+			return
+		}
+		key := req.InstanceID + ":" + req.AttachmentID
+		adapter, ok := deps.TransportStore.Get(key)
+		if !ok {
+			writeErrorMessage(w, http.StatusNotFound, "transport adapter not found")
+			return
+		}
+		if err := adapter.HandleICECandidate(req.Candidate); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
 	return mux
