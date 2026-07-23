@@ -60,3 +60,16 @@ run: ## Run both frontend and worker applications
 	$(MAKE) run-frontend & FRONTEND=$$!; \
 	trap 'echo "Stopping..."; kill $$WORKER $$FRONTEND 2>/dev/null' INT TERM; \
 	wait $$WORKER $$FRONTEND
+
+.PHONY: build-admin
+build-admin: ## Build admin frontend to apps/admin/dist
+	cd apps/admin && npm run build
+
+.PHONY: run-admin
+run-admin: ## Run admin frontend dev server with API proxy to :3000
+	cd apps/admin && npm run dev
+
+.PHONY: build
+build: build-admin ## Build all artifacts
+	cd apps/controlplane && npm run build
+	cd apps/worker && go build ./cmd/mako-worker/
