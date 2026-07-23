@@ -7,6 +7,7 @@ import { registerInviteRoutes } from "./routes/invites.js"
 import { registerRootRoutes } from "./routes/root.js"
 import { registerSessionRoutes } from "./routes/sessions.js"
 import { registerSignalingRoutes } from "./routes/signaling.js"
+import { registerStaticRoutes } from "./routes/static.js"
 import { registerTemplateRoutes } from "./routes/templates.js"
 import { registerWorkerRoutes } from "./routes/workers.js"
 import type { InstanceService } from "./services/instance-service.js"
@@ -20,6 +21,7 @@ export type ServerDependencies = {
   sessionService?: SessionService
   db?: AppDb
   baseUrl?: string
+  adminDistPath?: string
 }
 
 function registerDocsRoutes(app: Hono): void {
@@ -124,6 +126,10 @@ function registerDocsRoutes(app: Hono): void {
 
 export function createServer(deps: ServerDependencies): Hono {
   const app = new Hono()
+
+  if (deps.adminDistPath != null) {
+    registerStaticRoutes(app, deps.adminDistPath)
+  }
 
   registerRootRoutes(app)
   registerWorkerRoutes(app, deps.workerClient)

@@ -1,4 +1,5 @@
 import { serve } from "@hono/node-server"
+import path from "node:path"
 
 import { loadEnv } from "./config/env.js"
 import { createAppDb } from "./persistence/db.js"
@@ -21,12 +22,14 @@ export function main(): void {
     idleTtlMs: env.sessionIdleTtlMs,
   })
   const baseUrl = `http://localhost:${env.port}`
+  const adminDistPath = path.resolve(new URL(".", import.meta.url).pathname, "../../../admin/dist")
   const app = createServer({
     workerClient,
     instanceService,
     sessionService,
     db,
     baseUrl,
+    adminDistPath,
   })
 
   setInterval(() => {
