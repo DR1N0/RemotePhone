@@ -1,7 +1,9 @@
 import { swaggerUI } from "@hono/swagger-ui"
 import { Hono } from "hono"
 
+import type { AppDb } from "./persistence/db.js"
 import { registerInstanceRoutes } from "./routes/instances.js"
+import { registerInviteRoutes } from "./routes/invites.js"
 import { registerRootRoutes } from "./routes/root.js"
 import { registerSessionRoutes } from "./routes/sessions.js"
 import { registerSignalingRoutes } from "./routes/signaling.js"
@@ -16,6 +18,8 @@ export type ServerDependencies = {
   workerClient: DiscoveryWorkerClient
   instanceService?: InstanceService
   sessionService?: SessionService
+  db?: AppDb
+  baseUrl?: string
 }
 
 function registerDocsRoutes(app: Hono): void {
@@ -140,6 +144,14 @@ export function createServer(deps: ServerDependencies): Hono {
       signalingService,
       instanceService: deps.instanceService,
       sessionService: deps.sessionService,
+    })
+  }
+
+  if (deps.sessionService != null && deps.db != null) {
+    registerInviteRoutes(app, {
+      db: deps.db,
+      sessionService: deps.sessionService,
+      baseUrl: deps.baseUrl ?? "http://localhost:3000",
     })
   }
 

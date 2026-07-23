@@ -20,10 +20,13 @@ export function main(): void {
     db,
     idleTtlMs: env.sessionIdleTtlMs,
   })
+  const baseUrl = `http://localhost:${env.port}`
   const app = createServer({
     workerClient,
     instanceService,
     sessionService,
+    db,
+    baseUrl,
   })
 
   setInterval(() => {
