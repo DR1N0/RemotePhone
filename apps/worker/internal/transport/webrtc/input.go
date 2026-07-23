@@ -14,7 +14,7 @@ import (
 func BuildADBInputArgs(adbSerial string, ev transport.InputEvent, screenW, screenH int) []string {
 	xPx := strconv.Itoa(int(math.Round(ev.X * float64(screenW))))
 	yPx := strconv.Itoa(int(math.Round(ev.Y * float64(screenH))))
-	base := []string{"adb", "-s", adbSerial, "shell"}
+	base := []string{"adb", "-s", adbSerial, "shell", "input"}
 	switch ev.Type {
 	case "key":
 		return append(base, "keyevent", strconv.Itoa(ev.Keycode))
