@@ -125,7 +125,7 @@ func TestBuildStartupRuntimeRegistrySkipsAndroidStudioWhenUnavailable(t *testing
 		AndroidEmulatorPath: "/path/that/does/not/exist",
 	}
 
-	registry := buildStartupRuntimeRegistry(cfg, handles)
+	registry := buildStartupRuntimeRegistry(cfg, handles, nil)
 	if _, ok := registry.Get(androidstudio.RuntimeClass); ok {
 		t.Fatalf("expected %q adapter to be absent when emulator is unavailable", androidstudio.RuntimeClass)
 	}

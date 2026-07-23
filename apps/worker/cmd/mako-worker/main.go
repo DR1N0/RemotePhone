@@ -11,13 +11,15 @@ import (
 	workerruntime "mako-worker/internal/runtime"
 	"mako-worker/internal/runtime/androidstudio"
 	"mako-worker/internal/store"
+	"mako-worker/internal/transport"
 )
 
 func main() {
 	cfg := config.Load()
 
 	handles := store.NewRuntimeHandles()
-	registry := buildStartupRuntimeRegistry(cfg, handles)
+	transportStore := transport.NewStore()
+	registry := buildStartupRuntimeRegistry(cfg, handles, transportStore)
 
 	router := workerapi.NewRouter(workerapi.Dependencies{
 		WorkerID:      cfg.WorkerID,
@@ -27,6 +29,7 @@ func main() {
 			Arch:   runtime2GOARCH(),
 		},
 		RuntimeRegistry: registry,
+		TransportStore:  transportStore,
 	})
 
 	log.Printf("mako-worker listening on %s", cfg.ListenAddr)
@@ -43,9 +46,9 @@ func runtime2GOARCH() string {
 	return stdruntime.GOARCH
 }
 
-func buildStartupRuntimeRegistry(cfg config.Config, handles workerruntime.HandleStore) *workerruntime.Registry {
+func buildStartupRuntimeRegistry(cfg config.Config, handles workerruntime.HandleStore, transportStore *transport.Store) *workerruntime.Registry {
 	registry := newRuntimeRegistry(handles)
-	androidStudioAdapter := androidstudio.NewAdapter(cfg, handles)
+	androidStudioAdapter := androidstudio.NewAdapter(cfg, handles, transportStore)
 	if err := androidStudioAdapter.IsAvailable(); err == nil {
 		if err := registry.Register(androidStudioAdapter); err != nil {
 			log.Printf("skip android studio adapter registration: %v", err)

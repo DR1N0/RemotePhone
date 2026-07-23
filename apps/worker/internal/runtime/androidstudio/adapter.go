@@ -7,14 +7,17 @@ import (
 	"mako-worker/internal/config"
 	"mako-worker/internal/host"
 	"mako-worker/internal/runtime"
+	"mako-worker/internal/transport"
 )
 
 type Adapter struct {
-	workerID  string
-	discovery DiscoveryOptions
-	store     runtime.HandleStore
-	launchFn  func(string, LaunchRequest) (ProcessHandle, error)
-	stopFn    func(int) error
+	workerID       string
+	discovery      DiscoveryOptions
+	store          runtime.HandleStore
+	transportStore *transport.Store
+	stunURL        string
+	launchFn       func(string, LaunchRequest) (ProcessHandle, error)
+	stopFn         func(int) error
 }
 
 type ProcessHandle interface {
@@ -27,7 +30,7 @@ type execProcess struct {
 
 func (p execProcess) Pid() int { return p.pid }
 
-func NewAdapter(cfg config.Config, store runtime.HandleStore) *Adapter {
+func NewAdapter(cfg config.Config, store runtime.HandleStore, transportStore *transport.Store) *Adapter {
 	if store == nil {
 		store = runtime.NewMemoryHandleStore()
 	}
@@ -39,8 +42,10 @@ func NewAdapter(cfg config.Config, store runtime.HandleStore) *Adapter {
 			AndroidSDKRoot:       cfg.AndroidSDKRoot,
 			ExplicitEmulatorPath: cfg.AndroidEmulatorPath,
 		},
-		store: store,
-		stopFn: StopProcess,
+		store:          store,
+		transportStore: transportStore,
+		stunURL:        cfg.StunURL,
+		stopFn:         StopProcess,
 	}
 	adapter.launchFn = func(emulatorPath string, req LaunchRequest) (ProcessHandle, error) {
 		cmd, err := Launch(emulatorPath, req)
