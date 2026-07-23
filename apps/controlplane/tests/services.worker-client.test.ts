@@ -243,4 +243,52 @@ describe("local worker client", () => {
       }),
     )
   })
+
+  it("forwards SDP offer to worker /v1/transport/offer", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ sdpAnswer: "v=0\r\n" }),
+    })
+    const client = new LocalWorkerClient("http://127.0.0.1:7780", fetchImpl as typeof globalThis.fetch)
+    const result = await client.forwardOffer({
+      instanceId: "inst-1",
+      attachmentId: "att-1",
+      role: "owner",
+      sdpOffer: "v=0\r\n",
+    })
+    expect(result.sdpAnswer).toBe("v=0\r\n")
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:7780/v1/transport/offer",
+      expect.objectContaining({ method: "POST" }),
+    )
+  })
+
+  it("forwards ICE candidate to worker /v1/transport/ice-candidate", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+    })
+    const client = new LocalWorkerClient("http://127.0.0.1:7780", fetchImpl as typeof globalThis.fetch)
+    await expect(client.forwardICECandidate({
+      instanceId: "inst-1",
+      attachmentId: "att-1",
+      candidate: "candidate:1 1 UDP 2130706431 192.168.1.1 54400 typ host",
+    })).resolves.toBeUndefined()
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:7780/v1/transport/ice-candidate",
+      expect.objectContaining({ method: "POST" }),
+    )
+  })
+
+  it("throws when ICE candidate relay returns a non-ok status", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    })
+    const client = new LocalWorkerClient("http://127.0.0.1:7780", fetchImpl as typeof globalThis.fetch)
+    await expect(client.forwardICECandidate({
+      instanceId: "inst-1",
+      attachmentId: "att-1",
+      candidate: "candidate:1 1 UDP 2130706431 192.168.1.1 54400 typ host",
+    })).rejects.toThrow("Worker ICE relay failed with status 500")
+  })
 })

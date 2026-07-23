@@ -37,6 +37,23 @@ export type WorkerInstanceResponse = {
   lastError?: string
 }
 
+export type ForwardOfferInput = {
+  instanceId: string
+  attachmentId: string
+  role: string
+  sdpOffer: string
+}
+
+export type WorkerOfferResponse = {
+  sdpAnswer: string
+}
+
+export type ForwardICECandidateInput = {
+  instanceId: string
+  attachmentId: string
+  candidate: string
+}
+
 export type CreateTransportSessionInput = {
   sessionId: string
   attachmentId: string
@@ -67,6 +84,8 @@ export interface ManagedInstanceWorkerClient extends DiscoveryWorkerClient {
   inspectInstance(instanceId: string): Promise<WorkerInstanceResponse>
   stopInstance(instanceId: string): Promise<WorkerInstanceResponse>
   createTransportSession(input: CreateTransportSessionInput): Promise<WorkerTransportSession>
+  forwardOffer(input: ForwardOfferInput): Promise<WorkerOfferResponse>
+  forwardICECandidate(input: ForwardICECandidateInput): Promise<void>
 }
 
 type WorkerHealthResponse = {
@@ -157,5 +176,25 @@ export class LocalWorkerClient implements ManagedInstanceWorkerClient {
     })
 
     return await readJson<WorkerTransportSession>(response)
+  }
+
+  async forwardOffer(input: ForwardOfferInput): Promise<WorkerOfferResponse> {
+    const response = await this.fetchImpl(`${this.baseUrl}/v1/transport/offer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    })
+    return await readJson<WorkerOfferResponse>(response)
+  }
+
+  async forwardICECandidate(input: ForwardICECandidateInput): Promise<void> {
+    const response = await this.fetchImpl(`${this.baseUrl}/v1/transport/ice-candidate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    })
+    if (!response.ok) {
+      throw new Error(`Worker ICE relay failed with status ${response.status}`)
+    }
   }
 }
