@@ -64,6 +64,7 @@ export const attachments = sqliteTable("attachments", {
   role: text("role").$type<SessionRole>().notNull(),
   status: text("status").$type<AttachmentStatus>().notNull(),
   reconnectToken: text("reconnect_token"),
+  inviteToken: text("invite_token"),
   ...timestampColumns,
 })
 

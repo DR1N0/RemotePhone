@@ -7,6 +7,7 @@ import { createAppDb, createTestDb, resetTestDb } from "../src/persistence/db.js
 import {
   createAttachment,
   getAttachmentById,
+  getAttachmentByInviteToken,
   listAttachmentsForSession,
   updateAttachmentRole,
   updateAttachmentStatus,
@@ -281,5 +282,33 @@ describe("persistence repositories", () => {
         reconnectToken: "reconnect-missing-attachment",
       }),
     ).toThrow()
+  })
+
+  it("stores and retrieves invite token", () => {
+    const db = createTestDb()
+
+    seedInstance(db)
+
+    createSession(db, {
+      id: "sess_1",
+      instanceId: "inst_1",
+      status: "active",
+      idleExpiresAt: null,
+      reconnectToken: "reconnect-session-1",
+    })
+
+    createAttachment(db, {
+      id: "att-invite-1",
+      sessionId: "sess_1",
+      clientId: "client-1",
+      role: "observer",
+      status: "disconnected",
+      reconnectToken: null,
+      inviteToken: "tok-abc123",
+    })
+
+    const row = getAttachmentByInviteToken(db, "tok-abc123")
+    expect(row).toBeDefined()
+    expect(row?.id).toBe("att-invite-1")
   })
 })
