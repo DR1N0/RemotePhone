@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom"
 import {
   Table, Tag, Button, Space, Typography, Layout, message, Popconfirm,
 } from "antd"
-import { PlusOutlined } from "@ant-design/icons"
 import { api, type Instance } from "../api/client.js"
 
 const { Header, Content } = Layout
@@ -54,8 +53,7 @@ export default function Dashboard() {
   const handleLaunch = async (instanceId: string) => {
     try {
       const session = await api.createSession(instanceId)
-      // The first attachment from createSession is the owner attachment
-      const ownerAttachment = session.attachments[0]
+      const ownerAttachment = session.attachments.find((a) => a.role === "owner")
       if (ownerAttachment == null) {
         throw new Error("no attachment returned from session creation")
       }
