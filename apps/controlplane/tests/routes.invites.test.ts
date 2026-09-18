@@ -163,7 +163,7 @@ describe("GET /session/:id — token redemption", () => {
     resetTestDb()
   })
 
-  it("redirects to /session/:id?attachmentId=... after redeeming token", async () => {
+  it("redirects redeemed invites to the Admin SPA session route", async () => {
     const { app, sessionId } = await createAppWithSession()
 
     const inviteRes = await app.request(`/api/v1/sessions/${sessionId}/invites`, { method: "POST" })
@@ -175,7 +175,14 @@ describe("GET /session/:id — token redemption", () => {
     })
     expect(redeemRes.status).toBe(302)
     const location = redeemRes.headers.get("location") ?? ""
-    expect(location).toContain("attachmentId=")
+    const attachmentId = new URL(location, "http://localhost").searchParams.get("attachmentId")
+    expect(attachmentId).not.toBeNull()
+
+    const adminRedirectRes = await app.request(location, { redirect: "manual" })
+    expect(adminRedirectRes.status).toBe(302)
+    expect(adminRedirectRes.headers.get("location")).toBe(
+      `/admin/session/${sessionId}?attachmentId=${attachmentId}`,
+    )
   })
 
   it("returns 400 when token is invalid", async () => {

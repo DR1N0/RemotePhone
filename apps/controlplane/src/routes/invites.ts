@@ -56,7 +56,7 @@ export function registerInviteRoutes(
 
     // If attachmentId already present, redirect to admin page
     if (attachmentId != null) {
-      return c.redirect(`/admin/session.html?sessionId=${c.req.param("id")}&attachmentId=${attachmentId}`)
+      return c.redirect(`/admin/session/${c.req.param("id")}?attachmentId=${attachmentId}`)
     }
 
     if (token == null) {

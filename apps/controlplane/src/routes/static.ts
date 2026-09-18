@@ -16,4 +16,6 @@ export function registerStaticRoutes(app: Hono, adminDistPath: string): void {
     rewriteRequestPath: (p) => p.replace(/^\/admin/, ""),
   }))
   app.use("/admin", serveStatic({ path: path.join(relPath, "index.html") }))
+  // SPA fallback: serve index.html for any /admin/* path that didn't match a static file
+  app.get("/admin/*", serveStatic({ path: path.join(relPath, "index.html") }))
 }
