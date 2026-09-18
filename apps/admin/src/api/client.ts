@@ -30,6 +30,30 @@ export type Session = {
   attachments: SessionAttachment[]
 }
 
+export type Template = {
+  templateId: string
+  runtimeClass: string
+  displayName: string
+}
+
+export type CreateInstanceRequest = {
+  name: string
+  templateId: string
+  placement: { kind: "local-only" }
+  resourceProfile: {
+    cpuMillicores: number
+    memoryMb: number
+    diskMb: number
+    accelerationMode: "forbid" | "prefer" | "require" | "auto"
+    streamProfile: "prototype" | "balanced" | "high"
+  }
+  launchConfig: {
+    headless: boolean
+    readOnly: boolean
+    wipeData: boolean
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "content-type": "application/json", ...init?.headers },
@@ -43,14 +67,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  listTemplates: () =>
+    request<{ templates: Template[] }>("/api/v1/templates").then((r) => r.templates),
+
+  createInstance: (body: CreateInstanceRequest) =>
+    request<{ instance: Instance }>("/api/v1/instances", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.instance),
+
   listInstances: () =>
     request<{ instances: Instance[] }>("/api/v1/instances").then((r) => r.instances),
 
   startInstance: (id: string) =>
-    request<Instance>(`/api/v1/instances/${id}/start`, { method: "POST" }),
+    request<{ instance: Instance }>(`/api/v1/instances/${id}/start`, { method: "POST" })
+      .then((r) => r.instance),
 
   stopInstance: (id: string) =>
-    request<Instance>(`/api/v1/instances/${id}/stop`, { method: "POST" }),
+    request<{ instance: Instance }>(`/api/v1/instances/${id}/stop`, { method: "POST" })
+      .then((r) => r.instance),
 
   deleteInstance: (id: string) =>
     request<void>(`/api/v1/instances/${id}`, { method: "DELETE" }),
