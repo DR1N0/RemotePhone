@@ -67,10 +67,10 @@ func (r *transportRuntime) CreateTransportSession(req runtime.TransportSessionRe
 		response.RuntimeClass = req.RuntimeClass
 	}
 	if response.Mode == "" {
-		response.Mode = "prototype-webrtc"
+		response.Mode = "webrtc"
 	}
 	if response.Status == "" {
-		response.Status = "stub"
+		response.Status = "ready"
 	}
 	if response.WorkerBaseURL == "" {
 		response.WorkerBaseURL = req.WorkerBaseURL
@@ -78,7 +78,7 @@ func (r *transportRuntime) CreateTransportSession(req runtime.TransportSessionRe
 	return response, nil
 }
 
-func TestTransportSessionEndpointUsesRuntimeAdapterTransportHook(t *testing.T) {
+func TestTransportSessionPassesRoleToRuntime(t *testing.T) {
 	adapter := &transportRuntime{
 		transportResponse: runtime.TransportSession{
 			SessionToken: "adapter-token-session-1",
@@ -96,6 +96,7 @@ func TestTransportSessionEndpointUsesRuntimeAdapterTransportHook(t *testing.T) {
 		"sessionId": "session-1",
 		"attachmentId": "attachment-1",
 		"instanceId": "instance-1",
+		"role": "observer",
 		"runtimeClass": "android-studio-emulator",
 		"runtimeHandle": {
 			"workerId": "local",
@@ -126,6 +127,9 @@ func TestTransportSessionEndpointUsesRuntimeAdapterTransportHook(t *testing.T) {
 	if adapter.lastTransport.WorkerBaseURL != "http://127.0.0.1:7780" {
 		t.Fatalf("expected trimmed worker base url, got %q", adapter.lastTransport.WorkerBaseURL)
 	}
+	if adapter.lastTransport.Role != "observer" {
+		t.Fatalf("expected observer role, got %q", adapter.lastTransport.Role)
+	}
 	if response.SessionID != "session-1" {
 		t.Fatalf("expected session id session-1, got %q", response.SessionID)
 	}
@@ -138,11 +142,11 @@ func TestTransportSessionEndpointUsesRuntimeAdapterTransportHook(t *testing.T) {
 	if response.RuntimeClass != "android-studio-emulator" {
 		t.Fatalf("expected runtime class android-studio-emulator, got %q", response.RuntimeClass)
 	}
-	if response.Mode != "prototype-webrtc" {
-		t.Fatalf("expected prototype-webrtc mode, got %q", response.Mode)
+	if response.Mode != "webrtc" {
+		t.Fatalf("expected webrtc mode, got %q", response.Mode)
 	}
-	if response.Status != "stub" {
-		t.Fatalf("expected stub status, got %q", response.Status)
+	if response.Status != "ready" {
+		t.Fatalf("expected ready status, got %q", response.Status)
 	}
 	if response.WorkerBaseURL != "http://127.0.0.1:7780" {
 		t.Fatalf("expected worker base url http://127.0.0.1:7780, got %q", response.WorkerBaseURL)

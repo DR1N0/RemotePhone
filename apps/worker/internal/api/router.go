@@ -124,6 +124,10 @@ func NewRouter(deps Dependencies) http.Handler {
 			return
 		}
 
+		if deps.TransportStore != nil {
+			deps.TransportStore.StopAndDeleteByPrefix(instanceID + ":")
+		}
+
 		status, err := deps.RuntimeRegistry.Stop(instanceID)
 		if err != nil {
 			httpStatus := http.StatusInternalServerError
@@ -152,12 +156,17 @@ func NewRouter(deps Dependencies) http.Handler {
 			writeErrorMessage(w, http.StatusBadRequest, "invalid json body")
 			return
 		}
+		if strings.TrimSpace(req.SessionID) == "" || strings.TrimSpace(req.AttachmentID) == "" || strings.TrimSpace(req.InstanceID) == "" || strings.TrimSpace(req.RuntimeClass) == "" || strings.TrimSpace(req.Role) == "" {
+			writeErrorMessage(w, http.StatusBadRequest, "sessionId, attachmentId, instanceId, runtimeClass, and role are required")
+			return
+		}
 
 		transportSession, err := deps.RuntimeRegistry.CreateTransportSession(runtimepkg.TransportSessionRequest{
 			SessionID:     req.SessionID,
 			AttachmentID:  req.AttachmentID,
 			InstanceID:    req.InstanceID,
 			RuntimeClass:  req.RuntimeClass,
+			Role:          req.Role,
 			RuntimeHandle: req.RuntimeHandle,
 			WorkerBaseURL: strings.TrimRight(deps.ListenBaseURL, "/"),
 		})
@@ -180,6 +189,37 @@ func NewRouter(deps Dependencies) http.Handler {
 			WorkerBaseURL: transportSession.WorkerBaseURL,
 			SessionToken:  transportSession.SessionToken,
 		})
+	})
+
+	mux.HandleFunc("PATCH /v1/transport/session/role", func(w http.ResponseWriter, r *http.Request) {
+		var req UpdateTransportSessionRoleRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErrorMessage(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		if strings.TrimSpace(req.InstanceID) == "" || strings.TrimSpace(req.AttachmentID) == "" || strings.TrimSpace(req.Role) == "" {
+			writeErrorMessage(w, http.StatusBadRequest, "instanceId, attachmentId, and role are required")
+			return
+		}
+		if deps.TransportStore != nil {
+			if adapter, ok := deps.TransportStore.Get(req.InstanceID + ":" + req.AttachmentID); ok {
+				adapter.SetRole(req.Role)
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mux.HandleFunc("DELETE /v1/transport/session", func(w http.ResponseWriter, r *http.Request) {
+		instanceID := strings.TrimSpace(r.URL.Query().Get("instanceId"))
+		attachmentID := strings.TrimSpace(r.URL.Query().Get("attachmentId"))
+		if instanceID == "" || attachmentID == "" {
+			writeErrorMessage(w, http.StatusBadRequest, "instanceId and attachmentId are required")
+			return
+		}
+		if deps.TransportStore != nil {
+			deps.TransportStore.StopAndDelete(instanceID + ":" + attachmentID)
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	mux.HandleFunc("POST /v1/transport/offer", func(w http.ResponseWriter, r *http.Request) {

@@ -14,6 +14,12 @@ type Adapter interface {
 	// Observers are rejected by the adapter.
 	HandleInput(ev InputEvent) error
 
+	// SetRole changes the attachment's access role.
+	SetRole(role string)
+
+	// Role returns the attachment's current access role.
+	Role() string
+
 	// Stop tears down the peer connection and capture processes.
 	Stop() error
 }
@@ -31,6 +37,8 @@ type InputEvent struct {
 type NoopAdapter struct{}
 
 func (NoopAdapter) HandleOffer(_, _, _, _ string) (string, error) { return "sdp-answer", nil }
-func (NoopAdapter) HandleICECandidate(_ string) error              { return nil }
-func (NoopAdapter) HandleInput(_ InputEvent) error                 { return nil }
-func (NoopAdapter) Stop() error                                    { return nil }
+func (NoopAdapter) HandleICECandidate(_ string) error             { return nil }
+func (NoopAdapter) HandleInput(_ InputEvent) error                { return nil }
+func (NoopAdapter) SetRole(_ string)                              {}
+func (NoopAdapter) Role() string                                  { return "" }
+func (NoopAdapter) Stop() error                                   { return nil }

@@ -93,7 +93,7 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, role, sdpOffer string) (
 		if err := json.Unmarshal(msg.Data, &ev); err != nil {
 			return
 		}
-		_ = ForwardInput(a.adbSerial, ev, a.role, a.screenW, a.screenH)
+		_ = ForwardInput(a.adbSerial, ev, a.Role(), a.screenW, a.screenH)
 	})
 
 	if err = pc.SetRemoteDescription(webrtc.SessionDescription{
@@ -142,7 +142,19 @@ func (a *Adapter) HandleICECandidate(candidate string) error {
 }
 
 func (a *Adapter) HandleInput(ev transport.InputEvent) error {
-	return ForwardInput(a.adbSerial, ev, a.role, a.screenW, a.screenH)
+	return ForwardInput(a.adbSerial, ev, a.Role(), a.screenW, a.screenH)
+}
+
+func (a *Adapter) SetRole(role string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.role = role
+}
+
+func (a *Adapter) Role() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.role
 }
 
 func (a *Adapter) Stop() error {

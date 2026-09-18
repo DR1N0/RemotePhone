@@ -34,6 +34,17 @@ func (s *Store) Delete(key string) {
 	delete(s.adapters, key)
 }
 
+// StopAndDelete stops and removes the adapter for key.
+func (s *Store) StopAndDelete(key string) {
+	s.mu.Lock()
+	adapter, ok := s.adapters[key]
+	delete(s.adapters, key)
+	s.mu.Unlock()
+	if ok {
+		_ = adapter.Stop()
+	}
+}
+
 // StopAndDeleteByPrefix stops and removes all adapters whose key has the given prefix.
 func (s *Store) StopAndDeleteByPrefix(prefix string) {
 	s.mu.Lock()

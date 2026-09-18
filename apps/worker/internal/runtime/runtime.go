@@ -50,6 +50,7 @@ type TransportSessionRequest struct {
 	AttachmentID  string         `json:"attachmentId"`
 	InstanceID    string         `json:"instanceId"`
 	RuntimeClass  string         `json:"runtimeClass"`
+	Role          string         `json:"role"`
 	RuntimeHandle InstanceHandle `json:"runtimeHandle"`
 	WorkerBaseURL string         `json:"workerBaseUrl"`
 }

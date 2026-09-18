@@ -39,11 +39,18 @@ type StopInstanceResponse struct {
 }
 
 type CreateTransportSessionRequest struct {
-	SessionID    string                 `json:"sessionId"`
-	AttachmentID string                 `json:"attachmentId"`
-	InstanceID   string                 `json:"instanceId"`
-	RuntimeClass string                 `json:"runtimeClass"`
+	SessionID     string                 `json:"sessionId"`
+	AttachmentID  string                 `json:"attachmentId"`
+	InstanceID    string                 `json:"instanceId"`
+	RuntimeClass  string                 `json:"runtimeClass"`
+	Role          string                 `json:"role"`
 	RuntimeHandle runtime.InstanceHandle `json:"runtimeHandle"`
+}
+
+type UpdateTransportSessionRoleRequest struct {
+	InstanceID   string `json:"instanceId"`
+	AttachmentID string `json:"attachmentId"`
+	Role         string `json:"role"`
 }
 
 type TransportSessionResponse struct {

@@ -24,7 +24,7 @@ func (a *Adapter) CreateTransportSession(req runtime.TransportSessionRequest) (r
 	const screenW, screenH = 1080, 1920
 
 	adapter := webrtctransport.NewAdapter(
-		req.InstanceID, req.AttachmentID, "owner",
+		req.InstanceID, req.AttachmentID, req.Role,
 		adbSerial, screenW, screenH, a.stunURL,
 	)
 	if a.transportStore != nil {
