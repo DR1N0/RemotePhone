@@ -101,6 +101,25 @@ func TestStoppingInstanceStopsAllInstanceTransports(t *testing.T) {
 	}
 }
 
+func TestTransportRoleUpdateRejectsInvalidRole(t *testing.T) {
+	store := transport.NewStore()
+	adapter := &recordingTransportAdapter{role: "owner"}
+	store.Put("instance-1:attachment-1", adapter)
+
+	router := api.NewRouter(api.Dependencies{TransportStore: store})
+	req := httptest.NewRequest(http.MethodPatch, "/v1/transport/session/role", strings.NewReader(`{"instanceId":"instance-1","attachmentId":"attachment-1","role":"administrator"}`))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d with body %s", rec.Code, rec.Body.String())
+	}
+	if adapter.setRoleCalls != 0 || adapter.Role() != "owner" {
+		t.Fatalf("expected owner role to remain unchanged after %d updates, got %q", adapter.setRoleCalls, adapter.Role())
+	}
+}
+
 func TestTransportRoleUpdateChangesExistingAdapter(t *testing.T) {
 	store := transport.NewStore()
 	adapter := &recordingTransportAdapter{role: "owner"}

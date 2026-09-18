@@ -37,6 +37,20 @@ func TestOfferEndpointReturns200WithAnswer(t *testing.T) {
 	}
 }
 
+func TestOfferEndpointRejectsInvalidRole(t *testing.T) {
+	store := transport.NewStore()
+	store.Put("instance-1:att-1", transport.NoopAdapter{})
+	router := api.NewRouter(api.Dependencies{TransportStore: store})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/transport/offer", bytes.NewBufferString(`{"instanceId":"instance-1","attachmentId":"att-1","role":"administrator","sdpOffer":"v=0\\r\\n"}`))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d with body %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestOfferEndpointReturns404WhenAdapterNotFound(t *testing.T) {
 	store := transport.NewStore()
 	router := api.NewRouter(api.Dependencies{

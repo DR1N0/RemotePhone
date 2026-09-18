@@ -78,6 +78,30 @@ func (r *transportRuntime) CreateTransportSession(req runtime.TransportSessionRe
 	return response, nil
 }
 
+func TestTransportSessionRejectsInvalidRole(t *testing.T) {
+	adapter := &transportRuntime{}
+	registry := runtime.NewRegistry(adapter)
+	router := api.NewRouter(api.Dependencies{RuntimeRegistry: registry})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/transport/session", bytes.NewBufferString(`{
+		"sessionId": "session-1",
+		"attachmentId": "attachment-1",
+		"instanceId": "instance-1",
+		"runtimeClass": "android-studio-emulator",
+		"role": "administrator"
+	}`))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d with body %s", rec.Code, rec.Body.String())
+	}
+	if adapter.transportCalls != 0 {
+		t.Fatalf("expected no runtime calls, got %d", adapter.transportCalls)
+	}
+}
+
 func TestTransportSessionPassesRoleToRuntime(t *testing.T) {
 	adapter := &transportRuntime{
 		transportResponse: runtime.TransportSession{

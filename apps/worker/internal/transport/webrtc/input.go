@@ -24,11 +24,15 @@ func BuildADBInputArgs(adbSerial string, ev transport.InputEvent, screenW, scree
 }
 
 // ForwardInput executes the ADB input command for the given event.
-// Returns an error if the role is "observer" (input is silently blocked).
+// Only owner and participant roles may forward input.
 func ForwardInput(adbSerial string, ev transport.InputEvent, role string, screenW, screenH int) error {
-	if role == "observer" {
-		return fmt.Errorf("input blocked for observer role")
+	if !allowsInput(role) {
+		return fmt.Errorf("input blocked for %q role", role)
 	}
 	args := BuildADBInputArgs(adbSerial, ev, screenW, screenH)
 	return exec.Command(args[0], args[1:]...).Run()
+}
+
+func allowsInput(role string) bool {
+	return role == "owner" || role == "participant"
 }

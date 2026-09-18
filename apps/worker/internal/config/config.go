@@ -21,7 +21,7 @@ func Load() Config {
 	}
 
 	return Config{
-		ListenAddr:          getenv("MAKO_WORKER_LISTEN_ADDR", ":7780"),
+		ListenAddr:          getenv("MAKO_WORKER_LISTEN_ADDR", "127.0.0.1:7780"),
 		ListenBaseURL:       getenv("MAKO_WORKER_BASE_URL", "http://127.0.0.1:7780"),
 		WorkerID:            getenv("MAKO_WORKER_ID", "local"),
 		HomeDir:             homeDir,

@@ -160,6 +160,10 @@ func NewRouter(deps Dependencies) http.Handler {
 			writeErrorMessage(w, http.StatusBadRequest, "sessionId, attachmentId, instanceId, runtimeClass, and role are required")
 			return
 		}
+		if !validTransportRole(req.Role) {
+			writeErrorMessage(w, http.StatusBadRequest, "role must be owner, participant, or observer")
+			return
+		}
 
 		transportSession, err := deps.RuntimeRegistry.CreateTransportSession(runtimepkg.TransportSessionRequest{
 			SessionID:     req.SessionID,
@@ -201,6 +205,10 @@ func NewRouter(deps Dependencies) http.Handler {
 			writeErrorMessage(w, http.StatusBadRequest, "instanceId, attachmentId, and role are required")
 			return
 		}
+		if !validTransportRole(req.Role) {
+			writeErrorMessage(w, http.StatusBadRequest, "role must be owner, participant, or observer")
+			return
+		}
 		if deps.TransportStore != nil {
 			if adapter, ok := deps.TransportStore.Get(req.InstanceID + ":" + req.AttachmentID); ok {
 				adapter.SetRole(req.Role)
@@ -226,6 +234,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		var req TransportOfferRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeErrorMessage(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		if !validTransportRole(req.Role) {
+			writeErrorMessage(w, http.StatusBadRequest, "role must be owner, participant, or observer")
 			return
 		}
 		if deps.TransportStore == nil {
@@ -270,6 +282,15 @@ func NewRouter(deps Dependencies) http.Handler {
 	})
 
 	return mux
+}
+
+func validTransportRole(role string) bool {
+	switch role {
+	case "owner", "participant", "observer":
+		return true
+	default:
+		return false
+	}
 }
 
 func listInstalledRuntimes(registry *runtimepkg.Registry) []runtimepkg.AdapterInfo {

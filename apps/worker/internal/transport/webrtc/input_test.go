@@ -1,15 +1,14 @@
-package webrtc_test
+package webrtc
 
 import (
 	"testing"
 
 	"mako-worker/internal/transport"
-	webrtctransport "mako-worker/internal/transport/webrtc"
 )
 
 func TestBuildADBInputArgs_Touch(t *testing.T) {
 	ev := transport.InputEvent{Type: "touch", Action: "down", X: 0.5, Y: 0.25}
-	args := webrtctransport.BuildADBInputArgs("localhost:5554", ev, 1080, 1920)
+	args := BuildADBInputArgs("localhost:5554", ev, 1080, 1920)
 	// expect: adb -s localhost:5554 shell input tap 540 480
 	if args[0] != "adb" || args[1] != "-s" || args[2] != "localhost:5554" {
 		t.Fatalf("unexpected prefix: %v", args[:3])
@@ -27,7 +26,7 @@ func TestBuildADBInputArgs_Touch(t *testing.T) {
 
 func TestBuildADBInputArgs_Key(t *testing.T) {
 	ev := transport.InputEvent{Type: "key", Keycode: 4}
-	args := webrtctransport.BuildADBInputArgs("localhost:5554", ev, 1080, 1920)
+	args := BuildADBInputArgs("localhost:5554", ev, 1080, 1920)
 	if args[5] != "keyevent" {
 		t.Fatalf("expected 'keyevent' subcommand, got %q", args[5])
 	}
@@ -36,9 +35,12 @@ func TestBuildADBInputArgs_Key(t *testing.T) {
 	}
 }
 
-func TestObserverInputIsRejected(t *testing.T) {
-	err := webrtctransport.ForwardInput("localhost:5554", transport.InputEvent{Type: "touch"}, "observer", 1080, 1920)
-	if err == nil {
-		t.Fatal("expected error for observer role, got nil")
+func TestObserverAndUnknownInputRolesAreRejected(t *testing.T) {
+	for _, role := range []string{"observer", "administrator"} {
+		t.Run(role, func(t *testing.T) {
+			if allowsInput(role) {
+				t.Fatalf("expected input to be rejected for %q role", role)
+			}
+		})
 	}
 }
