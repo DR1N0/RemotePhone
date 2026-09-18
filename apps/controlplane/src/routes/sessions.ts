@@ -8,8 +8,15 @@ import {
   SessionNotFoundError,
   type SessionService,
 } from "../services/session-service.js"
+import {
+  TransportUnavailableError,
+  type TransportService,
+} from "../services/transport-service.js"
 
-function errorStatus(error: unknown): 400 | 404 | 409 | 500 {
+function errorStatus(error: unknown): 400 | 404 | 409 | 500 | 502 {
+  if (error instanceof TransportUnavailableError) {
+    return 502
+  }
   if (error instanceof SessionInvalidRequestError) {
     return 400
   }
@@ -34,7 +41,11 @@ function jsonError(c: Context, error: unknown) {
   return c.json({ error: errorMessage(error) })
 }
 
-export function registerSessionRoutes(app: Hono, sessionService: SessionService): void {
+export function registerSessionRoutes(
+  app: Hono,
+  sessionService: SessionService,
+  transportService?: TransportService,
+): void {
   app.post("/api/v1/sessions", async (c) => {
     try {
       const input = createSessionRequestSchema.parse(await c.req.json())
@@ -75,10 +86,12 @@ export function registerSessionRoutes(app: Hono, sessionService: SessionService)
 
   app.post("/api/v1/sessions/:id/attachments/:attachmentId/disconnect", async (c) => {
     try {
-      const session = await sessionService.disconnectAttachment({
-        sessionId: c.req.param("id"),
-        attachmentId: c.req.param("attachmentId"),
-      })
+      const sessionId = c.req.param("id")
+      const attachmentId = c.req.param("attachmentId")
+      const session = await sessionService.disconnectAttachment({ sessionId, attachmentId })
+      if (transportService != null) {
+        await transportService.destroyAttachmentTransport({ sessionId, attachmentId })
+      }
       return c.json({ session })
     } catch (error) {
       return jsonError(c, error)
@@ -87,10 +100,17 @@ export function registerSessionRoutes(app: Hono, sessionService: SessionService)
 
   app.post("/api/v1/sessions/:id/attachments/:attachmentId/promote", async (c) => {
     try {
-      const attachment = await sessionService.promoteAttachment({
-        sessionId: c.req.param("id"),
-        attachmentId: c.req.param("attachmentId"),
-      })
+      const sessionId = c.req.param("id")
+      const attachmentId = c.req.param("attachmentId")
+      const attachment = await sessionService.promoteAttachment({ sessionId, attachmentId })
+      try {
+        if (transportService != null) {
+          await transportService.syncAttachmentRole({ sessionId, attachmentId })
+        }
+      } catch (error) {
+        await sessionService.demoteAttachment({ sessionId, attachmentId })
+        throw error
+      }
       return c.json({ attachment })
     } catch (error) {
       return jsonError(c, error)
@@ -99,10 +119,16 @@ export function registerSessionRoutes(app: Hono, sessionService: SessionService)
 
   app.post("/api/v1/sessions/:id/attachments/:attachmentId/demote", async (c) => {
     try {
-      const attachment = await sessionService.demoteAttachment({
-        sessionId: c.req.param("id"),
-        attachmentId: c.req.param("attachmentId"),
-      })
+      const sessionId = c.req.param("id")
+      const attachmentId = c.req.param("attachmentId")
+      if (transportService != null) {
+        await transportService.syncAttachmentRole({
+          sessionId,
+          attachmentId,
+          role: "observer",
+        })
+      }
+      const attachment = await sessionService.demoteAttachment({ sessionId, attachmentId })
       return c.json({ attachment })
     } catch (error) {
       return jsonError(c, error)

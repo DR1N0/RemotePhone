@@ -32,10 +32,77 @@ function createWorkerClient() {
         },
       },
     ]),
-    startInstance: vi.fn(),
+    startInstance: vi.fn().mockImplementation(async (input: {
+      instanceId: string
+      templateId: string
+      runtimeClass: string
+    }) => ({
+      state: "starting",
+      handle: {
+        instanceId: input.instanceId,
+        templateId: input.templateId,
+        runtimeClass: input.runtimeClass,
+        workerId: "local",
+        pid: 4321,
+        consolePort: 5600,
+        adbPort: 5601,
+        grpcPort: 8554,
+      },
+    })),
     inspectInstance: vi.fn(),
     stopInstance: vi.fn(),
+    createTransportSession: vi.fn().mockImplementation(async (input: {
+      sessionId: string
+      attachmentId: string
+      instanceId: string
+      runtimeClass: string
+    }) => ({
+      sessionId: input.sessionId,
+      attachmentId: input.attachmentId,
+      instanceId: input.instanceId,
+      runtimeClass: input.runtimeClass,
+      mode: "webrtc",
+      status: "ready",
+      workerBaseUrl: "http://127.0.0.1:7780",
+      sessionToken: `stub-${input.sessionId}-${input.attachmentId}`,
+    })),
+    updateTransportRole: vi.fn().mockResolvedValue(undefined),
+    destroyTransportSession: vi.fn().mockResolvedValue(undefined),
+    forwardOffer: vi.fn(),
+    forwardICECandidate: vi.fn(),
   }
+}
+
+async function createAppWithObserverAttachment() {
+  const db = createTestDb()
+  const workerClient = createWorkerClient()
+  const instanceService = createInstanceService({ db, workerClient })
+  const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
+  const app = createServer({ workerClient, instanceService, sessionService })
+  const instance = await instanceService.createManagedInstance({
+    name: "phone-lifecycle",
+    templateId: "macos-android-studio:Medium_Phone",
+    placement: { kind: "local-only" },
+    resourceProfile: {
+      cpuMillicores: 1000,
+      memoryMb: 4096,
+      diskMb: 8192,
+      accelerationMode: "auto",
+      streamProfile: "prototype",
+    },
+    launchConfig: { headless: true, readOnly: true, wipeData: false },
+  })
+  await instanceService.startManagedInstance(instance.id)
+  const session = await sessionService.createSession({
+    instanceId: instance.id,
+    ownerClientId: "owner-lifecycle",
+  })
+  const attachment = await sessionService.joinSession({
+    sessionId: session.id,
+    clientId: "observer-lifecycle",
+  })
+
+  return { app, instance, session, attachment, sessionService, workerClient }
 }
 
 describe("session routes", () => {
@@ -158,6 +225,11 @@ describe("session routes", () => {
         role: "participant",
       },
     })
+    expect(workerClient.updateTransportRole).toHaveBeenLastCalledWith({
+      instanceId: createInstanceBody.instance.id,
+      attachmentId: joinBody.attachment.id,
+      role: "participant",
+    })
 
     const demoteRes = await app.request(
       `/api/v1/sessions/${createSessionBody.session.id}/attachments/${joinBody.attachment.id}/demote`,
@@ -169,6 +241,74 @@ describe("session routes", () => {
         id: joinBody.attachment.id,
         role: "observer",
       },
+    })
+    expect(workerClient.updateTransportRole).toHaveBeenLastCalledWith({
+      instanceId: createInstanceBody.instance.id,
+      attachmentId: joinBody.attachment.id,
+      role: "observer",
+    })
+  })
+
+  it("rolls a promotion back to observer when transport synchronization fails", async () => {
+    const { app, attachment, session, workerClient } = await createAppWithObserverAttachment()
+    workerClient.updateTransportRole.mockRejectedValueOnce(new Error("worker unavailable"))
+
+    const promoteRes = await app.request(
+      `/api/v1/sessions/${session.id}/attachments/${attachment.id}/promote`,
+      { method: "POST" },
+    )
+
+    expect(promoteRes.status).toBe(502)
+    expect(workerClient.updateTransportRole).toHaveBeenCalledWith({
+      instanceId: session.instanceId,
+      attachmentId: attachment.id,
+      role: "participant",
+    })
+    const readRes = await app.request(`/api/v1/sessions/${session.id}`)
+    const readBody = await readRes.json() as { session: { attachments: Array<{ id: string; role: string }> } }
+    expect(readBody.session.attachments).toContainEqual(
+      expect.objectContaining({ id: attachment.id, role: "observer" }),
+    )
+  })
+
+  it("restricts the Worker before persisting an attachment demotion", async () => {
+    const { app, attachment, session, sessionService, workerClient } = await createAppWithObserverAttachment()
+    await sessionService.promoteAttachment({ sessionId: session.id, attachmentId: attachment.id })
+    workerClient.updateTransportRole.mockImplementationOnce(async () => {
+      const current = await sessionService.getSession(session.id)
+      expect(current.attachments).toContainEqual(
+        expect.objectContaining({ id: attachment.id, role: "participant" }),
+      )
+    })
+
+    const demoteRes = await app.request(
+      `/api/v1/sessions/${session.id}/attachments/${attachment.id}/demote`,
+      { method: "POST" },
+    )
+
+    expect(demoteRes.status).toBe(200)
+    expect(workerClient.updateTransportRole).toHaveBeenCalledWith({
+      instanceId: session.instanceId,
+      attachmentId: attachment.id,
+      role: "observer",
+    })
+  })
+
+  it("leaves the Worker restrictive when demotion persistence fails", async () => {
+    const { app, attachment, session, sessionService, workerClient } = await createAppWithObserverAttachment()
+    await sessionService.promoteAttachment({ sessionId: session.id, attachmentId: attachment.id })
+    vi.spyOn(sessionService, "demoteAttachment").mockRejectedValueOnce(new Error("persistence failed"))
+
+    const demoteRes = await app.request(
+      `/api/v1/sessions/${session.id}/attachments/${attachment.id}/demote`,
+      { method: "POST" },
+    )
+
+    expect(demoteRes.status).toBe(500)
+    expect(workerClient.updateTransportRole).toHaveBeenCalledWith({
+      instanceId: session.instanceId,
+      attachmentId: attachment.id,
+      role: "observer",
     })
   })
 
@@ -244,6 +384,10 @@ describe("session routes", () => {
           },
         ],
       },
+    })
+    expect(workerClient.destroyTransportSession).toHaveBeenCalledWith({
+      instanceId: createInstanceBody.instance.id,
+      attachmentId: ownerAttachment.id,
     })
 
     const resumeRes = await app.request(`/api/v1/sessions/${createSessionBody.session.id}/resume`, {

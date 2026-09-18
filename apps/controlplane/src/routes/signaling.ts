@@ -10,6 +10,10 @@ import {
 } from "../services/session-service.js"
 import { InstanceNotFoundError } from "../services/instance-service.js"
 import type { SignalingService } from "../services/signaling-service.js"
+import {
+  TransportUnavailableError,
+  type TransportService,
+} from "../services/transport-service.js"
 
 const signalingSessionSchema = z.object({
   sessionId: z.string().min(1),
@@ -23,7 +27,8 @@ const iceCandidateSchema = z.object({
   candidate: z.string(),
 })
 
-function errorStatus(error: unknown): 400 | 404 | 500 {
+function errorStatus(error: unknown): 400 | 404 | 500 | 502 {
+  if (error instanceof TransportUnavailableError) return 502
   if (error instanceof SessionInvalidRequestError) return 400
   if (
     error instanceof SessionNotFoundError
@@ -48,6 +53,7 @@ export function registerSignalingRoutes(
     sessionService: SessionService
     instanceService: InstanceService
     signalingService: SignalingService
+    transportService: TransportService
   },
 ): void {
   app.post("/api/v1/signaling/session", async (c) => {
@@ -58,10 +64,17 @@ export function registerSignalingRoutes(
       if (attachment == null) {
         throw new AttachmentNotFoundError(`attachment not found: ${input.attachmentId}`)
       }
+      if (attachment.status !== "connected") {
+        throw new SessionInvalidRequestError(`attachment is not connected: ${attachment.id}`)
+      }
       const instance = await deps.instanceService.getManagedInstance(session.instanceId)
       if (instance.runtimeHandle == null) {
         throw new SessionInvalidRequestError(`instance is not running: ${instance.id}`)
       }
+      await deps.transportService.ensureAttachmentTransport({
+        sessionId: session.id,
+        attachmentId: attachment.id,
+      })
       const { sdpAnswer } = await deps.signalingService.relayOffer({
         instanceId: instance.id,
         attachmentId: attachment.id,

@@ -13,6 +13,7 @@ import { registerWorkerRoutes } from "./routes/workers.js"
 import type { InstanceService } from "./services/instance-service.js"
 import type { SessionService } from "./services/session-service.js"
 import { createSignalingService } from "./services/signaling-service.js"
+import { createTransportService } from "./services/transport-service.js"
 import type { DiscoveryWorkerClient, ManagedInstanceWorkerClient } from "./services/worker-client.js"
 
 export type ServerDependencies = {
@@ -22,6 +23,17 @@ export type ServerDependencies = {
   db?: AppDb
   baseUrl?: string
   adminDistPath?: string
+}
+
+function isManagedInstanceWorkerClient(workerClient: DiscoveryWorkerClient): workerClient is ManagedInstanceWorkerClient {
+  return "startInstance" in workerClient
+    && "inspectInstance" in workerClient
+    && "stopInstance" in workerClient
+    && "createTransportSession" in workerClient
+    && "updateTransportRole" in workerClient
+    && "destroyTransportSession" in workerClient
+    && "forwardOffer" in workerClient
+    && "forwardICECandidate" in workerClient
 }
 
 function registerDocsRoutes(app: Hono): void {
@@ -140,16 +152,32 @@ export function createServer(deps: ServerDependencies): Hono {
     registerInstanceRoutes(app, deps.instanceService)
   }
 
+  const transportService = deps.instanceService != null
+    && deps.sessionService != null
+    && isManagedInstanceWorkerClient(deps.workerClient)
+    ? createTransportService({
+      instanceService: deps.instanceService,
+      sessionService: deps.sessionService,
+      workerClient: deps.workerClient,
+    })
+    : undefined
+
   if (deps.sessionService != null) {
-    registerSessionRoutes(app, deps.sessionService)
+    registerSessionRoutes(app, deps.sessionService, transportService)
   }
 
-  if (deps.instanceService != null && deps.sessionService != null && "forwardOffer" in deps.workerClient) {
-    const signalingService = createSignalingService(deps.workerClient as ManagedInstanceWorkerClient)
+  if (
+    deps.instanceService != null
+    && deps.sessionService != null
+    && transportService != null
+    && isManagedInstanceWorkerClient(deps.workerClient)
+  ) {
+    const signalingService = createSignalingService(deps.workerClient)
     registerSignalingRoutes(app, {
       signalingService,
       instanceService: deps.instanceService,
       sessionService: deps.sessionService,
+      transportService,
     })
   }
 

@@ -199,6 +199,28 @@ export function createSessionService(deps: {
       return toAttachmentRecord(getRequiredAttachment(db, input.sessionId, attachmentId))
     },
 
+    async connectAttachment(input: {
+      sessionId: string
+      attachmentId: string
+    }): Promise<SessionAttachmentRecord> {
+      const session = getRequiredSession(db, input.sessionId)
+      assertSessionMutable(session)
+      const attachment = getRequiredAttachment(db, input.sessionId, input.attachmentId)
+
+      if (attachment.status !== "connected") {
+        updateAttachmentStatus(db, {
+          id: attachment.id,
+          status: "connected",
+        })
+      }
+
+      if (session.status === "idle") {
+        activateSession(db, { id: input.sessionId })
+      }
+
+      return toAttachmentRecord(getRequiredAttachment(db, input.sessionId, input.attachmentId))
+    },
+
     async promoteAttachment(input: {
       sessionId: string
       attachmentId: string

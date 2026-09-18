@@ -68,7 +68,11 @@ export function registerInviteRoutes(
       return c.json({ error: "invalid or expired token" }, 400)
     }
 
-    // Consume the token and activate the attachment
+    // Connect the attachment before consuming its single-use token.
+    await deps.sessionService.connectAttachment({
+      sessionId: row.sessionId,
+      attachmentId: row.id,
+    })
     setAttachmentInviteToken(deps.db, { id: row.id, inviteToken: null })
 
     return c.redirect(

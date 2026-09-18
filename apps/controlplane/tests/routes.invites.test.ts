@@ -57,6 +57,8 @@ function createWorkerClient() {
       workerBaseUrl: "http://127.0.0.1:7780",
       sessionToken: `stub-${input.sessionId}-${input.attachmentId}`,
     })),
+    updateTransportRole: vi.fn().mockResolvedValue(undefined),
+    destroyTransportSession: vi.fn().mockResolvedValue(undefined),
     forwardOffer: vi.fn().mockResolvedValue({ sdpAnswer: "v=0\r\nanswer" }),
     forwardICECandidate: vi.fn().mockResolvedValue(undefined),
   }
@@ -177,6 +179,15 @@ describe("GET /session/:id — token redemption", () => {
     const location = redeemRes.headers.get("location") ?? ""
     const attachmentId = new URL(location, "http://localhost").searchParams.get("attachmentId")
     expect(attachmentId).not.toBeNull()
+
+    const sessionRes = await app.request(`/api/v1/sessions/${sessionId}`)
+    expect(sessionRes.status).toBe(200)
+    const sessionBody = await sessionRes.json() as {
+      session: { attachments: Array<{ id: string; status: string }> }
+    }
+    expect(sessionBody.session.attachments).toContainEqual(
+      expect.objectContaining({ id: attachmentId, status: "connected" }),
+    )
 
     const adminRedirectRes = await app.request(location, { redirect: "manual" })
     expect(adminRedirectRes.status).toBe(302)

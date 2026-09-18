@@ -57,6 +57,8 @@ function createWorkerClient() {
       workerBaseUrl: "http://127.0.0.1:7780",
       sessionToken: `stub-${input.sessionId}-${input.attachmentId}`,
     })),
+    updateTransportRole: vi.fn().mockResolvedValue(undefined),
+    destroyTransportSession: vi.fn().mockResolvedValue(undefined),
     forwardOffer: vi.fn().mockResolvedValue({ sdpAnswer: "v=0\r\nanswer" }),
     forwardICECandidate: vi.fn().mockResolvedValue(undefined),
   }
@@ -134,6 +136,14 @@ describe("signaling route", () => {
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ sdpAnswer: "v=0\r\nanswer" })
+    expect(workerClient.createTransportSession).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: createSessionBody.session.id,
+      attachmentId: ownerAttachment.id,
+      instanceId: createInstanceBody.instance.id,
+      role: "owner",
+    }))
+    expect(workerClient.createTransportSession.mock.invocationCallOrder[0])
+      .toBeLessThan(workerClient.forwardOffer.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY)
     expect(workerClient.forwardOffer).toHaveBeenCalledWith({
       instanceId: createInstanceBody.instance.id,
       attachmentId: ownerAttachment.id,
@@ -293,6 +303,24 @@ describe("signaling route", () => {
       expect(await res.json()).toEqual({ error: "attachment not found: missing" })
       expect(workerClient.forwardICECandidate).not.toHaveBeenCalled()
     })
+
+    it("does not forward an offer when transport ensure fails", async () => {
+      const { app, workerClient, sessionId, attachment } = await createAppWithSessionAndAttachment()
+      workerClient.createTransportSession.mockRejectedValueOnce(new Error("worker unavailable"))
+
+      const res = await app.request("/api/v1/signaling/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          attachmentId: attachment.id,
+          sdpOffer: "v=0\r\noffer",
+        }),
+      })
+
+      expect(res.status).toBe(502)
+      expect(workerClient.forwardOffer).not.toHaveBeenCalled()
+    })
   })
 
   it("POST /api/v1/signaling/session forwards offer with correct instanceId, attachmentId, and sdpOffer", async () => {
@@ -353,6 +381,14 @@ describe("signaling route", () => {
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ sdpAnswer: "v=0\r\nanswer" })
+    expect(workerClient.createTransportSession).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: createSessionBody.session.id,
+      attachmentId: ownerAttachment.id,
+      instanceId: createInstanceBody.instance.id,
+      role: "owner",
+    }))
+    expect(workerClient.createTransportSession.mock.invocationCallOrder[0])
+      .toBeLessThan(workerClient.forwardOffer.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY)
     expect(workerClient.forwardOffer).toHaveBeenCalledWith({
       instanceId: createInstanceBody.instance.id,
       attachmentId: ownerAttachment.id,

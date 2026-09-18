@@ -1,3 +1,4 @@
+import type { SessionRole } from "../domain/types.js"
 import type { InstanceService } from "./instance-service.js"
 import {
   AttachmentNotFoundError,
@@ -17,6 +18,7 @@ export type TransportService = ReturnType<typeof createTransportService>
 type AttachmentTransportInput = {
   sessionId: string
   attachmentId: string
+  role?: SessionRole
 }
 
 function assertTransportableSession(session: SessionRecord): void {
@@ -104,7 +106,7 @@ export function createTransportService(deps: {
       await callWorker(async () => await workerClient.updateTransportRole({
         instanceId: instance.id,
         attachmentId: attachment.id,
-        role: attachment.role,
+        role: input.role ?? attachment.role,
       }))
     },
 
