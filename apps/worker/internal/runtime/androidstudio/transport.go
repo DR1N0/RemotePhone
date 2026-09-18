@@ -23,13 +23,17 @@ func (a *Adapter) CreateTransportSession(req runtime.TransportSessionRequest) (r
 	// Default screen dimensions for standard AVD profiles.
 	const screenW, screenH = 1080, 1920
 
-	adapter := webrtctransport.NewAdapter(
+	candidate := webrtctransport.NewAdapter(
 		req.InstanceID, req.AttachmentID, req.Role,
 		adbSerial, screenW, screenH, a.stunURL,
 	)
 	if a.transportStore != nil {
 		key := req.InstanceID + ":" + req.AttachmentID
-		a.transportStore.Put(key, adapter)
+		adapter, inserted := a.transportStore.GetOrPut(key, candidate)
+		adapter.SetRole(req.Role)
+		if !inserted {
+			_ = candidate.Stop()
+		}
 	}
 
 	return runtime.TransportSession{

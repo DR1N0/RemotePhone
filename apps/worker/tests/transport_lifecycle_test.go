@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -117,6 +118,25 @@ func TestTransportRoleUpdateRejectsInvalidRole(t *testing.T) {
 	}
 	if adapter.setRoleCalls != 0 || adapter.Role() != "owner" {
 		t.Fatalf("expected owner role to remain unchanged after %d updates, got %q", adapter.setRoleCalls, adapter.Role())
+	}
+}
+
+func TestOfferEndpointUpdatesAdapterRole(t *testing.T) {
+	store := transport.NewStore()
+	adapter := &recordingTransportAdapter{role: "owner"}
+	store.Put("instance-1:attachment-1", adapter)
+
+	router := api.NewRouter(api.Dependencies{TransportStore: store})
+	req := httptest.NewRequest(http.MethodPost, "/v1/transport/offer", bytes.NewBufferString(`{"instanceId":"instance-1","attachmentId":"attachment-1","role":"observer","sdpOffer":"v=0\\r\\n"}`))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d with body %s", rec.Code, rec.Body.String())
+	}
+	if adapter.setRoleCalls != 1 || adapter.Role() != "observer" {
+		t.Fatalf("expected observer role after %d updates, got %q", adapter.setRoleCalls, adapter.Role())
 	}
 }
 

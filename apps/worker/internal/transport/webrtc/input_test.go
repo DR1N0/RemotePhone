@@ -35,12 +35,15 @@ func TestBuildADBInputArgs_Key(t *testing.T) {
 	}
 }
 
-func TestObserverAndUnknownInputRolesAreRejected(t *testing.T) {
-	for _, role := range []string{"observer", "administrator"} {
-		t.Run(role, func(t *testing.T) {
-			if allowsInput(role) {
-				t.Fatalf("expected input to be rejected for %q role", role)
-			}
-		})
+func TestObserverInputIsRejected(t *testing.T) {
+	err := ForwardInput("localhost:5554", transport.InputEvent{Type: "touch"}, "observer", 1080, 1920)
+	if err == nil {
+		t.Fatal("expected observer input to be rejected")
+	}
+}
+
+func TestUnknownInputRoleIsRejected(t *testing.T) {
+	if allowsInput("administrator") {
+		t.Fatal("expected input to be rejected for unknown role")
 	}
 }

@@ -250,6 +250,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			writeErrorMessage(w, http.StatusNotFound, "transport adapter not found for instance/attachment")
 			return
 		}
+		adapter.SetRole(req.Role)
 		answer, err := adapter.HandleOffer(req.InstanceID, req.AttachmentID, req.Role, req.SdpOffer)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)

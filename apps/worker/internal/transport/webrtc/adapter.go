@@ -22,6 +22,8 @@ type Adapter struct {
 	screenH      int
 	stunURL      string
 
+	forwardInput func(string, transport.InputEvent, string, int, int) error
+
 	mu      sync.Mutex
 	pc      *webrtc.PeerConnection
 	capture *ScreenCapture
@@ -37,6 +39,7 @@ func NewAdapter(instanceID, attachmentID, role, adbSerial string, screenW, scree
 		screenW:      screenW,
 		screenH:      screenH,
 		stunURL:      stunURL,
+		forwardInput: ForwardInput,
 	}
 }
 
@@ -82,18 +85,12 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, role, sdpOffer string) (
 		return "", fmt.Errorf("add video track: %w", err)
 	}
 
-	// Add bidirectional data channel for input.
-	dc, err := pc.CreateDataChannel("input", nil)
-	if err != nil {
-		_ = pc.Close()
-		return "", fmt.Errorf("create data channel: %w", err)
-	}
-	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-		var ev transport.InputEvent
-		if err := json.Unmarshal(msg.Data, &ev); err != nil {
-			return
+	// Chrome creates the input data channel as part of its offer.
+	pc.OnDataChannel(a.handleDataChannel)
+	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
+			a.stopCaptureForPeerConnection(pc)
 		}
-		_ = ForwardInput(a.adbSerial, ev, a.Role(), a.screenW, a.screenH)
 	})
 
 	if err = pc.SetRemoteDescription(webrtc.SessionDescription{
@@ -128,7 +125,35 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, role, sdpOffer string) (
 
 	go pipeH264(stdout, videoTrack)
 
-	return answer.SDP, nil
+	if err := waitForGathering(webrtc.GatheringCompletePromise(pc), 10*time.Second); err != nil {
+		a.stopPeerConnection(pc)
+		return "", err
+	}
+	return pc.LocalDescription().SDP, nil
+}
+
+func (a *Adapter) handleDataChannel(dc *webrtc.DataChannel) {
+	if dc.Label() != "input" {
+		return
+	}
+	dc.OnMessage(a.handleInputMessage)
+}
+
+func (a *Adapter) handleInputMessage(msg webrtc.DataChannelMessage) {
+	var event transport.InputEvent
+	if err := json.Unmarshal(msg.Data, &event); err != nil {
+		return
+	}
+	_ = a.handleInputEvent(event)
+}
+
+func waitForGathering(gathering <-chan struct{}, timeout time.Duration) error {
+	select {
+	case <-gathering:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("gather ICE candidates: timeout")
+	}
 }
 
 func (a *Adapter) HandleICECandidate(candidate string) error {
@@ -142,7 +167,11 @@ func (a *Adapter) HandleICECandidate(candidate string) error {
 }
 
 func (a *Adapter) HandleInput(ev transport.InputEvent) error {
-	return ForwardInput(a.adbSerial, ev, a.Role(), a.screenW, a.screenH)
+	return a.handleInputEvent(ev)
+}
+
+func (a *Adapter) handleInputEvent(ev transport.InputEvent) error {
+	return a.forwardInput(a.adbSerial, ev, a.Role(), a.screenW, a.screenH)
 }
 
 func (a *Adapter) SetRole(role string) {
@@ -155,6 +184,37 @@ func (a *Adapter) Role() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.role
+}
+
+func (a *Adapter) stopCaptureForPeerConnection(pc *webrtc.PeerConnection) {
+	a.mu.Lock()
+	if a.pc != pc {
+		a.mu.Unlock()
+		return
+	}
+	cap := a.capture
+	a.capture = nil
+	a.pc = nil
+	a.mu.Unlock()
+	if cap != nil {
+		cap.Stop()
+	}
+}
+
+func (a *Adapter) stopPeerConnection(pc *webrtc.PeerConnection) {
+	a.mu.Lock()
+	if a.pc != pc {
+		a.mu.Unlock()
+		return
+	}
+	cap := a.capture
+	a.capture = nil
+	a.pc = nil
+	a.mu.Unlock()
+	if cap != nil {
+		cap.Stop()
+	}
+	_ = pc.Close()
 }
 
 func (a *Adapter) Stop() error {

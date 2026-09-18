@@ -21,6 +21,18 @@ func (s *Store) Put(key string, a Adapter) {
 	s.adapters[key] = a
 }
 
+// GetOrPut returns the adapter already registered for key, or stores candidate.
+// The boolean is true when candidate was stored.
+func (s *Store) GetOrPut(key string, candidate Adapter) (Adapter, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if adapter, ok := s.adapters[key]; ok {
+		return adapter, false
+	}
+	s.adapters[key] = candidate
+	return candidate, true
+}
+
 func (s *Store) Get(key string) (Adapter, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
