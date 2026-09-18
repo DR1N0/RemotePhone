@@ -188,8 +188,8 @@ describe("local worker client", () => {
       attachmentId: "attachment-1",
       instanceId: "instance-1",
       runtimeClass: "android-studio-emulator",
-      mode: "prototype-webrtc",
-      status: "stub",
+      mode: "webrtc",
+      status: "ready",
       workerBaseUrl: "http://127.0.0.1:7780",
       sessionToken: "token-1",
     }), {
@@ -211,13 +211,14 @@ describe("local worker client", () => {
         adbPort: 5601,
         grpcPort: 8554,
       },
+      role: "observer",
     })).resolves.toEqual({
       sessionId: "session-1",
       attachmentId: "attachment-1",
       instanceId: "instance-1",
       runtimeClass: "android-studio-emulator",
-      mode: "prototype-webrtc",
-      status: "stub",
+      mode: "webrtc",
+      status: "ready",
       workerBaseUrl: "http://127.0.0.1:7780",
       sessionToken: "token-1",
     })
@@ -239,6 +240,7 @@ describe("local worker client", () => {
             adbPort: 5601,
             grpcPort: 8554,
           },
+          role: "observer",
         }),
       }),
     )

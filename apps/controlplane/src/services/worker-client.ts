@@ -1,7 +1,7 @@
-import type { LaunchConfig, RuntimeHandle, RuntimeClass } from "../domain/types.js"
+import type { LaunchConfig, RuntimeHandle, RuntimeClass, SessionRole } from "../domain/types.js"
 
-export type TransportMode = "prototype-webrtc"
-export type TransportStatus = "stub"
+export type TransportMode = "webrtc"
+export type TransportStatus = "ready"
 
 export type InstalledRuntime = {
   runtimeClass: string
@@ -60,6 +60,7 @@ export type CreateTransportSessionInput = {
   instanceId: string
   runtimeClass: RuntimeClass
   runtimeHandle: RuntimeHandle
+  role: SessionRole
 }
 
 export type WorkerTransportSession = {
@@ -84,6 +85,15 @@ export interface ManagedInstanceWorkerClient extends DiscoveryWorkerClient {
   inspectInstance(instanceId: string): Promise<WorkerInstanceResponse>
   stopInstance(instanceId: string): Promise<WorkerInstanceResponse>
   createTransportSession(input: CreateTransportSessionInput): Promise<WorkerTransportSession>
+  updateTransportRole(input: {
+    instanceId: string
+    attachmentId: string
+    role: SessionRole
+  }): Promise<void>
+  destroyTransportSession(input: {
+    instanceId: string
+    attachmentId: string
+  }): Promise<void>
   forwardOffer(input: ForwardOfferInput): Promise<WorkerOfferResponse>
   forwardICECandidate(input: ForwardICECandidateInput): Promise<void>
 }
@@ -176,6 +186,41 @@ export class LocalWorkerClient implements ManagedInstanceWorkerClient {
     })
 
     return await readJson<WorkerTransportSession>(response)
+  }
+
+  async updateTransportRole(input: {
+    instanceId: string
+    attachmentId: string
+    role: SessionRole
+  }): Promise<void> {
+    const response = await this.fetchImpl(`${this.baseUrl}/v1/transport/session/role`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(input),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Worker request failed with status ${response.status}`)
+    }
+  }
+
+  async destroyTransportSession(input: {
+    instanceId: string
+    attachmentId: string
+  }): Promise<void> {
+    const query = new URLSearchParams({
+      instanceId: input.instanceId,
+      attachmentId: input.attachmentId,
+    })
+    const response = await this.fetchImpl(`${this.baseUrl}/v1/transport/session?${query}`, {
+      method: "DELETE",
+    })
+
+    if (!response.ok) {
+      throw new Error(`Worker request failed with status ${response.status}`)
+    }
   }
 
   async forwardOffer(input: ForwardOfferInput): Promise<WorkerOfferResponse> {
