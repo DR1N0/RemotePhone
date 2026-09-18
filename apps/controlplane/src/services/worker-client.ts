@@ -40,7 +40,6 @@ export type WorkerInstanceResponse = {
 export type ForwardOfferInput = {
   instanceId: string
   attachmentId: string
-  role: string
   sdpOffer: string
 }
 

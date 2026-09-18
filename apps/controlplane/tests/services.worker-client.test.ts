@@ -255,13 +255,19 @@ describe("local worker client", () => {
     const result = await client.forwardOffer({
       instanceId: "inst-1",
       attachmentId: "att-1",
-      role: "owner",
       sdpOffer: "v=0\r\n",
     })
     expect(result.sdpAnswer).toBe("v=0\r\n")
     expect(fetchImpl).toHaveBeenCalledWith(
       "http://127.0.0.1:7780/v1/transport/offer",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          instanceId: "inst-1",
+          attachmentId: "att-1",
+          sdpOffer: "v=0\r\n",
+        }),
+      }),
     )
   })
 

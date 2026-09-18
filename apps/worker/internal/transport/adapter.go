@@ -4,8 +4,7 @@ package transport
 // One Adapter instance exists per active browser attachment.
 type Adapter interface {
 	// HandleOffer accepts an SDP offer and returns an SDP answer.
-	// role is "owner" | "participant" | "observer".
-	HandleOffer(instanceID, attachmentID, role, sdpOffer string) (sdpAnswer string, err error)
+	HandleOffer(instanceID, attachmentID, sdpOffer string) (sdpAnswer string, err error)
 
 	// HandleICECandidate forwards a trickle-ICE candidate from the browser.
 	HandleICECandidate(candidate string) error
@@ -36,9 +35,9 @@ type InputEvent struct {
 // NoopAdapter is a do-nothing implementation used in tests.
 type NoopAdapter struct{}
 
-func (NoopAdapter) HandleOffer(_, _, _, _ string) (string, error) { return "sdp-answer", nil }
-func (NoopAdapter) HandleICECandidate(_ string) error             { return nil }
-func (NoopAdapter) HandleInput(_ InputEvent) error                { return nil }
-func (NoopAdapter) SetRole(_ string)                              {}
-func (NoopAdapter) Role() string                                  { return "" }
-func (NoopAdapter) Stop() error                                   { return nil }
+func (NoopAdapter) HandleOffer(_, _, _ string) (string, error) { return "sdp-answer", nil }
+func (NoopAdapter) HandleICECandidate(_ string) error          { return nil }
+func (NoopAdapter) HandleInput(_ InputEvent) error             { return nil }
+func (NoopAdapter) SetRole(_ string)                           {}
+func (NoopAdapter) Role() string                               { return "" }
+func (NoopAdapter) Stop() error                                { return nil }

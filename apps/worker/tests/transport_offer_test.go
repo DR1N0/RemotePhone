@@ -24,7 +24,6 @@ func TestOfferEndpointReturns200WithAnswer(t *testing.T) {
 	body := bytes.NewBufferString(`{
         "instanceId": "instance-1",
         "attachmentId": "att-1",
-        "role": "owner",
         "sdpOffer": "v=0\r\n"
     }`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/transport/offer", body)
@@ -37,20 +36,6 @@ func TestOfferEndpointReturns200WithAnswer(t *testing.T) {
 	}
 }
 
-func TestOfferEndpointRejectsInvalidRole(t *testing.T) {
-	store := transport.NewStore()
-	store.Put("instance-1:att-1", transport.NoopAdapter{})
-	router := api.NewRouter(api.Dependencies{TransportStore: store})
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/transport/offer", bytes.NewBufferString(`{"instanceId":"instance-1","attachmentId":"att-1","role":"administrator","sdpOffer":"v=0\\r\\n"}`))
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d with body %s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestOfferEndpointReturns404WhenAdapterNotFound(t *testing.T) {
 	store := transport.NewStore()
 	router := api.NewRouter(api.Dependencies{
@@ -60,7 +45,7 @@ func TestOfferEndpointReturns404WhenAdapterNotFound(t *testing.T) {
 		TransportStore: store,
 	})
 
-	body := bytes.NewBufferString(`{"instanceId":"x","attachmentId":"y","role":"owner","sdpOffer":""}`)
+	body := bytes.NewBufferString(`{"instanceId":"x","attachmentId":"y","sdpOffer":""}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/transport/offer", body)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

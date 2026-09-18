@@ -18,7 +18,7 @@ type recordingTransportAdapter struct {
 	stopCalls    int
 }
 
-func (a *recordingTransportAdapter) HandleOffer(_, _, _, _ string) (string, error) {
+func (a *recordingTransportAdapter) HandleOffer(_, _, _ string) (string, error) {
 	return "sdp-answer", nil
 }
 
@@ -121,22 +121,26 @@ func TestTransportRoleUpdateRejectsInvalidRole(t *testing.T) {
 	}
 }
 
-func TestOfferEndpointUpdatesAdapterRole(t *testing.T) {
-	store := transport.NewStore()
-	adapter := &recordingTransportAdapter{role: "owner"}
-	store.Put("instance-1:attachment-1", adapter)
+func TestOfferCannotChangeStoredObserverRole(t *testing.T) {
+	for _, offeredRole := range []string{"owner", "participant"} {
+		t.Run(offeredRole, func(t *testing.T) {
+			store := transport.NewStore()
+			adapter := &recordingTransportAdapter{role: "observer"}
+			store.Put("instance-1:attachment-1", adapter)
 
-	router := api.NewRouter(api.Dependencies{TransportStore: store})
-	req := httptest.NewRequest(http.MethodPost, "/v1/transport/offer", bytes.NewBufferString(`{"instanceId":"instance-1","attachmentId":"attachment-1","role":"observer","sdpOffer":"v=0\\r\\n"}`))
-	rec := httptest.NewRecorder()
+			router := api.NewRouter(api.Dependencies{TransportStore: store})
+			req := httptest.NewRequest(http.MethodPost, "/v1/transport/offer", bytes.NewBufferString(`{"instanceId":"instance-1","attachmentId":"attachment-1","role":"`+offeredRole+`","sdpOffer":"v=0\\r\\n"}`))
+			rec := httptest.NewRecorder()
 
-	router.ServeHTTP(rec, req)
+			router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d with body %s", rec.Code, rec.Body.String())
-	}
-	if adapter.setRoleCalls != 1 || adapter.Role() != "observer" {
-		t.Fatalf("expected observer role after %d updates, got %q", adapter.setRoleCalls, adapter.Role())
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d with body %s", rec.Code, rec.Body.String())
+			}
+			if adapter.setRoleCalls != 0 || adapter.Role() != "observer" {
+				t.Fatalf("expected observer role after %d updates, got %q", adapter.setRoleCalls, adapter.Role())
+			}
+		})
 	}
 }
 

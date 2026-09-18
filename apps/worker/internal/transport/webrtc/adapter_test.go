@@ -33,6 +33,16 @@ func TestAdapterUsesItsCurrentRoleForInput(t *testing.T) {
 	}
 }
 
+func TestObserverAdapterRejectsInput(t *testing.T) {
+	adapter := NewAdapter("instance-1", "attachment-1", "observer", "adb", 1080, 1920, "")
+
+	err := adapter.HandleInput(transport.InputEvent{Type: "touch"})
+
+	if err == nil {
+		t.Fatal("expected observer input to be rejected")
+	}
+}
+
 func TestHandleDataChannelOnlyBindsInputLabel(t *testing.T) {
 	adapter := NewAdapter("instance-1", "attachment-1", "participant", "adb", 1080, 1920, "")
 	received := make(chan transport.InputEvent, 2)

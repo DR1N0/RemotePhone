@@ -236,10 +236,6 @@ func NewRouter(deps Dependencies) http.Handler {
 			writeErrorMessage(w, http.StatusBadRequest, "invalid json body")
 			return
 		}
-		if !validTransportRole(req.Role) {
-			writeErrorMessage(w, http.StatusBadRequest, "role must be owner, participant, or observer")
-			return
-		}
 		if deps.TransportStore == nil {
 			writeErrorMessage(w, http.StatusBadRequest, "transport store not configured")
 			return
@@ -250,8 +246,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			writeErrorMessage(w, http.StatusNotFound, "transport adapter not found for instance/attachment")
 			return
 		}
-		adapter.SetRole(req.Role)
-		answer, err := adapter.HandleOffer(req.InstanceID, req.AttachmentID, req.Role, req.SdpOffer)
+		answer, err := adapter.HandleOffer(req.InstanceID, req.AttachmentID, req.SdpOffer)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return

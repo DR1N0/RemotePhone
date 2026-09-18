@@ -65,7 +65,6 @@ export function registerSignalingRoutes(
       const { sdpAnswer } = await deps.signalingService.relayOffer({
         instanceId: instance.id,
         attachmentId: attachment.id,
-        role: attachment.role,
         sdpOffer: input.sdpOffer,
       })
       return c.json({ sdpAnswer })

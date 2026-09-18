@@ -43,7 +43,7 @@ func NewAdapter(instanceID, attachmentID, role, adbSerial string, screenW, scree
 	}
 }
 
-func (a *Adapter) HandleOffer(instanceID, attachmentID, role, sdpOffer string) (string, error) {
+func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string, error) {
 	// Stop any existing resources to avoid leaks on re-offer.
 	a.mu.Lock()
 	oldCap := a.capture

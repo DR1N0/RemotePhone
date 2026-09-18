@@ -137,7 +137,6 @@ describe("signaling route", () => {
     expect(workerClient.forwardOffer).toHaveBeenCalledWith({
       instanceId: createInstanceBody.instance.id,
       attachmentId: ownerAttachment.id,
-      role: expect.any(String),
       sdpOffer: "v=0\r\noffer",
     })
   })
@@ -296,7 +295,7 @@ describe("signaling route", () => {
     })
   })
 
-  it("POST /api/v1/signaling/session forwards offer with correct instanceId, attachmentId, role, and sdpOffer", async () => {
+  it("POST /api/v1/signaling/session forwards offer with correct instanceId, attachmentId, and sdpOffer", async () => {
     const db = createTestDb()
     const workerClient = createWorkerClient()
     const instanceService = createInstanceService({ db, workerClient })
@@ -357,7 +356,6 @@ describe("signaling route", () => {
     expect(workerClient.forwardOffer).toHaveBeenCalledWith({
       instanceId: createInstanceBody.instance.id,
       attachmentId: ownerAttachment.id,
-      role: expect.any(String),
       sdpOffer: "v=0\r\noffer",
     })
   })

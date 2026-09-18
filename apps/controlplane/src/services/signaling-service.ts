@@ -7,13 +7,11 @@ export function createSignalingService(workerClient: ManagedInstanceWorkerClient
     async relayOffer(input: {
       instanceId: string
       attachmentId: string
-      role: string
       sdpOffer: string
     }): Promise<{ sdpAnswer: string }> {
       return workerClient.forwardOffer({
         instanceId: input.instanceId,
         attachmentId: input.attachmentId,
-        role: input.role,
         sdpOffer: input.sdpOffer,
       })
     },
