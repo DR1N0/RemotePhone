@@ -9,6 +9,7 @@ import {
   getAttachmentById,
   getAttachmentByInviteToken,
   listAttachmentsForSession,
+  setAttachmentPendingTransportRole,
   updateAttachmentRole,
   updateAttachmentStatus,
 } from "../src/persistence/repositories/attachments.js"
@@ -201,11 +202,27 @@ describe("persistence repositories", () => {
       id: "att_1",
       status: "disconnected",
     })
+    setAttachmentPendingTransportRole(db, {
+      id: "att_1",
+      pendingTargetRole: "participant",
+    })
 
-    const rows = listAttachmentsForSession(db, "sess_1")
+    let rows = listAttachmentsForSession(db, "sess_1")
+    expect(rows[0]).toMatchObject({
+      restrictivePendingRole: "observer",
+      pendingTargetRole: "participant",
+    })
+
+    setAttachmentPendingTransportRole(db, {
+      id: "att_1",
+      pendingTargetRole: "observer",
+    })
+    rows = listAttachmentsForSession(db, "sess_1")
     expect(rows).toHaveLength(1)
     expect(rows[0]?.role).toBe("participant")
     expect(rows[0]?.status).toBe("disconnected")
+    expect(rows[0]?.restrictivePendingRole).toBe("observer")
+    expect(rows[0]?.pendingTargetRole).toBe("observer")
     expect(getAttachmentById(db, "att_1")?.clientId).toBe("client_1")
   })
 

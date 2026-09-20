@@ -110,16 +110,16 @@ export function registerSessionRoutes(
             attachmentId,
             role: attachment.role,
           })
-          await sessionService.setAttachmentRestrictivePendingRole({
+          await sessionService.setAttachmentPendingTransportRole({
             sessionId,
             attachmentId,
-            role: null,
+            targetRole: null,
           })
         } catch (error) {
-          await sessionService.setAttachmentRestrictivePendingRole({
+          await sessionService.setAttachmentPendingTransportRole({
             sessionId,
             attachmentId,
-            role: "observer",
+            targetRole: "participant",
           })
           try {
             await transportService.syncAttachmentRole({
@@ -151,10 +151,10 @@ export function registerSessionRoutes(
             role: "observer",
           })
         } catch (error) {
-          await sessionService.setAttachmentRestrictivePendingRole({
+          await sessionService.setAttachmentPendingTransportRole({
             sessionId,
             attachmentId,
-            role: "observer",
+            targetRole: "observer",
           })
           throw error
         }
@@ -162,19 +162,19 @@ export function registerSessionRoutes(
       try {
         const attachment = await sessionService.demoteAttachment({ sessionId, attachmentId })
         if (transportService != null) {
-          await sessionService.setAttachmentRestrictivePendingRole({
+          await sessionService.setAttachmentPendingTransportRole({
             sessionId,
             attachmentId,
-            role: null,
+            targetRole: null,
           })
         }
         return c.json({ attachment })
       } catch (error) {
         if (transportService != null) {
-          await sessionService.setAttachmentRestrictivePendingRole({
+          await sessionService.setAttachmentPendingTransportRole({
             sessionId,
             attachmentId,
-            role: "observer",
+            targetRole: "observer",
           })
         }
         throw error

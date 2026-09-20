@@ -272,13 +272,25 @@ describe("session routes", () => {
     })
     const readRes = await app.request(`/api/v1/sessions/${session.id}`)
     const readBody = await readRes.json() as {
-      session: { attachments: Array<{ id: string; role: string; restrictivePendingRole: string | null }> }
+      session: {
+        attachments: Array<{
+          id: string
+          role: string
+          restrictivePendingRole: string | null
+          pendingTargetRole: string | null
+          requestedTransportRole: string
+          effectiveTransportRole: string
+        }>
+      }
     }
     expect(readBody.session.attachments).toContainEqual(
       expect.objectContaining({
         id: attachment.id,
         role: "participant",
         restrictivePendingRole: "observer",
+        pendingTargetRole: "participant",
+        requestedTransportRole: "participant",
+        effectiveTransportRole: "observer",
       }),
     )
 
@@ -339,6 +351,27 @@ describe("session routes", () => {
       attachmentId: attachment.id,
       role: "observer",
     })
+    const readRes = await app.request(`/api/v1/sessions/${session.id}`)
+    const readBody = await readRes.json() as {
+      session: {
+        attachments: Array<{
+          id: string
+          role: string
+          pendingTargetRole: string | null
+          requestedTransportRole: string
+          effectiveTransportRole: string
+        }>
+      }
+    }
+    expect(readBody.session.attachments).toContainEqual(
+      expect.objectContaining({
+        id: attachment.id,
+        role: "participant",
+        pendingTargetRole: "observer",
+        requestedTransportRole: "observer",
+        effectiveTransportRole: "observer",
+      }),
+    )
 
     const offerRes = await app.request("/api/v1/signaling/session", {
       method: "POST",

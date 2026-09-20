@@ -31,6 +31,7 @@ function createDependencies(options?: {
   attachmentStatus?: "connected" | "disconnected"
   role?: "owner" | "participant" | "observer"
   restrictivePendingRole?: "observer" | null
+  pendingTargetRole?: "participant" | "observer" | null
   sessionStatus?: "active" | "idle" | "closed"
   idleExpiresAt?: string | null
   runtimeHandle?: object | null
@@ -48,6 +49,7 @@ function createDependencies(options?: {
         clientId: "client-1",
         role: options?.role ?? "observer",
         restrictivePendingRole: options?.restrictivePendingRole ?? null,
+        pendingTargetRole: options?.pendingTargetRole ?? null,
         status: options?.attachmentStatus ?? "connected",
         reconnectToken: null,
         createdAt: "2026-09-18T00:00:00.000Z",
@@ -110,6 +112,20 @@ describe("transport service", () => {
       attachmentId,
       role: "observer",
     })
+  })
+
+  it("fails closed when only a pending target role is present", async () => {
+    const deps = createDependencies({
+      role: "participant",
+      pendingTargetRole: "participant",
+    })
+    const transportService = createTransportService(deps)
+
+    await transportService.ensureAttachmentTransport({ sessionId, attachmentId })
+
+    expect(deps.workerClient.createTransportSession).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "observer" }),
+    )
   })
 
   it("allows a connected attachment on an unexpired idle session", async () => {

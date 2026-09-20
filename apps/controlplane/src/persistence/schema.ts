@@ -15,6 +15,7 @@ import type {
 export type SessionStatus = "active" | "idle" | "closed"
 export type AttachmentStatus = "connected" | "disconnected"
 export type RestrictivePendingRole = "observer"
+export type PendingTargetRole = "participant" | "observer"
 
 function jsonTextColumn<T>(name: string) {
   return text(name, { mode: "json" }).$type<T>()
@@ -67,6 +68,7 @@ export const attachments = sqliteTable("attachments", {
   reconnectToken: text("reconnect_token"),
   inviteToken: text("invite_token"),
   restrictivePendingRole: text("restrictive_pending_role").$type<RestrictivePendingRole>(),
+  pendingTargetRole: text("pending_target_role").$type<PendingTargetRole>(),
   ...timestampColumns,
 })
 

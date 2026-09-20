@@ -22,10 +22,20 @@ type AttachmentTransportInput = {
 }
 
 export function effectiveTransportRole(
-  attachment: { role: SessionRole; restrictivePendingRole: "observer" | null },
+  attachment: {
+    role: SessionRole
+    restrictivePendingRole: "observer" | null
+    pendingTargetRole: "participant" | "observer" | null
+  },
   explicitRole?: SessionRole,
 ): SessionRole {
-  return explicitRole ?? attachment.restrictivePendingRole ?? attachment.role
+  if (explicitRole != null) {
+    return explicitRole
+  }
+
+  return attachment.restrictivePendingRole != null || attachment.pendingTargetRole != null
+    ? "observer"
+    : attachment.role
 }
 
 function assertTransportableSession(session: SessionRecord): void {

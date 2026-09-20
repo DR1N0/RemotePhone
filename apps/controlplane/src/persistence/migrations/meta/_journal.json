@@ -22,6 +22,13 @@
       "when": 1783862400000,
       "tag": "0002_restrictive_pending_role",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783948800000,
+      "tag": "0003_pending_target_role",
+      "breakpoints": true
     }
   ]
 }

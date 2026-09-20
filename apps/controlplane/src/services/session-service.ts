@@ -7,7 +7,7 @@ import {
   getAttachmentById,
   getAttachmentByReconnectToken,
   listAttachmentsForSession,
-  setAttachmentRestrictivePendingRole,
+  setAttachmentPendingTransportRole,
   updateAttachmentRole,
   updateAttachmentStatus,
 } from "../persistence/repositories/attachments.js"
@@ -27,6 +27,9 @@ export type SessionAttachmentRecord = {
   clientId: string
   role: SessionRole
   restrictivePendingRole: AttachmentRow["restrictivePendingRole"] | null
+  pendingTargetRole: AttachmentRow["pendingTargetRole"] | null
+  requestedTransportRole: SessionRole
+  effectiveTransportRole: SessionRole
   status: AttachmentRow["status"]
   reconnectToken: string | null
   createdAt: string
@@ -53,12 +56,21 @@ const roleOrder: Record<SessionRole, number> = {
 }
 
 function toAttachmentRecord(row: AttachmentRow): SessionAttachmentRecord {
+  const restrictivePendingRole = row.restrictivePendingRole ?? null
+  const pendingTargetRole = row.pendingTargetRole ?? null
+  const requestedTransportRole = pendingTargetRole ?? row.role
+
   return {
     id: row.id,
     sessionId: row.sessionId,
     clientId: row.clientId,
     role: row.role,
-    restrictivePendingRole: row.restrictivePendingRole ?? null,
+    restrictivePendingRole,
+    pendingTargetRole,
+    requestedTransportRole,
+    effectiveTransportRole: restrictivePendingRole != null || pendingTargetRole != null
+      ? "observer"
+      : requestedTransportRole,
     status: row.status,
     reconnectToken: row.reconnectToken ?? null,
     createdAt: row.createdAt,
@@ -224,16 +236,16 @@ export function createSessionService(deps: {
       return toAttachmentRecord(getRequiredAttachment(db, input.sessionId, input.attachmentId))
     },
 
-    async setAttachmentRestrictivePendingRole(input: {
+    async setAttachmentPendingTransportRole(input: {
       sessionId: string
       attachmentId: string
-      role: "observer" | null
+      targetRole: "participant" | "observer" | null
     }): Promise<SessionAttachmentRecord> {
       getRequiredSession(db, input.sessionId)
       const attachment = getRequiredAttachment(db, input.sessionId, input.attachmentId)
-      setAttachmentRestrictivePendingRole(db, {
+      setAttachmentPendingTransportRole(db, {
         id: attachment.id,
-        restrictivePendingRole: input.role,
+        pendingTargetRole: input.targetRole,
       })
 
       return toAttachmentRecord(getRequiredAttachment(db, input.sessionId, input.attachmentId))
