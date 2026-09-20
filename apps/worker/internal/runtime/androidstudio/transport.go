@@ -19,7 +19,7 @@ func (a *Adapter) CreateTransportSession(req runtime.TransportSessionRequest) (r
 		return runtime.TransportSession{}, fmt.Errorf("instanceId is required")
 	}
 
-	adbSerial := fmt.Sprintf("localhost:%d", req.RuntimeHandle.AdbPort)
+	adbSerial := fmt.Sprintf("emulator-%d", req.RuntimeHandle.ConsolePort)
 	// Default screen dimensions for standard AVD profiles.
 	const screenW, screenH = 1080, 1920
 
