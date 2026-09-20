@@ -15,6 +15,13 @@
       "when": 1753000000000,
       "tag": "0001_invite_token",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783862400000,
+      "tag": "0002_restrictive_pending_role",
+      "breakpoints": true
     }
   ]
 }

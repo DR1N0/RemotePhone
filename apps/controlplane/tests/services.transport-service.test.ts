@@ -29,6 +29,8 @@ const transport: WorkerTransportSession = {
 
 function createDependencies(options?: {
   attachmentStatus?: "connected" | "disconnected"
+  role?: "owner" | "participant" | "observer"
+  restrictivePendingRole?: "observer" | null
   sessionStatus?: "active" | "idle" | "closed"
   idleExpiresAt?: string | null
   runtimeHandle?: object | null
@@ -44,7 +46,8 @@ function createDependencies(options?: {
         id: attachmentId,
         sessionId,
         clientId: "client-1",
-        role: "observer",
+        role: options?.role ?? "observer",
+        restrictivePendingRole: options?.restrictivePendingRole ?? null,
         status: options?.attachmentStatus ?? "connected",
         reconnectToken: null,
         createdAt: "2026-09-18T00:00:00.000Z",
@@ -85,6 +88,26 @@ describe("transport service", () => {
       instanceId,
       runtimeClass: "android-studio-emulator",
       runtimeHandle: { workerId: "local", pid: 4321 },
+      role: "observer",
+    })
+  })
+
+  it("uses the restrictive pending observer role for ensure and default synchronization", async () => {
+    const deps = createDependencies({
+      role: "participant",
+      restrictivePendingRole: "observer",
+    })
+    const transportService = createTransportService(deps)
+
+    await transportService.ensureAttachmentTransport({ sessionId, attachmentId })
+    await transportService.syncAttachmentRole({ sessionId, attachmentId })
+
+    expect(deps.workerClient.createTransportSession).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "observer" }),
+    )
+    expect(deps.workerClient.updateTransportRole).toHaveBeenCalledWith({
+      instanceId,
+      attachmentId,
       role: "observer",
     })
   })

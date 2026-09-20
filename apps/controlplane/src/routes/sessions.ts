@@ -103,13 +103,35 @@ export function registerSessionRoutes(
       const sessionId = c.req.param("id")
       const attachmentId = c.req.param("attachmentId")
       const attachment = await sessionService.promoteAttachment({ sessionId, attachmentId })
-      try {
-        if (transportService != null) {
-          await transportService.syncAttachmentRole({ sessionId, attachmentId })
+      if (transportService != null) {
+        try {
+          await transportService.syncAttachmentRole({
+            sessionId,
+            attachmentId,
+            role: attachment.role,
+          })
+          await sessionService.setAttachmentRestrictivePendingRole({
+            sessionId,
+            attachmentId,
+            role: null,
+          })
+        } catch (error) {
+          await sessionService.setAttachmentRestrictivePendingRole({
+            sessionId,
+            attachmentId,
+            role: "observer",
+          })
+          try {
+            await transportService.syncAttachmentRole({
+              sessionId,
+              attachmentId,
+              role: "observer",
+            })
+          } catch {
+            // A later ensure uses the durable restrictive pending role.
+          }
+          throw error
         }
-      } catch (error) {
-        await sessionService.demoteAttachment({ sessionId, attachmentId })
-        throw error
       }
       return c.json({ attachment })
     } catch (error) {
@@ -122,14 +144,41 @@ export function registerSessionRoutes(
       const sessionId = c.req.param("id")
       const attachmentId = c.req.param("attachmentId")
       if (transportService != null) {
-        await transportService.syncAttachmentRole({
-          sessionId,
-          attachmentId,
-          role: "observer",
-        })
+        try {
+          await transportService.syncAttachmentRole({
+            sessionId,
+            attachmentId,
+            role: "observer",
+          })
+        } catch (error) {
+          await sessionService.setAttachmentRestrictivePendingRole({
+            sessionId,
+            attachmentId,
+            role: "observer",
+          })
+          throw error
+        }
       }
-      const attachment = await sessionService.demoteAttachment({ sessionId, attachmentId })
-      return c.json({ attachment })
+      try {
+        const attachment = await sessionService.demoteAttachment({ sessionId, attachmentId })
+        if (transportService != null) {
+          await sessionService.setAttachmentRestrictivePendingRole({
+            sessionId,
+            attachmentId,
+            role: null,
+          })
+        }
+        return c.json({ attachment })
+      } catch (error) {
+        if (transportService != null) {
+          await sessionService.setAttachmentRestrictivePendingRole({
+            sessionId,
+            attachmentId,
+            role: "observer",
+          })
+        }
+        throw error
+      }
     } catch (error) {
       return jsonError(c, error)
     }

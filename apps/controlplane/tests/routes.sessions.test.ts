@@ -249,9 +249,10 @@ describe("session routes", () => {
     })
   })
 
-  it("rolls a promotion back to observer when transport synchronization fails", async () => {
+  it("uses a restrictive pending role for later offers after promotion synchronization times out", async () => {
     const { app, attachment, session, workerClient } = await createAppWithObserverAttachment()
     workerClient.updateTransportRole.mockRejectedValueOnce(new Error("worker unavailable"))
+    workerClient.forwardOffer.mockResolvedValue({ sdpAnswer: "v=0\r\nanswer" })
 
     const promoteRes = await app.request(
       `/api/v1/sessions/${session.id}/attachments/${attachment.id}/promote`,
@@ -259,16 +260,43 @@ describe("session routes", () => {
     )
 
     expect(promoteRes.status).toBe(502)
-    expect(workerClient.updateTransportRole).toHaveBeenCalledWith({
+    expect(workerClient.updateTransportRole).toHaveBeenNthCalledWith(1, {
       instanceId: session.instanceId,
       attachmentId: attachment.id,
       role: "participant",
     })
+    expect(workerClient.updateTransportRole).toHaveBeenNthCalledWith(2, {
+      instanceId: session.instanceId,
+      attachmentId: attachment.id,
+      role: "observer",
+    })
     const readRes = await app.request(`/api/v1/sessions/${session.id}`)
-    const readBody = await readRes.json() as { session: { attachments: Array<{ id: string; role: string }> } }
+    const readBody = await readRes.json() as {
+      session: { attachments: Array<{ id: string; role: string; restrictivePendingRole: string | null }> }
+    }
     expect(readBody.session.attachments).toContainEqual(
-      expect.objectContaining({ id: attachment.id, role: "observer" }),
+      expect.objectContaining({
+        id: attachment.id,
+        role: "participant",
+        restrictivePendingRole: "observer",
+      }),
     )
+
+    const offerRes = await app.request("/api/v1/signaling/session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: session.id,
+        attachmentId: attachment.id,
+        sdpOffer: "v=0\r\noffer",
+      }),
+    })
+
+    expect(offerRes.status).toBe(200)
+    expect(workerClient.createTransportSession).toHaveBeenLastCalledWith(expect.objectContaining({
+      attachmentId: attachment.id,
+      role: "observer",
+    }))
   })
 
   it("restricts the Worker before persisting an attachment demotion", async () => {
@@ -294,10 +322,11 @@ describe("session routes", () => {
     })
   })
 
-  it("leaves the Worker restrictive when demotion persistence fails", async () => {
+  it("uses a restrictive pending role for later offers after demotion persistence fails", async () => {
     const { app, attachment, session, sessionService, workerClient } = await createAppWithObserverAttachment()
     await sessionService.promoteAttachment({ sessionId: session.id, attachmentId: attachment.id })
     vi.spyOn(sessionService, "demoteAttachment").mockRejectedValueOnce(new Error("persistence failed"))
+    workerClient.forwardOffer.mockResolvedValue({ sdpAnswer: "v=0\r\nanswer" })
 
     const demoteRes = await app.request(
       `/api/v1/sessions/${session.id}/attachments/${attachment.id}/demote`,
@@ -310,6 +339,22 @@ describe("session routes", () => {
       attachmentId: attachment.id,
       role: "observer",
     })
+
+    const offerRes = await app.request("/api/v1/signaling/session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: session.id,
+        attachmentId: attachment.id,
+        sdpOffer: "v=0\r\noffer",
+      }),
+    })
+
+    expect(offerRes.status).toBe(200)
+    expect(workerClient.createTransportSession).toHaveBeenLastCalledWith(expect.objectContaining({
+      attachmentId: attachment.id,
+      role: "observer",
+    }))
   })
 
   it("disconnects the last attachment through the API and resumes the same attachment", async () => {

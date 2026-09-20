@@ -58,3 +58,16 @@ export function updateAttachmentStatus(
     .where(eq(attachments.id, input.id))
     .run()
 }
+
+export function setAttachmentRestrictivePendingRole(
+  db: AppDb,
+  input: Pick<NewAttachmentRow, "id" | "restrictivePendingRole">,
+): void {
+  db.update(attachments)
+    .set({
+      restrictivePendingRole: input.restrictivePendingRole,
+      updatedAt: sql`CURRENT_TIMESTAMP`,
+    })
+    .where(eq(attachments.id, input.id))
+    .run()
+}

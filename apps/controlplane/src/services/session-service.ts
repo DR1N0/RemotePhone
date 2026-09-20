@@ -7,6 +7,7 @@ import {
   getAttachmentById,
   getAttachmentByReconnectToken,
   listAttachmentsForSession,
+  setAttachmentRestrictivePendingRole,
   updateAttachmentRole,
   updateAttachmentStatus,
 } from "../persistence/repositories/attachments.js"
@@ -25,6 +26,7 @@ export type SessionAttachmentRecord = {
   sessionId: string
   clientId: string
   role: SessionRole
+  restrictivePendingRole: AttachmentRow["restrictivePendingRole"] | null
   status: AttachmentRow["status"]
   reconnectToken: string | null
   createdAt: string
@@ -56,6 +58,7 @@ function toAttachmentRecord(row: AttachmentRow): SessionAttachmentRecord {
     sessionId: row.sessionId,
     clientId: row.clientId,
     role: row.role,
+    restrictivePendingRole: row.restrictivePendingRole ?? null,
     status: row.status,
     reconnectToken: row.reconnectToken ?? null,
     createdAt: row.createdAt,
@@ -217,6 +220,21 @@ export function createSessionService(deps: {
       if (session.status === "idle") {
         activateSession(db, { id: input.sessionId })
       }
+
+      return toAttachmentRecord(getRequiredAttachment(db, input.sessionId, input.attachmentId))
+    },
+
+    async setAttachmentRestrictivePendingRole(input: {
+      sessionId: string
+      attachmentId: string
+      role: "observer" | null
+    }): Promise<SessionAttachmentRecord> {
+      getRequiredSession(db, input.sessionId)
+      const attachment = getRequiredAttachment(db, input.sessionId, input.attachmentId)
+      setAttachmentRestrictivePendingRole(db, {
+        id: attachment.id,
+        restrictivePendingRole: input.role,
+      })
 
       return toAttachmentRecord(getRequiredAttachment(db, input.sessionId, input.attachmentId))
     },

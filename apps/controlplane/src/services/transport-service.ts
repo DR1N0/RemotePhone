@@ -21,6 +21,13 @@ type AttachmentTransportInput = {
   role?: SessionRole
 }
 
+export function effectiveTransportRole(
+  attachment: { role: SessionRole; restrictivePendingRole: "observer" | null },
+  explicitRole?: SessionRole,
+): SessionRole {
+  return explicitRole ?? attachment.restrictivePendingRole ?? attachment.role
+}
+
 function assertTransportableSession(session: SessionRecord): void {
   if (session.status === "active") {
     return
@@ -95,7 +102,7 @@ export function createTransportService(deps: {
         instanceId: instance.id,
         runtimeClass: instance.runtimeClass,
         runtimeHandle,
-        role: attachment.role,
+        role: effectiveTransportRole(attachment),
       }))
     },
 
@@ -106,7 +113,7 @@ export function createTransportService(deps: {
       await callWorker(async () => await workerClient.updateTransportRole({
         instanceId: instance.id,
         attachmentId: attachment.id,
-        role: input.role ?? attachment.role,
+        role: effectiveTransportRole(attachment, input.role),
       }))
     },
 
