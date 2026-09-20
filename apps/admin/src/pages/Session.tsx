@@ -14,6 +14,39 @@ const ROLE_COLOR: Record<string, string> = {
   observer: "default",
 }
 
+function waitForIceGatheringComplete(pc: RTCPeerConnection, signal: AbortSignal): Promise<void> {
+  if (pc.iceGatheringState === "complete") return Promise.resolve()
+
+  return new Promise((resolve, reject) => {
+    let timeoutId: number | undefined
+
+    const cleanup = () => {
+      if (timeoutId != null) window.clearTimeout(timeoutId)
+      pc.removeEventListener("icegatheringstatechange", onIceGatheringStateChange)
+      signal.removeEventListener("abort", onAbort)
+    }
+    const onIceGatheringStateChange = () => {
+      if (pc.iceGatheringState !== "complete") return
+      cleanup()
+      resolve()
+    }
+    const onAbort = () => {
+      cleanup()
+      reject(new Error("WebRTC setup cancelled"))
+    }
+
+    pc.addEventListener("icegatheringstatechange", onIceGatheringStateChange)
+    signal.addEventListener("abort", onAbort)
+    timeoutId = window.setTimeout(() => {
+      cleanup()
+      reject(new Error("ICE gathering timed out after 10 seconds"))
+    }, 10_000)
+
+    if (signal.aborted) onAbort()
+    else onIceGatheringStateChange()
+  })
+}
+
 export default function Session() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const [searchParams] = useSearchParams()
@@ -47,15 +80,23 @@ export default function Session() {
     return () => clearInterval(t)
   }, [fetchSession])
 
-  // Start WebRTC once we have sessionId + attachmentId
+  // Start WebRTC once we have sessionId + attachmentId.
   useEffect(() => {
-    if (sessionId == null || attachmentId.current == null) return
+    const currentAttachmentId = attachmentId.current
+    if (sessionId == null || currentAttachmentId == null) return
     let cancelled = false
+    const abortController = new AbortController()
+    const disconnectPath = `/api/v1/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(currentAttachmentId)}/disconnect`
 
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     })
     pcRef.current = pc
+
+    const dc = pc.createDataChannel("input")
+    dcRef.current = dc
+    dc.onopen = () => setConnected(true)
+    dc.onclose = () => setConnected(false)
 
     pc.ontrack = (ev) => {
       if (videoRef.current != null && ev.streams[0] != null) {
@@ -63,29 +104,37 @@ export default function Session() {
       }
     }
 
-    const dc = pc.createDataChannel("input")
-    dcRef.current = dc
-    dc.onopen = () => setConnected(true)
-    dc.onclose = () => setConnected(false)
-
-    pc.onicecandidate = (ev) => {
-      if (ev.candidate == null || sessionId == null || attachmentId.current == null) return
-      api.sendICECandidate(sessionId, attachmentId.current, ev.candidate.candidate).catch(() => {})
+    const disconnectOnPagehide = () => {
+      if (typeof navigator.sendBeacon === "function" && navigator.sendBeacon(disconnectPath)) return
+      void api.disconnectAttachment(sessionId, currentAttachmentId).catch(() => {})
     }
+    window.addEventListener("pagehide", disconnectOnPagehide)
 
-    pc.createOffer().then((offer) => {
-      if (cancelled) return
-      return pc.setLocalDescription(offer).then(() =>
-        api.sendOffer(sessionId, attachmentId.current!, offer.sdp ?? "")
-      ).then(({ sdpAnswer }) =>
-        pc.setRemoteDescription({ type: "answer", sdp: sdpAnswer })
-      )
-    }).catch((e: Error) => {
-      if (!cancelled) messageApi.error(`WebRTC setup failed: ${e.message}`)
-    })
+    const setup = async () => {
+      try {
+        const offer = await pc.createOffer()
+        if (cancelled) return
+        await pc.setLocalDescription(offer)
+        await waitForIceGatheringComplete(pc, abortController.signal)
+        if (cancelled) return
+        const sdpOffer = pc.localDescription?.sdp
+        if (sdpOffer == null) throw new Error("Local SDP is unavailable")
+        const { sdpAnswer } = await api.sendOffer(sessionId, currentAttachmentId, sdpOffer)
+        if (cancelled) return
+        await pc.setRemoteDescription({ type: "answer", sdp: sdpAnswer })
+      } catch (error) {
+        if (!cancelled) {
+          const detail = error instanceof Error ? error.message : String(error)
+          messageApi.error(`WebRTC setup failed: ${detail}`)
+        }
+      }
+    }
+    void setup()
 
     return () => {
       cancelled = true
+      abortController.abort()
+      window.removeEventListener("pagehide", disconnectOnPagehide)
       pc.close()
     }
   }, [sessionId, messageApi])

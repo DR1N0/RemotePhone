@@ -111,6 +111,11 @@ export const api = {
       body: JSON.stringify({ sessionId, attachmentId, candidate }),
     }),
 
+  disconnectAttachment: (sessionId: string, attachmentId: string) =>
+    request<void>(`/api/v1/sessions/${sessionId}/attachments/${attachmentId}/disconnect`, {
+      method: "POST",
+    }),
+
   createInvite: (sessionId: string) =>
     request<{ token: string; inviteUrl: string }>(`/api/v1/sessions/${sessionId}/invites`, {
       method: "POST",
