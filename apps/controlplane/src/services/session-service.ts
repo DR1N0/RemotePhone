@@ -169,23 +169,28 @@ export function createSessionService(deps: {
       }
 
       const sessionId = randomUUID()
-      createSessionRecord(db, {
-        id: sessionId,
-        instanceId: instance.id,
-        status: "active",
-        idleExpiresAt: null,
-        reconnectToken: randomUUID(),
-      })
-      createAttachment(db, {
-        id: randomUUID(),
-        sessionId,
-        clientId: input.ownerClientId,
-        role: "owner",
-        status: "connected",
-        reconnectToken: randomUUID(),
-      })
+      return db.$client.transaction(() => {
+        createSessionRecord(db, {
+          id: sessionId,
+          instanceId: instance.id,
+          status: "active",
+          idleExpiresAt: null,
+          reconnectToken: randomUUID(),
+        })
+        createAttachment(db, {
+          id: randomUUID(),
+          sessionId,
+          clientId: input.ownerClientId,
+          role: "owner",
+          status: "connected",
+          reconnectToken: randomUUID(),
+        })
 
-      return await this.getSession(sessionId)
+        return toSessionRecord(
+          getRequiredSession(db, sessionId),
+          listAttachmentsForSession(db, sessionId),
+        )
+      })()
     },
 
     async joinSession(input: {

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import { createTestDb, resetTestDb } from "../src/persistence/db.js"
 import { createInstance } from "../src/persistence/repositories/instances.js"
+import { listAttachmentsForSession } from "../src/persistence/repositories/attachments.js"
+import { listSessionsForInstance } from "../src/persistence/repositories/sessions.js"
 import {
   SessionInvalidRequestError,
   createSessionService,
@@ -39,6 +41,36 @@ function seedInstance(db: ReturnType<typeof createTestDb>, id = "inst_1"): void 
 describe("session service", () => {
   beforeEach(() => {
     resetTestDb()
+  })
+
+  it("rolls back session creation when the owner attachment insert fails", async () => {
+    const db = createTestDb()
+    seedInstance(db)
+    const service = createSessionService({ db, idleTtlMs: 300_000 })
+    const ownerClientId = "owner-attachment-trigger-failure"
+
+    db.$client.exec(`
+      CREATE TEMP TRIGGER reject_owner_attachment_insert
+      BEFORE INSERT ON main.attachments
+      WHEN NEW.client_id = '${ownerClientId}'
+      BEGIN
+        SELECT RAISE(ABORT, 'injected owner attachment failure');
+      END
+    `)
+
+    try {
+      await expect(service.createSession({
+        instanceId: "inst_1",
+        ownerClientId,
+      })).rejects.toThrow("injected owner attachment failure")
+
+      expect(listSessionsForInstance(db, "inst_1").map((session) => ({
+        status: session.status,
+        attachmentCount: listAttachmentsForSession(db, session.id).length,
+      }))).toEqual([])
+    } finally {
+      db.$client.exec("DROP TRIGGER IF EXISTS reject_owner_attachment_insert")
+    }
   })
 
   it("marks a session idle when the last attachment disconnects and clears idle state when a new client joins", async () => {
