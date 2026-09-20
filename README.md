@@ -59,4 +59,8 @@ Open in a browser:
 6. Create a session and attach a browser client.
 7. Request `POST /api/v1/signaling/session` to receive prototype transport metadata.
 
-The signaling path is intentionally a prototype stub. It returns session transport metadata and a deterministic session token, but it does not implement full media transport yet.
+The signaling path supports the local attachment transport flow. See [`docs/testing/local-transport-e2e.md`](docs/testing/local-transport-e2e.md) for the repeatable manual acceptance procedure.
+
+## Transport limitations
+
+The browser transport feature is validated only for the macOS Android Studio Emulator with Google Chrome on localhost or a controlled LAN. It does not provide public NAT traversal or TURN, authentication, or production reliability. These limitations make it unsuitable for public-network or untrusted-user use.
