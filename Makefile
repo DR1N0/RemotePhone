@@ -4,7 +4,6 @@ YELLOW := \033[33m
 NC := \033[0m
 .DEFAULT_GOAL := help
 
-BINARY_NAME=mako-server
 BUILD_DIR=.bin
 
 
@@ -12,7 +11,7 @@ BUILD_DIR=.bin
 
 .PHONY: help
 help: ## Display this help message
-	@echo "$(BLUE)Welcome to MAKO SERVER$(NC)"
+	@echo "$(BLUE)Welcome to MAKO$(NC)"
 	@echo ""
 	@echo "$(GREEN)Usage:$(NC)"
 	@echo "  make <target>"

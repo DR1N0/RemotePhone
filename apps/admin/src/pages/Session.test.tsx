@@ -29,6 +29,7 @@ class MockRTCPeerConnection {
   iceGatheringState: RTCIceGatheringState = "gathering"
   localDescription: RTCSessionDescriptionInit | null = null
   ontrack: ((event: RTCTrackEvent) => void) | null = null
+  addTransceiver = vi.fn()
   createDataChannel = vi.fn(() => new MockDataChannel())
   createOffer = vi.fn(async (): Promise<RTCSessionDescriptionInit> => ({ type: "offer", sdp: "offer-sdp" }))
   setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => {
@@ -101,6 +102,16 @@ describe("Session", () => {
   afterEach(() => {
     vi.clearAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it("adds a video receiver before creating its offer", async () => {
+    renderSession()
+
+    await waitFor(() => expect(MockRTCPeerConnection.instances).toHaveLength(1))
+
+    const pc = MockRTCPeerConnection.instances[0]!
+    expect(pc.addTransceiver).toHaveBeenCalledWith("video", { direction: "recvonly" })
+    expect(pc.addTransceiver.mock.invocationCallOrder[0]!).toBeLessThan(pc.createOffer.mock.invocationCallOrder[0]!)
   })
 
   it("submits the offer only after ICE gathering completes", async () => {

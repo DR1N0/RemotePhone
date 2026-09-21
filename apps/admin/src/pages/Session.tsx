@@ -93,6 +93,7 @@ export default function Session() {
     })
     pcRef.current = pc
 
+    pc.addTransceiver("video", { direction: "recvonly" })
     const dc = pc.createDataChannel("input")
     dcRef.current = dc
     dc.onopen = () => setConnected(true)

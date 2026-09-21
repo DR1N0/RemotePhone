@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/pkg/media"
 	"mako-worker/internal/transport"
@@ -23,6 +24,7 @@ type Adapter struct {
 	stunURL      string
 
 	forwardInput func(string, transport.InputEvent, string, int, int) error
+	startCapture func(string) (*ScreenCapture, io.ReadCloser, error)
 
 	mu      sync.Mutex
 	pc      *webrtc.PeerConnection
@@ -40,6 +42,7 @@ func NewAdapter(instanceID, attachmentID, role, adbSerial string, screenW, scree
 		screenH:      screenH,
 		stunURL:      stunURL,
 		forwardInput: ForwardInput,
+		startCapture: StartCapture,
 	}
 }
 
@@ -59,7 +62,19 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 	}
 
 	se := webrtc.SettingEngine{}
-	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
+	mediaEngine := &webrtc.MediaEngine{}
+	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
+		return "", fmt.Errorf("register default codecs: %w", err)
+	}
+	interceptorRegistry := &interceptor.Registry{}
+	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, interceptorRegistry); err != nil {
+		return "", fmt.Errorf("register default interceptors: %w", err)
+	}
+	api := webrtc.NewAPI(
+		webrtc.WithSettingEngine(se),
+		webrtc.WithMediaEngine(mediaEngine),
+		webrtc.WithInterceptorRegistry(interceptorRegistry),
+	)
 
 	config := webrtc.Configuration{}
 	if a.stunURL != "" {
@@ -112,7 +127,7 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 	}
 
 	// Start ADB H264 capture and pipe into video track.
-	cap, stdout, err := StartCapture(a.adbSerial)
+	cap, stdout, err := a.startCapture(a.adbSerial)
 	if err != nil {
 		_ = pc.Close()
 		return "", fmt.Errorf("start capture: %w", err)

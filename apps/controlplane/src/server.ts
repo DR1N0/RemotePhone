@@ -1,7 +1,8 @@
 import { swaggerUI } from "@hono/swagger-ui"
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 
 import type { AppDb } from "./persistence/db.js"
+import { registerAuthRoutes } from "./routes/auth.js"
 import { registerInstanceRoutes } from "./routes/instances.js"
 import { registerInviteRoutes } from "./routes/invites.js"
 import { registerRootRoutes } from "./routes/root.js"
@@ -10,6 +11,7 @@ import { registerSignalingRoutes } from "./routes/signaling.js"
 import { registerStaticRoutes } from "./routes/static.js"
 import { registerTemplateRoutes } from "./routes/templates.js"
 import { registerWorkerRoutes } from "./routes/workers.js"
+import type { AuthService } from "./services/auth-service.js"
 import type { InstanceService } from "./services/instance-service.js"
 import type { SessionService } from "./services/session-service.js"
 import { createSignalingService } from "./services/signaling-service.js"
@@ -20,6 +22,8 @@ export type ServerDependencies = {
   workerClient: DiscoveryWorkerClient
   instanceService?: InstanceService
   sessionService?: SessionService
+  authService?: AuthService
+  getClientAddress?: (c: Context) => string | undefined
   db?: AppDb
   baseUrl?: string
   adminDistPath?: string
@@ -187,6 +191,10 @@ export function createServer(deps: ServerDependencies): Hono {
       sessionService: deps.sessionService,
       baseUrl: deps.baseUrl ?? "http://localhost:3000",
     })
+  }
+
+  if (deps.authService != null) {
+    registerAuthRoutes(app, { authService: deps.authService, getClientAddress: deps.getClientAddress })
   }
 
   return app

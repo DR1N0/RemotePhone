@@ -4,6 +4,24 @@ import { tmpdir } from "node:os"
 
 import { beforeEach, describe, expect, it } from "vitest"
 import { createAppDb, createTestDb, resetTestDb } from "../src/persistence/db.js"
+import { principals, credentials, pairingInvites } from "../src/persistence/schema.js"
+import {
+  createPrincipal,
+  getPrincipalById,
+  getServerOwnerPrincipal,
+  setPrincipalStatus,
+} from "../src/persistence/repositories/principals.js"
+import {
+  createCredential,
+  getCredentialByTokenHash,
+  getCredentialById,
+  revokeCredential,
+} from "../src/persistence/repositories/credentials.js"
+import {
+  createPairingInvite,
+  getPairingInviteByTokenHash,
+  consumePairingInvite,
+} from "../src/persistence/repositories/pairing-invites.js"
 import {
   createAttachment,
   getAttachmentById,
@@ -327,5 +345,142 @@ describe("persistence repositories", () => {
     const row = getAttachmentByInviteToken(db, "tok-abc123")
     expect(row).toBeDefined()
     expect(row?.id).toBe("att-invite-1")
+  })
+})
+
+describe("principals, credentials, pairing_invites schema", () => {
+  beforeEach(() => {
+    resetTestDb()
+  })
+
+  it("round-trips a principal, a credential, and a pairing invite", () => {
+    const db = createTestDb()
+
+    db.insert(principals).values({
+      id: "principal_1",
+      displayName: "Server Owner",
+      isServerOwner: true,
+      status: "active",
+    }).run()
+
+    db.insert(credentials).values({
+      id: "credential_1",
+      principalId: "principal_1",
+      tokenHash: "deadbeef",
+      deviceLabel: "laptop-chrome",
+      revokedAt: null,
+    }).run()
+
+    db.insert(pairingInvites).values({
+      id: "invite_1",
+      tokenHash: "cafef00d",
+      createdBy: "principal_1",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      consumedAt: null,
+      consumedByPrincipalId: null,
+    }).run()
+
+    const principalRow = db.select().from(principals).all()[0]
+    expect(principalRow).toMatchObject({
+      id: "principal_1",
+      displayName: "Server Owner",
+      isServerOwner: true,
+      status: "active",
+    })
+
+    const credentialRow = db.select().from(credentials).all()[0]
+    expect(credentialRow).toMatchObject({
+      id: "credential_1",
+      principalId: "principal_1",
+      tokenHash: "deadbeef",
+      deviceLabel: "laptop-chrome",
+      revokedAt: null,
+    })
+
+    const inviteRow = db.select().from(pairingInvites).all()[0]
+    expect(inviteRow).toMatchObject({
+      id: "invite_1",
+      tokenHash: "cafef00d",
+      createdBy: "principal_1",
+      consumedAt: null,
+      consumedByPrincipalId: null,
+    })
+  })
+
+  it("creates and looks up a server owner principal and its credential", () => {
+    const db = createTestDb()
+
+    createPrincipal(db, {
+      id: "principal_owner",
+      displayName: "Server Owner",
+      isServerOwner: true,
+      status: "active",
+    })
+
+    createPrincipal(db, {
+      id: "principal_other",
+      displayName: "Someone Else",
+      isServerOwner: false,
+      status: "active",
+    })
+
+    expect(getPrincipalById(db, "principal_owner")?.displayName).toBe("Server Owner")
+    expect(getServerOwnerPrincipal(db)?.id).toBe("principal_owner")
+
+    setPrincipalStatus(db, { id: "principal_other", status: "banned" })
+    expect(getPrincipalById(db, "principal_other")?.status).toBe("banned")
+
+    createCredential(db, {
+      id: "credential_owner",
+      principalId: "principal_owner",
+      tokenHash: "hash-owner",
+      deviceLabel: "laptop-chrome",
+      revokedAt: null,
+    })
+
+    expect(getCredentialByTokenHash(db, "hash-owner")?.id).toBe("credential_owner")
+    expect(getCredentialById(db, "credential_owner")?.principalId).toBe("principal_owner")
+
+    revokeCredential(db, { id: "credential_owner", revokedAt: "2026-09-21T00:00:00.000Z" })
+    expect(getCredentialById(db, "credential_owner")?.revokedAt).toBe("2026-09-21T00:00:00.000Z")
+  })
+
+  it("creates, looks up, and consumes a pairing invite", () => {
+    const db = createTestDb()
+
+    createPrincipal(db, {
+      id: "principal_owner",
+      displayName: "Server Owner",
+      isServerOwner: true,
+      status: "active",
+    })
+
+    createPairingInvite(db, {
+      id: "invite_2",
+      tokenHash: "hash-invite-2",
+      createdBy: "principal_owner",
+      expiresAt: "2026-09-22T00:00:00.000Z",
+      consumedAt: null,
+      consumedByPrincipalId: null,
+    })
+
+    expect(getPairingInviteByTokenHash(db, "hash-invite-2")?.id).toBe("invite_2")
+
+    createPrincipal(db, {
+      id: "principal_new",
+      displayName: "New Person",
+      isServerOwner: false,
+      status: "active",
+    })
+
+    consumePairingInvite(db, {
+      id: "invite_2",
+      consumedAt: "2026-09-21T12:00:00.000Z",
+      consumedByPrincipalId: "principal_new",
+    })
+
+    const consumed = getPairingInviteByTokenHash(db, "hash-invite-2")
+    expect(consumed?.consumedAt).toBe("2026-09-21T12:00:00.000Z")
+    expect(consumed?.consumedByPrincipalId).toBe("principal_new")
   })
 })

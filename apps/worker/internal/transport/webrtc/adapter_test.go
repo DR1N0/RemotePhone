@@ -2,6 +2,8 @@ package webrtc
 
 import (
 	"fmt"
+	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,6 +99,46 @@ func TestHandleDataChannelOnlyBindsInputLabel(t *testing.T) {
 	case event := <-received:
 		t.Fatalf("unexpected event from non-input channel: %#v", event)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestHandleOfferNegotiatesH264VideoForRecvonlyOffer(t *testing.T) {
+	offerer, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatalf("create offerer: %v", err)
+	}
+	defer func() { _ = offerer.Close() }()
+
+	if _, err := offerer.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	}); err != nil {
+		t.Fatalf("add video receiver: %v", err)
+	}
+	offer, err := offerer.CreateOffer(nil)
+	if err != nil {
+		t.Fatalf("create offer: %v", err)
+	}
+	offerGathering := webrtc.GatheringCompletePromise(offerer)
+	if err := offerer.SetLocalDescription(offer); err != nil {
+		t.Fatalf("set offerer local description: %v", err)
+	}
+	waitForTestGathering(t, offerGathering)
+
+	adapter := NewAdapter("instance-1", "attachment-1", "participant", "adb", 1080, 1920, "")
+	adapter.startCapture = func(string) (*ScreenCapture, io.ReadCloser, error) {
+		return &ScreenCapture{}, io.NopCloser(strings.NewReader("")), nil
+	}
+	defer func() { _ = adapter.Stop() }()
+
+	answer, err := adapter.HandleOffer("instance-1", "attachment-1", offerer.LocalDescription().SDP)
+	if err != nil {
+		t.Fatalf("handle offer: %v", err)
+	}
+	if !strings.Contains(answer, "m=video") {
+		t.Fatalf("answer missing video media section:\n%s", answer)
+	}
+	if !strings.Contains(answer, "a=rtpmap") || !strings.Contains(strings.ToLower(answer), "h264") {
+		t.Fatalf("answer missing H264 codec mapping:\n%s", answer)
 	}
 }
 

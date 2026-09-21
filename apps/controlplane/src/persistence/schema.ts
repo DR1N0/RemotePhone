@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm"
-import { sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core"
 
 import type {
   InstanceDesiredState,
@@ -12,6 +12,7 @@ import type {
   SessionRole,
 } from "../domain/types.js"
 
+export type PrincipalStatus = "active" | "banned"
 export type SessionStatus = "active" | "idle" | "closed"
 export type AttachmentStatus = "connected" | "disconnected"
 export type RestrictivePendingRole = "observer"
@@ -72,6 +73,38 @@ export const attachments = sqliteTable("attachments", {
   ...timestampColumns,
 })
 
+export const principals = sqliteTable("principals", {
+  id: text("id").primaryKey(),
+  displayName: text("display_name").notNull(),
+  isServerOwner: integer("is_server_owner", { mode: "boolean" }).notNull().default(false),
+  status: text("status").$type<PrincipalStatus>().notNull().default("active"),
+  ...timestampColumns,
+})
+
+export const credentials = sqliteTable("credentials", {
+  id: text("id").primaryKey(),
+  principalId: text("principal_id")
+    .notNull()
+    .references(() => principals.id),
+  tokenHash: text("token_hash").notNull(),
+  deviceLabel: text("device_label").notNull(),
+  revokedAt: text("revoked_at"),
+  ...timestampColumns,
+})
+
+export const pairingInvites = sqliteTable("pairing_invites", {
+  id: text("id").primaryKey(),
+  tokenHash: text("token_hash").notNull(),
+  createdBy: text("created_by")
+    .notNull()
+    .references(() => principals.id),
+  expiresAt: text("expires_at").notNull(),
+  consumedAt: text("consumed_at"),
+  consumedByPrincipalId: text("consumed_by_principal_id")
+    .references(() => principals.id),
+  ...timestampColumns,
+})
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: jsonTextColumn<unknown>("value_json").notNull(),
@@ -82,7 +115,10 @@ export const settings = sqliteTable("settings", {
 
 export const appSchema = {
   attachments,
+  credentials,
   instances,
+  pairingInvites,
+  principals,
   sessions,
   settings,
 }
@@ -95,6 +131,15 @@ export type NewSessionRow = typeof sessions.$inferInsert
 
 export type AttachmentRow = typeof attachments.$inferSelect
 export type NewAttachmentRow = typeof attachments.$inferInsert
+
+export type PrincipalRow = typeof principals.$inferSelect
+export type NewPrincipalRow = typeof principals.$inferInsert
+
+export type CredentialRow = typeof credentials.$inferSelect
+export type NewCredentialRow = typeof credentials.$inferInsert
+
+export type PairingInviteRow = typeof pairingInvites.$inferSelect
+export type NewPairingInviteRow = typeof pairingInvites.$inferInsert
 
 type BaseSettingRow = typeof settings.$inferSelect
 type BaseNewSettingRow = typeof settings.$inferInsert
