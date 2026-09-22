@@ -11,6 +11,10 @@ export function listInstances(db: AppDb): InstanceRow[] {
   return db.select().from(instances).all()
 }
 
+export function listInstancesByOwner(db: AppDb, ownerId: string): InstanceRow[] {
+  return db.select().from(instances).where(eq(instances.ownerId, ownerId)).all()
+}
+
 export function getInstanceById(db: AppDb, id: string): InstanceRow | undefined {
   return db.select().from(instances).where(eq(instances.id, id)).get()
 }
