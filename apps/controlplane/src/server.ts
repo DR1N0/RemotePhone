@@ -152,8 +152,8 @@ export function createServer(deps: ServerDependencies): Hono {
   registerTemplateRoutes(app, deps.workerClient)
   registerDocsRoutes(app)
 
-  if (deps.instanceService != null) {
-    registerInstanceRoutes(app, deps.instanceService)
+  if (deps.instanceService != null && deps.authService != null) {
+    registerInstanceRoutes(app, deps.instanceService, deps.authService)
   }
 
   const transportService = deps.instanceService != null
