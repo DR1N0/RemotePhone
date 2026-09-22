@@ -147,6 +147,15 @@ function assertSessionMutable(session: SessionRow): void {
   }
 }
 
+function assertIsSessionOwner(db: AppDb, sessionId: string, requesterPrincipalId: string): void {
+  const ownerAttachment = listAttachmentsForSession(db, sessionId).find((attachment) => attachment.role === "owner")
+  if (ownerAttachment?.principalId !== requesterPrincipalId) {
+    throw new SessionForbiddenError(
+      `principal ${requesterPrincipalId} is not the owner of session ${sessionId}`,
+    )
+  }
+}
+
 export function createSessionService(deps: {
   db: AppDb
   idleTtlMs: number
@@ -270,7 +279,9 @@ export function createSessionService(deps: {
     async promoteAttachment(input: {
       sessionId: string
       attachmentId: string
+      requesterPrincipalId: string
     }): Promise<SessionAttachmentRecord> {
+      assertIsSessionOwner(db, input.sessionId, input.requesterPrincipalId)
       const session = getRequiredSession(db, input.sessionId)
       assertSessionMutable(session)
       const attachment = getRequiredAttachment(db, input.sessionId, input.attachmentId)
@@ -290,7 +301,9 @@ export function createSessionService(deps: {
     async demoteAttachment(input: {
       sessionId: string
       attachmentId: string
+      requesterPrincipalId: string
     }): Promise<SessionAttachmentRecord> {
+      assertIsSessionOwner(db, input.sessionId, input.requesterPrincipalId)
       const session = getRequiredSession(db, input.sessionId)
       assertSessionMutable(session)
       const attachment = getRequiredAttachment(db, input.sessionId, input.attachmentId)

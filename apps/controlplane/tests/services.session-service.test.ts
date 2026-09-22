@@ -150,6 +150,7 @@ describe("session service", () => {
     const promoted = await service.promoteAttachment({
       sessionId: created.id,
       attachmentId: joined.id,
+      requesterPrincipalId: "owner_1",
     })
     if (promoted.reconnectToken == null) {
       throw new Error("expected reconnect token")
@@ -207,6 +208,7 @@ describe("session service", () => {
       service.promoteAttachment({
         sessionId: created.id,
         attachmentId: ownerAttachment.id,
+        requesterPrincipalId: "owner_1",
       }),
     ).rejects.toThrow(SessionInvalidRequestError)
 
@@ -214,6 +216,7 @@ describe("session service", () => {
       service.demoteAttachment({
         sessionId: created.id,
         attachmentId: ownerAttachment.id,
+        requesterPrincipalId: "owner_1",
       }),
     ).rejects.toThrow(SessionInvalidRequestError)
 
@@ -288,6 +291,7 @@ describe("session service", () => {
       service.promoteAttachment({
         sessionId: created.id,
         attachmentId: joined.id,
+        requesterPrincipalId: "owner_1",
       }),
     ).rejects.toThrow(SessionInvalidRequestError)
 
@@ -295,6 +299,7 @@ describe("session service", () => {
       service.demoteAttachment({
         sessionId: created.id,
         attachmentId: joined.id,
+        requesterPrincipalId: "owner_1",
       }),
     ).rejects.toThrow(SessionInvalidRequestError)
 
@@ -331,6 +336,69 @@ describe("session service", () => {
       service.createSession({
         instanceId: "inst_1",
         ownerClientId: "owner-client",
+        requesterPrincipalId: "stranger",
+      }),
+    ).rejects.toBeInstanceOf(SessionForbiddenError)
+  })
+
+  it("allows the session owner to promote and demote an observer attachment", async () => {
+    const db = createTestDb()
+    seedInstance(db)
+    const service = createSessionService({ db, idleTtlMs: 300_000 })
+
+    const session = await service.createSession({
+      instanceId: "inst_1",
+      ownerClientId: "owner-client",
+      requesterPrincipalId: "owner_1",
+    })
+    const joined = await service.joinSession({
+      sessionId: session.id,
+      clientId: "observer-client",
+    })
+
+    const promoted = await service.promoteAttachment({
+      sessionId: session.id,
+      attachmentId: joined.id,
+      requesterPrincipalId: "owner_1",
+    })
+    expect(promoted.role).toBe("participant")
+
+    const demoted = await service.demoteAttachment({
+      sessionId: session.id,
+      attachmentId: joined.id,
+      requesterPrincipalId: "owner_1",
+    })
+    expect(demoted.role).toBe("observer")
+  })
+
+  it("rejects promote/demote from a caller who is not the session owner", async () => {
+    const db = createTestDb()
+    seedInstance(db)
+    seedPrincipal(db, "stranger")
+    const service = createSessionService({ db, idleTtlMs: 300_000 })
+
+    const session = await service.createSession({
+      instanceId: "inst_1",
+      ownerClientId: "owner-client",
+      requesterPrincipalId: "owner_1",
+    })
+    const joined = await service.joinSession({
+      sessionId: session.id,
+      clientId: "observer-client",
+    })
+
+    await expect(
+      service.promoteAttachment({
+        sessionId: session.id,
+        attachmentId: joined.id,
+        requesterPrincipalId: "stranger",
+      }),
+    ).rejects.toBeInstanceOf(SessionForbiddenError)
+
+    await expect(
+      service.demoteAttachment({
+        sessionId: session.id,
+        attachmentId: joined.id,
         requesterPrincipalId: "stranger",
       }),
     ).rejects.toBeInstanceOf(SessionForbiddenError)
