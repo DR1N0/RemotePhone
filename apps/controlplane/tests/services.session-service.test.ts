@@ -104,6 +104,7 @@ describe("session service", () => {
     const disconnected = await service.disconnectAttachment({
       sessionId: created.id,
       attachmentId: ownerAttachment.id,
+      requesterReconnectToken: ownerAttachment.reconnectToken,
     })
 
     expect(disconnected).toMatchObject({
@@ -159,6 +160,7 @@ describe("session service", () => {
     await service.disconnectAttachment({
       sessionId: created.id,
       attachmentId: promoted.id,
+      requesterReconnectToken: promoted.reconnectToken,
     })
 
     const resumed = await service.resumeAttachment({
@@ -253,6 +255,7 @@ describe("session service", () => {
     const disconnected = await service.disconnectAttachment({
       sessionId: created.id,
       attachmentId: ownerAttachment.id,
+      requesterReconnectToken: ownerAttachment.reconnectToken,
     })
     expect(disconnected.status).toBe("idle")
     expect(disconnected.idleExpiresAt).toBe("2026-07-11T12:05:00.000Z")
@@ -261,6 +264,7 @@ describe("session service", () => {
     const repeated = await service.disconnectAttachment({
       sessionId: created.id,
       attachmentId: ownerAttachment.id,
+      requesterReconnectToken: ownerAttachment.reconnectToken,
     })
 
     expect(repeated.status).toBe("idle")
@@ -307,6 +311,7 @@ describe("session service", () => {
       service.disconnectAttachment({
         sessionId: created.id,
         attachmentId: joined.id,
+        requesterReconnectToken: joined.reconnectToken,
       }),
     ).rejects.toThrow(SessionInvalidRequestError)
   })
@@ -400,6 +405,61 @@ describe("session service", () => {
         sessionId: session.id,
         attachmentId: joined.id,
         requesterPrincipalId: "stranger",
+      }),
+    ).rejects.toBeInstanceOf(SessionForbiddenError)
+  })
+
+  it("lets the session owner force-disconnect another attachment", async () => {
+    const db = createTestDb()
+    seedInstance(db)
+    const service = createSessionService({ db, idleTtlMs: 60_000 })
+    const session = await service.createSession({
+      instanceId: "inst_1",
+      ownerClientId: "owner-client",
+      requesterPrincipalId: "owner_1",
+    })
+    const joined = await service.joinSession({ sessionId: session.id, clientId: "observer-client" })
+
+    const result = await service.disconnectAttachment({
+      sessionId: session.id,
+      attachmentId: joined.id,
+      requesterPrincipalId: "owner_1",
+    })
+    expect(result.attachments.find((a) => a.id === joined.id)?.status).toBe("disconnected")
+  })
+
+  it("rejects disconnectAttachment without a matching reconnect token or session-owner identity", async () => {
+    const db = createTestDb()
+    seedInstance(db)
+    seedPrincipal(db, "stranger")
+    const service = createSessionService({ db, idleTtlMs: 60_000 })
+    const session = await service.createSession({
+      instanceId: "inst_1",
+      ownerClientId: "owner-client",
+      requesterPrincipalId: "owner_1",
+    })
+    const joined = await service.joinSession({ sessionId: session.id, clientId: "observer-client" })
+
+    await expect(
+      service.disconnectAttachment({
+        sessionId: session.id,
+        attachmentId: joined.id,
+        requesterPrincipalId: "stranger",
+      }),
+    ).rejects.toBeInstanceOf(SessionForbiddenError)
+
+    await expect(
+      service.disconnectAttachment({
+        sessionId: session.id,
+        attachmentId: joined.id,
+        requesterReconnectToken: "wrong-token",
+      }),
+    ).rejects.toBeInstanceOf(SessionForbiddenError)
+
+    await expect(
+      service.disconnectAttachment({
+        sessionId: session.id,
+        attachmentId: joined.id,
       }),
     ).rejects.toBeInstanceOf(SessionForbiddenError)
   })

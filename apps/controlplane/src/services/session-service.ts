@@ -323,10 +323,23 @@ export function createSessionService(deps: {
     async disconnectAttachment(input: {
       sessionId: string
       attachmentId: string
+      requesterPrincipalId?: string
+      requesterReconnectToken?: string
     }): Promise<SessionRecord> {
       const session = getRequiredSession(db, input.sessionId)
       assertSessionMutable(session)
       const attachment = getRequiredAttachment(db, input.sessionId, input.attachmentId)
+
+      const selfAuthorized = input.requesterReconnectToken != null
+        && input.requesterReconnectToken === attachment.reconnectToken
+      const ownerAuthorized = input.requesterPrincipalId != null
+        && listAttachmentsForSession(db, input.sessionId).find((a) => a.role === "owner")?.principalId
+          === input.requesterPrincipalId
+      if (!selfAuthorized && !ownerAuthorized) {
+        throw new SessionForbiddenError(
+          `caller may not disconnect attachment ${input.attachmentId} in session ${input.sessionId}`,
+        )
+      }
 
       const wasAlreadyDisconnected = attachment.status === "disconnected"
       if (!wasAlreadyDisconnected) {
