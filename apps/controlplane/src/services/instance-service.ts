@@ -6,8 +6,10 @@ import {
   deleteInstanceById,
   getInstanceById,
   listInstances,
+  listInstancesByOwner,
   updateInstanceLifecycle,
 } from "../persistence/repositories/instances.js"
+import { getPrincipalById } from "../persistence/repositories/principals.js"
 import type { InstanceRow } from "../persistence/schema.js"
 import { selectPlacement } from "./placement-service.js"
 import type {
@@ -19,10 +21,12 @@ import type { CreateInstanceRequest, RuntimeClass } from "../domain/types.js"
 export class InstanceServiceError extends Error {}
 export class InstanceNotFoundError extends InstanceServiceError {}
 export class InvalidRequestError extends InstanceServiceError {}
+export class InstanceForbiddenError extends InstanceServiceError {}
 
 export type ManagedInstanceRecord = {
   id: string
   name: string
+  ownerId: string
   runtimeClass: RuntimeClass
   templateId: string
   placement: InstanceRow["placementPolicy"]
@@ -43,6 +47,7 @@ function toManagedInstance(row: InstanceRow): ManagedInstanceRecord {
   return {
     id: row.id,
     name: row.name,
+    ownerId: row.ownerId,
     runtimeClass: row.runtimeClass,
     templateId: row.templateId,
     placement: row.placementPolicy,
@@ -97,6 +102,17 @@ function getRequiredInstance(db: AppDb, id: string): InstanceRow {
   return row
 }
 
+function assertCanManageInstance(db: AppDb, instance: InstanceRow, callerPrincipalId: string): void {
+  if (instance.ownerId === callerPrincipalId) {
+    return
+  }
+  const caller = getPrincipalById(db, callerPrincipalId)
+  if (caller?.isServerOwner === true) {
+    return
+  }
+  throw new InstanceForbiddenError(`principal ${callerPrincipalId} may not manage instance ${instance.id}`)
+}
+
 export function createInstanceService(deps: {
   db: AppDb
   workerClient: ManagedInstanceWorkerClient
@@ -104,7 +120,7 @@ export function createInstanceService(deps: {
   const { db, workerClient } = deps
 
   return {
-    async createManagedInstance(input: CreateInstanceRequest): Promise<ManagedInstanceRecord> {
+    async createManagedInstance(input: CreateInstanceRequest, ownerId: string): Promise<ManagedInstanceRecord> {
       const [template] = await Promise.all([
         resolveTemplate(workerClient, input.templateId),
         validatePlacement(workerClient, input),
@@ -113,6 +129,7 @@ export function createInstanceService(deps: {
       const id = randomUUID()
       createInstance(db, {
         id,
+        ownerId,
         name: input.name,
         runtimeClass: template.runtimeClass as RuntimeClass,
         templateId: template.templateId,
@@ -129,16 +146,23 @@ export function createInstanceService(deps: {
       return toManagedInstance(getRequiredInstance(db, id))
     },
 
-    async listManagedInstances(): Promise<ManagedInstanceRecord[]> {
-      return listInstances(db).map(toManagedInstance)
+    async listManagedInstances(callerPrincipalId: string): Promise<ManagedInstanceRecord[]> {
+      const caller = getPrincipalById(db, callerPrincipalId)
+      const rows = caller?.isServerOwner === true
+        ? listInstances(db)
+        : listInstancesByOwner(db, callerPrincipalId)
+      return rows.map(toManagedInstance)
     },
 
-    async getManagedInstance(id: string): Promise<ManagedInstanceRecord> {
-      return toManagedInstance(getRequiredInstance(db, id))
-    },
-
-    async startManagedInstance(id: string): Promise<ManagedInstanceRecord> {
+    async getManagedInstance(id: string, callerPrincipalId: string): Promise<ManagedInstanceRecord> {
       const row = getRequiredInstance(db, id)
+      assertCanManageInstance(db, row, callerPrincipalId)
+      return toManagedInstance(row)
+    },
+
+    async startManagedInstance(id: string, callerPrincipalId: string): Promise<ManagedInstanceRecord> {
+      const row = getRequiredInstance(db, id)
+      assertCanManageInstance(db, row, callerPrincipalId)
       const response = await workerClient.startInstance({
         instanceId: row.id,
         runtimeClass: row.runtimeClass,
@@ -157,8 +181,9 @@ export function createInstanceService(deps: {
       return toManagedInstance(getRequiredInstance(db, id))
     },
 
-    async stopManagedInstance(id: string): Promise<ManagedInstanceRecord> {
+    async stopManagedInstance(id: string, callerPrincipalId: string): Promise<ManagedInstanceRecord> {
       const row = getRequiredInstance(db, id)
+      assertCanManageInstance(db, row, callerPrincipalId)
 
       if (row.runtimeHandle == null) {
         updateInstanceLifecycle(db, {
@@ -197,8 +222,9 @@ export function createInstanceService(deps: {
       return toManagedInstance(getRequiredInstance(db, id))
     },
 
-    async deleteManagedInstance(id: string): Promise<void> {
-      getRequiredInstance(db, id)
+    async deleteManagedInstance(id: string, callerPrincipalId: string): Promise<void> {
+      const row = getRequiredInstance(db, id)
+      assertCanManageInstance(db, row, callerPrincipalId)
       deleteInstanceById(db, id)
     },
   }
