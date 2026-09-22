@@ -3,12 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createTestDb, resetTestDb } from "../src/persistence/db.js"
 import { createInstance, getInstanceById } from "../src/persistence/repositories/instances.js"
 import { createAttachment } from "../src/persistence/repositories/attachments.js"
+import { createPrincipal } from "../src/persistence/repositories/principals.js"
 import { createSession, getSessionById } from "../src/persistence/repositories/sessions.js"
 import { runReconcilePass } from "../src/services/reconciler.js"
 
 function seedRunningInstance(db: ReturnType<typeof createTestDb>, id: string): void {
+  createPrincipal(db, { id: `${id}_owner`, displayName: "Owner", isServerOwner: false, status: "active" })
   createInstance(db, {
     id,
+    ownerId: `${id}_owner`,
     name: `phone-${id}`,
     runtimeClass: "android-studio-emulator",
     templateId: "macos-android-studio:Medium_Phone",
