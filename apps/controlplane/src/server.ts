@@ -166,8 +166,8 @@ export function createServer(deps: ServerDependencies): Hono {
     })
     : undefined
 
-  if (deps.sessionService != null) {
-    registerSessionRoutes(app, deps.sessionService, transportService)
+  if (deps.sessionService != null && deps.authService != null) {
+    registerSessionRoutes(app, deps.sessionService, transportService, deps.authService)
   }
 
   if (

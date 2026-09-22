@@ -1,9 +1,12 @@
 import type { Context, Hono } from "hono"
 
 import { createSessionRequestSchema, joinSessionRequestSchema, resumeSessionRequestSchema } from "../domain/schemas.js"
+import { createBearerAuthMiddleware, getAuthenticatedPrincipal } from "../middleware/auth.js"
+import type { AuthService } from "../services/auth-service.js"
 import {
   AttachmentNotFoundError,
   SessionConflictError,
+  SessionForbiddenError,
   SessionInvalidRequestError,
   SessionNotFoundError,
   type SessionService,
@@ -13,12 +16,15 @@ import {
   type TransportService,
 } from "../services/transport-service.js"
 
-function errorStatus(error: unknown): 400 | 404 | 409 | 500 | 502 {
+function errorStatus(error: unknown): 400 | 403 | 404 | 409 | 500 | 502 {
   if (error instanceof TransportUnavailableError) {
     return 502
   }
   if (error instanceof SessionInvalidRequestError) {
     return 400
+  }
+  if (error instanceof SessionForbiddenError) {
+    return 403
   }
   if (error instanceof SessionNotFoundError || error instanceof AttachmentNotFoundError) {
     return 404
@@ -44,12 +50,25 @@ function jsonError(c: Context, error: unknown) {
 export function registerSessionRoutes(
   app: Hono,
   sessionService: SessionService,
-  transportService?: TransportService,
+  transportService: TransportService | undefined,
+  authService: AuthService,
 ): void {
-  app.post("/api/v1/sessions", async (c) => {
+  const requireAuth = createBearerAuthMiddleware(authService)
+
+  async function getOptionalPrincipalId(c: Context): Promise<string | undefined> {
+    const header = c.req.header("Authorization")
+    if (!header?.startsWith("Bearer ")) {
+      return undefined
+    }
+    const principal = await authService.authenticate(header.slice("Bearer ".length))
+    return principal?.principalId
+  }
+
+  app.post("/api/v1/sessions", requireAuth, async (c) => {
+    const { principalId } = getAuthenticatedPrincipal(c)
     try {
       const input = createSessionRequestSchema.parse(await c.req.json())
-      const session = await sessionService.createSession(input)
+      const session = await sessionService.createSession({ ...input, requesterPrincipalId: principalId })
       c.status(201)
       return c.json({ session })
     } catch (error) {
@@ -85,10 +104,24 @@ export function registerSessionRoutes(
   })
 
   app.post("/api/v1/sessions/:id/attachments/:attachmentId/disconnect", async (c) => {
+    let reconnectToken: string | undefined
+    try {
+      const body = await c.req.json() as { reconnectToken?: string }
+      reconnectToken = body.reconnectToken
+    } catch {
+      reconnectToken = undefined
+    }
+    const requesterPrincipalId = await getOptionalPrincipalId(c)
+
     try {
       const sessionId = c.req.param("id")
       const attachmentId = c.req.param("attachmentId")
-      const session = await sessionService.disconnectAttachment({ sessionId, attachmentId })
+      const session = await sessionService.disconnectAttachment({
+        sessionId,
+        attachmentId,
+        requesterPrincipalId,
+        requesterReconnectToken: reconnectToken,
+      })
       if (transportService != null) {
         await transportService.destroyAttachmentTransport({ sessionId, attachmentId })
       }
@@ -98,11 +131,12 @@ export function registerSessionRoutes(
     }
   })
 
-  app.post("/api/v1/sessions/:id/attachments/:attachmentId/promote", async (c) => {
+  app.post("/api/v1/sessions/:id/attachments/:attachmentId/promote", requireAuth, async (c) => {
+    const { principalId } = getAuthenticatedPrincipal(c)
     try {
       const sessionId = c.req.param("id")
       const attachmentId = c.req.param("attachmentId")
-      const attachment = await sessionService.promoteAttachment({ sessionId, attachmentId })
+      const attachment = await sessionService.promoteAttachment({ sessionId, attachmentId, requesterPrincipalId: principalId })
       if (transportService != null) {
         try {
           await transportService.syncAttachmentRole({
@@ -139,7 +173,8 @@ export function registerSessionRoutes(
     }
   })
 
-  app.post("/api/v1/sessions/:id/attachments/:attachmentId/demote", async (c) => {
+  app.post("/api/v1/sessions/:id/attachments/:attachmentId/demote", requireAuth, async (c) => {
+    const { principalId } = getAuthenticatedPrincipal(c)
     try {
       const sessionId = c.req.param("id")
       const attachmentId = c.req.param("attachmentId")
@@ -160,7 +195,7 @@ export function registerSessionRoutes(
         }
       }
       try {
-        const attachment = await sessionService.demoteAttachment({ sessionId, attachmentId })
+        const attachment = await sessionService.demoteAttachment({ sessionId, attachmentId, requesterPrincipalId: principalId })
         if (transportService != null) {
           await sessionService.setAttachmentPendingTransportRole({
             sessionId,

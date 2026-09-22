@@ -1,9 +1,20 @@
+import type { Hono } from "hono"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { createTestDb, resetTestDb } from "../src/persistence/db.js"
+import { createAuthService } from "../src/services/auth-service.js"
 import { createInstanceService } from "../src/services/instance-service.js"
 import { createServer } from "../src/server.js"
 import { createSessionService } from "../src/services/session-service.js"
+
+async function claim(app: Hono, displayName = "Owner") {
+  const res = await app.request("/api/v1/auth/claim", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ displayName }),
+  })
+  return await res.json() as { principal: { id: string }; token: string }
+}
 
 function createWorkerClient() {
   return {
@@ -78,7 +89,9 @@ async function createAppWithObserverAttachment() {
   const workerClient = createWorkerClient()
   const instanceService = createInstanceService({ db, workerClient })
   const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
-  const app = createServer({ workerClient, instanceService, sessionService })
+  const authService = createAuthService({ db })
+  const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+  const owner = await claim(app)
   const instance = await instanceService.createManagedInstance({
     name: "phone-lifecycle",
     templateId: "macos-android-studio:Medium_Phone",
@@ -91,18 +104,28 @@ async function createAppWithObserverAttachment() {
       streamProfile: "prototype",
     },
     launchConfig: { headless: true, readOnly: true, wipeData: false },
-  })
-  await instanceService.startManagedInstance(instance.id)
+  }, owner.principal.id)
+  await instanceService.startManagedInstance(instance.id, owner.principal.id)
   const session = await sessionService.createSession({
     instanceId: instance.id,
     ownerClientId: "owner-lifecycle",
+    requesterPrincipalId: owner.principal.id,
   })
   const attachment = await sessionService.joinSession({
     sessionId: session.id,
     clientId: "observer-lifecycle",
   })
 
-  return { app, instance, session, attachment, sessionService, workerClient }
+  return {
+    app,
+    instance,
+    session,
+    attachment,
+    sessionService,
+    workerClient,
+    ownerToken: owner.token,
+    ownerPrincipalId: owner.principal.id,
+  }
 }
 
 describe("session routes", () => {
@@ -121,11 +144,14 @@ describe("session routes", () => {
       db,
       idleTtlMs: 300_000,
     })
-    const app = createServer({ workerClient, instanceService, sessionService })
+    const authService = createAuthService({ db })
+    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+
+    const { token: ownerToken } = await claim(app)
 
     const createInstanceRes = await app.request("/api/v1/instances", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
       body: JSON.stringify({
         name: "phone-1",
         templateId: "macos-android-studio:Medium_Phone",
@@ -148,7 +174,7 @@ describe("session routes", () => {
 
     const createSessionRes = await app.request("/api/v1/sessions", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
       body: JSON.stringify({
         instanceId: createInstanceBody.instance.id,
         ownerClientId: "owner-1",
@@ -216,7 +242,7 @@ describe("session routes", () => {
 
     const promoteRes = await app.request(
       `/api/v1/sessions/${createSessionBody.session.id}/attachments/${joinBody.attachment.id}/promote`,
-      { method: "POST" },
+      { method: "POST", headers: { Authorization: `Bearer ${ownerToken}` } },
     )
     expect(promoteRes.status).toBe(200)
     expect(await promoteRes.json()).toMatchObject({
@@ -233,7 +259,7 @@ describe("session routes", () => {
 
     const demoteRes = await app.request(
       `/api/v1/sessions/${createSessionBody.session.id}/attachments/${joinBody.attachment.id}/demote`,
-      { method: "POST" },
+      { method: "POST", headers: { Authorization: `Bearer ${ownerToken}` } },
     )
     expect(demoteRes.status).toBe(200)
     expect(await demoteRes.json()).toMatchObject({
@@ -250,13 +276,13 @@ describe("session routes", () => {
   })
 
   it("uses a restrictive pending role for later offers after promotion synchronization times out", async () => {
-    const { app, attachment, session, workerClient } = await createAppWithObserverAttachment()
+    const { app, attachment, session, workerClient, ownerToken } = await createAppWithObserverAttachment()
     workerClient.updateTransportRole.mockRejectedValueOnce(new Error("worker unavailable"))
     workerClient.forwardOffer.mockResolvedValue({ sdpAnswer: "v=0\r\nanswer" })
 
     const promoteRes = await app.request(
       `/api/v1/sessions/${session.id}/attachments/${attachment.id}/promote`,
-      { method: "POST" },
+      { method: "POST", headers: { Authorization: `Bearer ${ownerToken}` } },
     )
 
     expect(promoteRes.status).toBe(502)
@@ -312,8 +338,8 @@ describe("session routes", () => {
   })
 
   it("restricts the Worker before persisting an attachment demotion", async () => {
-    const { app, attachment, session, sessionService, workerClient } = await createAppWithObserverAttachment()
-    await sessionService.promoteAttachment({ sessionId: session.id, attachmentId: attachment.id })
+    const { app, attachment, session, sessionService, workerClient, ownerToken, ownerPrincipalId } = await createAppWithObserverAttachment()
+    await sessionService.promoteAttachment({ sessionId: session.id, attachmentId: attachment.id, requesterPrincipalId: ownerPrincipalId })
     workerClient.updateTransportRole.mockImplementationOnce(async () => {
       const current = await sessionService.getSession(session.id)
       expect(current.attachments).toContainEqual(
@@ -323,7 +349,7 @@ describe("session routes", () => {
 
     const demoteRes = await app.request(
       `/api/v1/sessions/${session.id}/attachments/${attachment.id}/demote`,
-      { method: "POST" },
+      { method: "POST", headers: { Authorization: `Bearer ${ownerToken}` } },
     )
 
     expect(demoteRes.status).toBe(200)
@@ -335,14 +361,14 @@ describe("session routes", () => {
   })
 
   it("uses a restrictive pending role for later offers after demotion persistence fails", async () => {
-    const { app, attachment, session, sessionService, workerClient } = await createAppWithObserverAttachment()
-    await sessionService.promoteAttachment({ sessionId: session.id, attachmentId: attachment.id })
+    const { app, attachment, session, sessionService, workerClient, ownerToken, ownerPrincipalId } = await createAppWithObserverAttachment()
+    await sessionService.promoteAttachment({ sessionId: session.id, attachmentId: attachment.id, requesterPrincipalId: ownerPrincipalId })
     vi.spyOn(sessionService, "demoteAttachment").mockRejectedValueOnce(new Error("persistence failed"))
     workerClient.forwardOffer.mockResolvedValue({ sdpAnswer: "v=0\r\nanswer" })
 
     const demoteRes = await app.request(
       `/api/v1/sessions/${session.id}/attachments/${attachment.id}/demote`,
-      { method: "POST" },
+      { method: "POST", headers: { Authorization: `Bearer ${ownerToken}` } },
     )
 
     expect(demoteRes.status).toBe(500)
@@ -399,11 +425,14 @@ describe("session routes", () => {
       idleTtlMs: 300_000,
       now: () => new Date("2026-07-11T12:00:00.000Z"),
     })
-    const app = createServer({ workerClient, instanceService, sessionService })
+    const authService = createAuthService({ db })
+    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+
+    const { token: ownerToken } = await claim(app)
 
     const createInstanceRes = await app.request("/api/v1/instances", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
       body: JSON.stringify({
         name: "phone-1",
         templateId: "macos-android-studio:Medium_Phone",
@@ -426,7 +455,7 @@ describe("session routes", () => {
 
     const createSessionRes = await app.request("/api/v1/sessions", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
       body: JSON.stringify({
         instanceId: createInstanceBody.instance.id,
         ownerClientId: "owner-1",
@@ -446,7 +475,11 @@ describe("session routes", () => {
 
     const disconnectRes = await app.request(
       `/api/v1/sessions/${createSessionBody.session.id}/attachments/${ownerAttachment.id}/disconnect`,
-      { method: "POST" },
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reconnectToken: ownerAttachment.reconnectToken }),
+      },
     )
     expect(disconnectRes.status).toBe(200)
     expect(await disconnectRes.json()).toMatchObject({
@@ -511,11 +544,14 @@ describe("session routes", () => {
     const workerClient = createWorkerClient()
     const instanceService = createInstanceService({ db, workerClient })
     const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
-    const app = createServer({ workerClient, instanceService, sessionService })
+    const authService = createAuthService({ db })
+    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+
+    const { token: ownerToken } = await claim(app)
 
     const createInstanceRes = await app.request("/api/v1/instances", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
       body: JSON.stringify({
         name: "phone-1",
         templateId: "macos-android-studio:Medium_Phone",
@@ -538,7 +574,7 @@ describe("session routes", () => {
 
     const firstRes = await app.request("/api/v1/sessions", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
       body: JSON.stringify({
         instanceId: createInstanceBody.instance.id,
         ownerClientId: "owner-1",
@@ -548,7 +584,7 @@ describe("session routes", () => {
 
     const secondRes = await app.request("/api/v1/sessions", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
       body: JSON.stringify({
         instanceId: createInstanceBody.instance.id,
         ownerClientId: "owner-2",
@@ -559,5 +595,194 @@ describe("session routes", () => {
     expect(await secondRes.json()).toEqual({
       error: `active session already exists for instance ${createInstanceBody.instance.id}`,
     })
+  })
+
+  it("rejects creating a session without a bearer token", async () => {
+    const db = createTestDb()
+    const workerClient = createWorkerClient()
+    const instanceService = createInstanceService({ db, workerClient })
+    const sessionService = createSessionService({ db, idleTtlMs: 60_000 })
+    const authService = createAuthService({ db })
+    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+
+    const { token: ownerToken } = await claim(app)
+    const createInstanceRes = await app.request("/api/v1/instances", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "test-instance",
+        templateId: "macos-android-studio:Medium_Phone",
+        placement: { kind: "local-only" },
+        resourceProfile: {
+          cpuMillicores: 1000,
+          memoryMb: 4096,
+          diskMb: 8192,
+          accelerationMode: "auto",
+          streamProfile: "prototype",
+        },
+        launchConfig: { headless: true, readOnly: true, wipeData: false },
+      }),
+    })
+    const createInstanceBody = await createInstanceRes.json() as { instance: { id: string } }
+
+    const res = await app.request("/api/v1/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ instanceId: createInstanceBody.instance.id, ownerClientId: "owner-client" }),
+    })
+    expect(res.status).toBe(401)
+  })
+
+  it("rejects creating a session for an instance the caller does not own", async () => {
+    const db = createTestDb()
+    const workerClient = createWorkerClient()
+    const instanceService = createInstanceService({ db, workerClient })
+    const sessionService = createSessionService({ db, idleTtlMs: 60_000 })
+    const authService = createAuthService({ db })
+    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+
+    const { token: ownerToken } = await claim(app)
+    const createInstanceRes = await app.request("/api/v1/instances", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "test-instance",
+        templateId: "macos-android-studio:Medium_Phone",
+        placement: { kind: "local-only" },
+        resourceProfile: {
+          cpuMillicores: 1000,
+          memoryMb: 4096,
+          diskMb: 8192,
+          accelerationMode: "auto",
+          streamProfile: "prototype",
+        },
+        launchConfig: { headless: true, readOnly: true, wipeData: false },
+      }),
+    })
+    const createInstanceBody = await createInstanceRes.json() as { instance: { id: string } }
+
+    const inviteRes = await app.request("/api/v1/auth/pairing-invites", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ ttlMinutes: 30 }),
+    })
+    const { token: inviteToken } = await inviteRes.json() as { token: string }
+    const redeemRes = await app.request("/api/v1/auth/pairing-invites/redeem", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: inviteToken, displayName: "Stranger", deviceLabel: "device" }),
+    })
+    const { token: strangerToken } = await redeemRes.json() as { token: string }
+
+    const res = await app.request("/api/v1/sessions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${strangerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ instanceId: createInstanceBody.instance.id, ownerClientId: "owner-client" }),
+    })
+    expect(res.status).toBe(403)
+  })
+
+  it("rejects promote/demote from a caller who is not the session owner", async () => {
+    const db = createTestDb()
+    const workerClient = createWorkerClient()
+    const instanceService = createInstanceService({ db, workerClient })
+    const sessionService = createSessionService({ db, idleTtlMs: 60_000 })
+    const authService = createAuthService({ db })
+    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+
+    const { token: ownerToken } = await claim(app)
+    const createInstanceRes = await app.request("/api/v1/instances", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "test-instance",
+        templateId: "macos-android-studio:Medium_Phone",
+        placement: { kind: "local-only" },
+        resourceProfile: {
+          cpuMillicores: 1000,
+          memoryMb: 4096,
+          diskMb: 8192,
+          accelerationMode: "auto",
+          streamProfile: "prototype",
+        },
+        launchConfig: { headless: true, readOnly: true, wipeData: false },
+      }),
+    })
+    const createInstanceBody = await createInstanceRes.json() as { instance: { id: string } }
+    const createSessionRes = await app.request("/api/v1/sessions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ instanceId: createInstanceBody.instance.id, ownerClientId: "owner-client" }),
+    })
+    const createSessionBody = await createSessionRes.json() as { session: { id: string } }
+    const joinRes = await app.request(`/api/v1/sessions/${createSessionBody.session.id}/join`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clientId: "observer-client" }),
+    })
+    const joined = await joinRes.json() as { attachment: { id: string; role: string } }
+    const observerAttachment = joined.attachment
+
+    const inviteRes = await app.request("/api/v1/auth/pairing-invites", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ ttlMinutes: 30 }),
+    })
+    const { token: inviteToken } = await inviteRes.json() as { token: string }
+    const redeemRes = await app.request("/api/v1/auth/pairing-invites/redeem", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: inviteToken, displayName: "Stranger", deviceLabel: "device" }),
+    })
+    const { token: strangerToken } = await redeemRes.json() as { token: string }
+
+    const res = await app.request(
+      `/api/v1/sessions/${createSessionBody.session.id}/attachments/${observerAttachment.id}/promote`,
+      { method: "POST", headers: { Authorization: `Bearer ${strangerToken}` } },
+    )
+    expect(res.status).toBe(403)
+  })
+
+  it("redacts reconnect tokens when reading a session but not when creating it", async () => {
+    const db = createTestDb()
+    const workerClient = createWorkerClient()
+    const instanceService = createInstanceService({ db, workerClient })
+    const sessionService = createSessionService({ db, idleTtlMs: 60_000 })
+    const authService = createAuthService({ db })
+    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+
+    const { token: ownerToken } = await claim(app)
+    const createInstanceRes = await app.request("/api/v1/instances", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "test-instance",
+        templateId: "macos-android-studio:Medium_Phone",
+        placement: { kind: "local-only" },
+        resourceProfile: {
+          cpuMillicores: 1000,
+          memoryMb: 4096,
+          diskMb: 8192,
+          accelerationMode: "auto",
+          streamProfile: "prototype",
+        },
+        launchConfig: { headless: true, readOnly: true, wipeData: false },
+      }),
+    })
+    const createInstanceBody = await createInstanceRes.json() as { instance: { id: string } }
+    const createSessionRes = await app.request("/api/v1/sessions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ instanceId: createInstanceBody.instance.id, ownerClientId: "owner-client" }),
+    })
+    const created = await createSessionRes.json() as {
+      session: { id: string; attachments: { role: string; reconnectToken: string | null }[] }
+    }
+    const ownerAttachment = created.session.attachments.find((a) => a.role === "owner")!
+    expect(ownerAttachment.reconnectToken).toEqual(expect.any(String))
+
+    const readRes = await app.request(`/api/v1/sessions/${created.session.id}`)
+    const read = await readRes.json() as { session: { attachments: { reconnectToken: string | null }[] } }
+    expect(read.session.attachments.every((a) => a.reconnectToken === null)).toBe(true)
   })
 })
