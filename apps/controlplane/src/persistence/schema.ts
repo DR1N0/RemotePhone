@@ -33,6 +33,7 @@ const timestampColumns = {
 
 export const instances = sqliteTable("instances", {
   id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => principals.id),
   name: text("name").notNull(),
   runtimeClass: text("runtime_class").$type<RuntimeClass>().notNull(),
   templateId: text("template_id").notNull(),
@@ -63,6 +64,7 @@ export const attachments = sqliteTable("attachments", {
   sessionId: text("session_id")
     .notNull()
     .references(() => sessions.id),
+  principalId: text("principal_id").references(() => principals.id),
   clientId: text("client_id").notNull(),
   role: text("role").$type<SessionRole>().notNull(),
   status: text("status").$type<AttachmentStatus>().notNull(),

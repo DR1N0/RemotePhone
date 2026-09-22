@@ -35,6 +35,7 @@ import {
   createInstance,
   getInstanceById,
   listInstances,
+  listInstancesByOwner,
   updateInstanceRuntime,
 } from "../src/persistence/repositories/instances.js"
 import {
@@ -52,9 +53,24 @@ import {
   markSessionIdle,
 } from "../src/persistence/repositories/sessions.js"
 
-function seedInstance(db: ReturnType<typeof createTestDb>, id = "inst_1"): void {
+function seedPrincipal(db: ReturnType<typeof createTestDb>, id = "principal_1"): void {
+  createPrincipal(db, {
+    id,
+    displayName: "Test Owner",
+    isServerOwner: false,
+    status: "active",
+  })
+}
+
+function seedInstance(
+  db: ReturnType<typeof createTestDb>,
+  id = "inst_1",
+  ownerId = "principal_1",
+): void {
+  seedPrincipal(db, ownerId)
   createInstance(db, {
     id,
+    ownerId,
     name: "phone-1",
     runtimeClass: "android-studio-emulator",
     templateId: "macos-android-studio:Medium_Phone",
@@ -146,6 +162,18 @@ describe("persistence repositories", () => {
       wipeData: false,
     }))
     expect(stored.runtime_handle_json).toBe(JSON.stringify({ pid: 4321, workerId: "local" }))
+  })
+
+  it("persists and lists instances scoped to their owner", () => {
+    const db = createTestDb()
+    seedInstance(db, "inst_a1", "owner_a")
+    seedInstance(db, "inst_b1", "owner_b")
+
+    const stored = getInstanceById(db, "inst_a1")
+    expect(stored?.ownerId).toBe("owner_a")
+
+    const ownedByA = listInstancesByOwner(db, "owner_a")
+    expect(ownedByA.map((i) => i.id)).toEqual(["inst_a1"])
   })
 
   it("stores and updates sessions for an instance", () => {
