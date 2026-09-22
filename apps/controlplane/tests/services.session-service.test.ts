@@ -463,4 +463,21 @@ describe("session service", () => {
       }),
     ).rejects.toBeInstanceOf(SessionForbiddenError)
   })
+
+  it("redacts reconnect tokens on getSession but not on the createSession response", async () => {
+    const db = createTestDb()
+    seedInstance(db)
+    const service = createSessionService({ db, idleTtlMs: 60_000 })
+
+    const created = await service.createSession({
+      instanceId: "inst_1",
+      ownerClientId: "owner-client",
+      requesterPrincipalId: "owner_1",
+    })
+    const ownerAttachment = created.attachments.find((a) => a.role === "owner")!
+    expect(ownerAttachment.reconnectToken).toEqual(expect.any(String))
+
+    const fetched = await service.getSession(created.id)
+    expect(fetched.attachments.every((a) => a.reconnectToken === null)).toBe(true)
+  })
 })

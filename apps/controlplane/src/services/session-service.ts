@@ -387,7 +387,11 @@ export function createSessionService(deps: {
     async getSession(sessionId: string): Promise<SessionRecord> {
       const session = getRequiredSession(db, sessionId)
       const attachments = listAttachmentsForSession(db, sessionId)
-      return toSessionRecord(session, attachments)
+      const record = toSessionRecord(session, attachments)
+      return {
+        ...record,
+        attachments: record.attachments.map((a) => ({ ...a, reconnectToken: null })),
+      }
     },
 
     async closeSession(sessionId: string): Promise<SessionRecord> {
