@@ -2,16 +2,24 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import { createTestDb, resetTestDb } from "../src/persistence/db.js"
 import { createInstance } from "../src/persistence/repositories/instances.js"
+import { createPrincipal } from "../src/persistence/repositories/principals.js"
 import { listAttachmentsForSession } from "../src/persistence/repositories/attachments.js"
 import { listSessionsForInstance } from "../src/persistence/repositories/sessions.js"
 import {
+  SessionForbiddenError,
   SessionInvalidRequestError,
   createSessionService,
 } from "../src/services/session-service.js"
 
-function seedInstance(db: ReturnType<typeof createTestDb>, id = "inst_1"): void {
+function seedPrincipal(db: ReturnType<typeof createTestDb>, id = "owner_1"): void {
+  createPrincipal(db, { id, displayName: "Owner", isServerOwner: false, status: "active" })
+}
+
+function seedInstance(db: ReturnType<typeof createTestDb>, id = "inst_1", ownerId = "owner_1"): void {
+  seedPrincipal(db, ownerId)
   createInstance(db, {
     id,
+    ownerId,
     name: "phone-1",
     runtimeClass: "android-studio-emulator",
     templateId: "macos-android-studio:Medium_Phone",
@@ -62,6 +70,7 @@ describe("session service", () => {
       await expect(service.createSession({
         instanceId: "inst_1",
         ownerClientId,
+        requesterPrincipalId: "owner_1",
       })).rejects.toThrow("injected owner attachment failure")
 
       expect(listSessionsForInstance(db, "inst_1").map((session) => ({
@@ -85,6 +94,7 @@ describe("session service", () => {
     const created = await service.createSession({
       instanceId: "inst_1",
       ownerClientId: "owner-1",
+      requesterPrincipalId: "owner_1",
     })
     const ownerAttachment = created.attachments[0]
     if (ownerAttachment == null) {
@@ -131,6 +141,7 @@ describe("session service", () => {
     const created = await service.createSession({
       instanceId: "inst_1",
       ownerClientId: "owner-1",
+      requesterPrincipalId: "owner_1",
     })
     const joined = await service.joinSession({
       sessionId: created.id,
@@ -185,6 +196,7 @@ describe("session service", () => {
     const created = await service.createSession({
       instanceId: "inst_1",
       ownerClientId: "owner-1",
+      requesterPrincipalId: "owner_1",
     })
     const ownerAttachment = created.attachments[0]
     if (ownerAttachment == null) {
@@ -228,6 +240,7 @@ describe("session service", () => {
     const created = await service.createSession({
       instanceId: "inst_1",
       ownerClientId: "owner-1",
+      requesterPrincipalId: "owner_1",
     })
     const ownerAttachment = created.attachments[0]
     if (ownerAttachment == null) {
@@ -262,6 +275,7 @@ describe("session service", () => {
     const created = await service.createSession({
       instanceId: "inst_1",
       ownerClientId: "owner-1",
+      requesterPrincipalId: "owner_1",
     })
     const joined = await service.joinSession({
       sessionId: created.id,
@@ -290,5 +304,35 @@ describe("session service", () => {
         attachmentId: joined.id,
       }),
     ).rejects.toThrow(SessionInvalidRequestError)
+  })
+
+  it("creates a session for the instance's owner and binds the owner attachment to that principal", async () => {
+    const db = createTestDb()
+    seedInstance(db)
+    const service = createSessionService({ db, idleTtlMs: 300_000 })
+
+    const session = await service.createSession({
+      instanceId: "inst_1",
+      ownerClientId: "owner-client",
+      requesterPrincipalId: "owner_1",
+    })
+
+    const ownerAttachment = session.attachments.find((a) => a.role === "owner")
+    expect(ownerAttachment?.principalId).toBe("owner_1")
+  })
+
+  it("rejects createSession from a caller who does not own the instance", async () => {
+    const db = createTestDb()
+    seedInstance(db)
+    seedPrincipal(db, "stranger")
+    const service = createSessionService({ db, idleTtlMs: 300_000 })
+
+    await expect(
+      service.createSession({
+        instanceId: "inst_1",
+        ownerClientId: "owner-client",
+        requesterPrincipalId: "stranger",
+      }),
+    ).rejects.toBeInstanceOf(SessionForbiddenError)
   })
 })

@@ -20,11 +20,13 @@ export class SessionConflictError extends SessionServiceError {}
 export class SessionNotFoundError extends SessionServiceError {}
 export class AttachmentNotFoundError extends SessionServiceError {}
 export class SessionInvalidRequestError extends SessionServiceError {}
+export class SessionForbiddenError extends SessionServiceError {}
 
 export type SessionAttachmentRecord = {
   id: string
   sessionId: string
   clientId: string
+  principalId: string | null
   role: SessionRole
   restrictivePendingRole: AttachmentRow["restrictivePendingRole"] | null
   pendingTargetRole: AttachmentRow["pendingTargetRole"] | null
@@ -64,6 +66,7 @@ function toAttachmentRecord(row: AttachmentRow): SessionAttachmentRecord {
     id: row.id,
     sessionId: row.sessionId,
     clientId: row.clientId,
+    principalId: row.principalId ?? null,
     role: row.role,
     restrictivePendingRole,
     pendingTargetRole,
@@ -156,10 +159,17 @@ export function createSessionService(deps: {
     async createSession(input: {
       instanceId: string
       ownerClientId: string
+      requesterPrincipalId: string
     }): Promise<SessionRecord> {
       const instance = getInstanceById(db, input.instanceId)
       if (instance == null) {
         throw new SessionNotFoundError(`instance not found: ${input.instanceId}`)
+      }
+
+      if (instance.ownerId !== input.requesterPrincipalId) {
+        throw new SessionForbiddenError(
+          `principal ${input.requesterPrincipalId} does not own instance ${input.instanceId}`,
+        )
       }
 
       const existingSession = listSessionsForInstance(db, input.instanceId)
@@ -181,6 +191,7 @@ export function createSessionService(deps: {
           id: randomUUID(),
           sessionId,
           clientId: input.ownerClientId,
+          principalId: input.requesterPrincipalId,
           role: "owner",
           status: "connected",
           reconnectToken: randomUUID(),
