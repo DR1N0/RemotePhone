@@ -60,7 +60,7 @@ function createDependencies(options?: {
     })
   } as unknown as SessionService
   const instanceService = {
-    getManagedInstance: vi.fn().mockResolvedValue({
+    getManagedInstanceUnchecked: vi.fn().mockResolvedValue({
       id: instanceId,
       runtimeClass: "android-studio-emulator",
       runtimeHandle: options?.runtimeHandle === undefined

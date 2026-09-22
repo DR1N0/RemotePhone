@@ -100,7 +100,7 @@ export function createTransportService(deps: {
         throw new SessionInvalidRequestError(`attachment is not connected: ${attachment.id}`)
       }
 
-      const instance = await instanceService.getManagedInstance(session.instanceId)
+      const instance = await instanceService.getManagedInstanceUnchecked(session.instanceId)
       const runtimeHandle = instance.runtimeHandle
       if (runtimeHandle == null) {
         throw new SessionInvalidRequestError(`instance is not running: ${instance.id}`)
@@ -118,7 +118,7 @@ export function createTransportService(deps: {
 
     async syncAttachmentRole(input: AttachmentTransportInput): Promise<void> {
       const { attachment, session } = await getSessionAndAttachment(input)
-      const instance = await instanceService.getManagedInstance(session.instanceId)
+      const instance = await instanceService.getManagedInstanceUnchecked(session.instanceId)
 
       await callWorker(async () => await workerClient.updateTransportRole({
         instanceId: instance.id,
@@ -129,7 +129,7 @@ export function createTransportService(deps: {
 
     async destroyAttachmentTransport(input: AttachmentTransportInput): Promise<void> {
       const { attachment, session } = await getSessionAndAttachment(input)
-      const instance = await instanceService.getManagedInstance(session.instanceId)
+      const instance = await instanceService.getManagedInstanceUnchecked(session.instanceId)
 
       await callWorker(async () => await workerClient.destroyTransportSession({
         instanceId: instance.id,

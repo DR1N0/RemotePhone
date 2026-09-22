@@ -160,6 +160,10 @@ export function createInstanceService(deps: {
       return toManagedInstance(row)
     },
 
+    async getManagedInstanceUnchecked(id: string): Promise<ManagedInstanceRecord> {
+      return toManagedInstance(getRequiredInstance(db, id))
+    },
+
     async startManagedInstance(id: string, callerPrincipalId: string): Promise<ManagedInstanceRecord> {
       const row = getRequiredInstance(db, id)
       assertCanManageInstance(db, row, callerPrincipalId)
@@ -184,6 +188,46 @@ export function createInstanceService(deps: {
     async stopManagedInstance(id: string, callerPrincipalId: string): Promise<ManagedInstanceRecord> {
       const row = getRequiredInstance(db, id)
       assertCanManageInstance(db, row, callerPrincipalId)
+
+      if (row.runtimeHandle == null) {
+        updateInstanceLifecycle(db, {
+          id,
+          desiredState: "stopped",
+          observedState: "stopped",
+          runtimeHandle: null,
+          lastError: null,
+        })
+        return toManagedInstance(getRequiredInstance(db, id))
+      }
+
+      let response: Awaited<ReturnType<typeof workerClient.stopInstance>>
+      try {
+        response = await workerClient.stopInstance(id)
+      } catch (error) {
+        // Worker no longer has the handle — treat as already stopped
+        updateInstanceLifecycle(db, {
+          id,
+          desiredState: "stopped",
+          observedState: "stopped",
+          runtimeHandle: null,
+          lastError: null,
+        })
+        return toManagedInstance(getRequiredInstance(db, id))
+      }
+
+      updateInstanceLifecycle(db, {
+        id,
+        desiredState: "stopped",
+        observedState: response.state === "" ? "stopped" : response.state as InstanceRow["observedState"],
+        runtimeHandle: null,
+        lastError: response.lastError ?? null,
+      })
+
+      return toManagedInstance(getRequiredInstance(db, id))
+    },
+
+    async stopManagedInstanceUnchecked(id: string): Promise<ManagedInstanceRecord> {
+      const row = getRequiredInstance(db, id)
 
       if (row.runtimeHandle == null) {
         updateInstanceLifecycle(db, {

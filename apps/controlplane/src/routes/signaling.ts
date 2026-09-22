@@ -67,7 +67,7 @@ export function registerSignalingRoutes(
       if (attachment.status !== "connected") {
         throw new SessionInvalidRequestError(`attachment is not connected: ${attachment.id}`)
       }
-      const instance = await deps.instanceService.getManagedInstance(session.instanceId)
+      const instance = await deps.instanceService.getManagedInstanceUnchecked(session.instanceId)
       if (instance.runtimeHandle == null) {
         throw new SessionInvalidRequestError(`instance is not running: ${instance.id}`)
       }
@@ -94,7 +94,7 @@ export function registerSignalingRoutes(
       if (attachment == null) {
         throw new AttachmentNotFoundError(`attachment not found: ${input.attachmentId}`)
       }
-      const instance = await deps.instanceService.getManagedInstance(session.instanceId)
+      const instance = await deps.instanceService.getManagedInstanceUnchecked(session.instanceId)
       if (instance.runtimeHandle == null) {
         throw new SessionInvalidRequestError(`instance is not running: ${instance.id}`)
       }
