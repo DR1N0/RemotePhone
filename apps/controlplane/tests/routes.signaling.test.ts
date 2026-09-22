@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { createTestDb, resetTestDb } from "../src/persistence/db.js"
 import { createServer } from "../src/server.js"
+import { createAuthService } from "../src/services/auth-service.js"
 import { createInstanceService } from "../src/services/instance-service.js"
 import { createSessionService } from "../src/services/session-service.js"
 
@@ -64,6 +65,16 @@ function createWorkerClient() {
   }
 }
 
+async function claimOwnerAuth(app: ReturnType<typeof createServer>) {
+  const claimRes = await app.request("/api/v1/auth/claim", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ displayName: "Owner" }),
+  })
+  const { token } = await claimRes.json() as { token: string }
+  return { Authorization: `Bearer ${token}`, "content-type": "application/json" }
+}
+
 describe("signaling route", () => {
   beforeEach(() => {
     resetTestDb()
@@ -74,11 +85,13 @@ describe("signaling route", () => {
     const workerClient = createWorkerClient()
     const instanceService = createInstanceService({ db, workerClient })
     const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
-    const app = createServer({ workerClient, instanceService, sessionService })
+    const authService = createAuthService({ db })
+    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+    const auth = await claimOwnerAuth(app)
 
     const createInstanceRes = await app.request("/api/v1/instances", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: auth,
       body: JSON.stringify({
         name: "phone-1",
         templateId: "macos-android-studio:Medium_Phone",
@@ -101,12 +114,13 @@ describe("signaling route", () => {
 
     const startInstanceRes = await app.request(`/api/v1/instances/${createInstanceBody.instance.id}/start`, {
       method: "POST",
+      headers: auth,
     })
     expect(startInstanceRes.status).toBe(200)
 
     const createSessionRes = await app.request("/api/v1/sessions", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: auth,
       body: JSON.stringify({
         instanceId: createInstanceBody.instance.id,
         ownerClientId: "owner-1",
@@ -156,11 +170,13 @@ describe("signaling route", () => {
     const workerClient = createWorkerClient()
     const instanceService = createInstanceService({ db, workerClient })
     const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
-    const app = createServer({ workerClient, instanceService, sessionService })
+    const authService = createAuthService({ db })
+    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+    const auth = await claimOwnerAuth(app)
 
     const createInstanceRes = await app.request("/api/v1/instances", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: auth,
       body: JSON.stringify({
         name: "phone-1",
         templateId: "macos-android-studio:Medium_Phone",
@@ -183,11 +199,12 @@ describe("signaling route", () => {
 
     await app.request(`/api/v1/instances/${createInstanceBody.instance.id}/start`, {
       method: "POST",
+      headers: auth,
     })
 
     const createSessionRes = await app.request("/api/v1/sessions", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: auth,
       body: JSON.stringify({
         instanceId: createInstanceBody.instance.id,
         ownerClientId: "owner-1",
@@ -218,11 +235,13 @@ describe("signaling route", () => {
       const workerClient = createWorkerClient()
       const instanceService = createInstanceService({ db, workerClient })
       const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
-      const app = createServer({ workerClient, instanceService, sessionService })
+      const authService = createAuthService({ db })
+      const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+      const auth = await claimOwnerAuth(app)
 
       const createInstanceRes = await app.request("/api/v1/instances", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: auth,
         body: JSON.stringify({
           name: "phone-ice",
           templateId: "macos-android-studio:Medium_Phone",
@@ -245,11 +264,12 @@ describe("signaling route", () => {
 
       await app.request(`/api/v1/instances/${createInstanceBody.instance.id}/start`, {
         method: "POST",
+        headers: auth,
       })
 
       const createSessionRes = await app.request("/api/v1/sessions", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: auth,
         body: JSON.stringify({
           instanceId: createInstanceBody.instance.id,
           ownerClientId: "owner-ice",
@@ -328,11 +348,13 @@ describe("signaling route", () => {
     const workerClient = createWorkerClient()
     const instanceService = createInstanceService({ db, workerClient })
     const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
-    const app = createServer({ workerClient, instanceService, sessionService })
+    const authService = createAuthService({ db })
+    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+    const auth = await claimOwnerAuth(app)
 
     const createInstanceRes = await app.request("/api/v1/instances", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: auth,
       body: JSON.stringify({
         name: "phone-2",
         templateId: "macos-android-studio:Medium_Phone",
@@ -353,11 +375,11 @@ describe("signaling route", () => {
     })
     const createInstanceBody = await createInstanceRes.json() as { instance: { id: string } }
 
-    await app.request(`/api/v1/instances/${createInstanceBody.instance.id}/start`, { method: "POST" })
+    await app.request(`/api/v1/instances/${createInstanceBody.instance.id}/start`, { method: "POST", headers: auth })
 
     const createSessionRes = await app.request("/api/v1/sessions", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: auth,
       body: JSON.stringify({
         instanceId: createInstanceBody.instance.id,
         ownerClientId: "owner-2",
