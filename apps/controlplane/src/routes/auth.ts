@@ -34,24 +34,23 @@ const LOGIN_FAILURE_WINDOW_MS = 10 * 60 * 1000
 const MAX_TRACKED_LOGIN_KEYS = 10_000
 
 type LoginFailures = Map<string, number[]>
+export type AuthRouteDependencies = {
+  authService: AuthService
+  getClientAddress?: (c: Context) => string | undefined
+  now?: () => Date
+}
 
 function pruneLoginFailures(failures: LoginFailures, now: number): void {
   for (const [key, timestamps] of failures) {
     const recent = timestamps.filter((timestamp) => timestamp > now - LOGIN_FAILURE_WINDOW_MS)
-    if (recent.length === 0) {
-      failures.delete(key)
-    } else {
-      failures.set(key, recent)
-    }
+    if (recent.length === 0) failures.delete(key)
+    else failures.set(key, recent)
   }
 }
 
 function isLoginThrottled(failures: LoginFailures, key: string, now: number): boolean {
   const timestamps = failures.get(key)
-  if (timestamps == null) {
-    return false
-  }
-
+  if (timestamps == null) return false
   const recent = timestamps.filter((timestamp) => timestamp > now - LOGIN_FAILURE_WINDOW_MS)
   if (recent.length === 0) {
     failures.delete(key)
@@ -65,11 +64,8 @@ function recordLoginFailure(failures: LoginFailures, key: string, now: number): 
   pruneLoginFailures(failures, now)
   if (!failures.has(key) && failures.size >= MAX_TRACKED_LOGIN_KEYS) {
     const oldestKey = failures.keys().next().value
-    if (oldestKey != null) {
-      failures.delete(oldestKey)
-    }
+    if (oldestKey != null) failures.delete(oldestKey)
   }
-
   const timestamps = failures.get(key) ?? []
   timestamps.push(now)
   failures.set(key, timestamps)
@@ -83,14 +79,8 @@ function hasLocalSetupHost(host: string | undefined): boolean {
   )
 }
 
-export function registerAuthRoutes(
-  app: Hono,
-  deps: {
-    authService: AuthService
-    getClientAddress?: (c: Context) => string | undefined
-    now?: () => Date
-  },
-): void {
+/** Routes usable by both account surfaces. Client login intentionally has no source throttle. */
+export function registerCommonAuthRoutes(app: Hono, deps: AuthRouteDependencies, options: { sourceThrottle: boolean }): void {
   const { authService } = deps
   const getClientAddress = deps.getClientAddress ?? defaultGetClientAddress
   const now = deps.now ?? (() => new Date())
@@ -98,49 +88,17 @@ export function registerAuthRoutes(
   const failedUsernames: LoginFailures = new Map()
   const failedSources: LoginFailures = new Map()
 
-  app.get("/api/v1/auth/status", (c) => c.json(authService.getSetupStatus()))
-
-  app.post("/api/v1/auth/setup", async (c) => {
-    // A loopback peer and local Host provide defense in depth. A same-host proxy can
-    // still forge an upstream Host, so deployment must also deny this route outright.
-    const host = c.req.header("host") ?? new URL(c.req.url).host
-    if (!isLoopbackAddress(getClientAddress(c)) || !hasLocalSetupHost(host)) {
-      return c.json({ error: "first-admin setup must be performed locally" }, 403)
-    }
-
-    const parsed = setupAdminRequestSchema.safeParse(await c.req.json())
-    if (!parsed.success) {
-      return c.json({ error: "invalid setup request" }, 400)
-    }
-
-    try {
-      return c.json(await authService.setupAdmin(parsed.data), 201)
-    } catch (error) {
-      if (error instanceof BootstrapSecretInvalidError) {
-        return c.json({ error: "invalid bootstrap secret" }, 403)
-      }
-      if (error instanceof ServerAlreadyClaimedError) {
-        return c.json({ error: "server has already been claimed" }, 409)
-      }
-      throw error
-    }
-  })
-
   app.post("/api/v1/auth/login", async (c) => {
     const parsed = loginRequestSchema.safeParse(await c.req.json())
-    if (!parsed.success) {
-      return c.json({ error: "invalid login request" }, 400)
-    }
+    if (!parsed.success) return c.json({ error: "invalid login request" }, 400)
 
     const requestTime = now().getTime()
     const usernameKey = parsed.data.username
-    // getClientAddress reads the direct socket address. It deliberately ignores forwarded headers.
-    // Without a direct source address, only the normalized-username limit is trustworthy.
-    const sourceKey = getClientAddress(c)
-    if (
-      isLoginThrottled(failedUsernames, usernameKey, requestTime)
-      || (sourceKey != null && isLoginThrottled(failedSources, sourceKey, requestTime))
-    ) {
+    // The direct peer is never derived from forwarded headers. Public clients share a
+    // loopback peer behind the TLS proxy, so only the local app enables this limiter.
+    const sourceKey = options.sourceThrottle ? getClientAddress(c) : undefined
+    if (isLoginThrottled(failedUsernames, usernameKey, requestTime)
+      || (sourceKey != null && isLoginThrottled(failedSources, sourceKey, requestTime))) {
       return c.json({ error: "too many login attempts" }, 429)
     }
 
@@ -149,9 +107,7 @@ export function registerAuthRoutes(
     } catch (error) {
       if (error instanceof InvalidLoginError) {
         recordLoginFailure(failedUsernames, usernameKey, requestTime)
-        if (sourceKey != null) {
-          recordLoginFailure(failedSources, sourceKey, requestTime)
-        }
+        if (sourceKey != null) recordLoginFailure(failedSources, sourceKey, requestTime)
         return c.json({ error: "invalid username or password" }, 401)
       }
       throw error
@@ -166,13 +122,34 @@ export function registerAuthRoutes(
     await authService.revokeCurrentCredential(getAuthenticatedUser(c).credentialId)
     return c.body(null, 204)
   })
+}
+
+/** First-admin bootstrap and administrator-issued registration invitations are local-only. */
+export function registerAdminAuthRoutes(app: Hono, deps: AuthRouteDependencies): void {
+  const { authService } = deps
+  const getClientAddress = deps.getClientAddress ?? defaultGetClientAddress
+  const requireAuth = createBearerAuthMiddleware(authService)
+
+  app.get("/api/v1/auth/status", (c) => c.json(authService.getSetupStatus()))
+  app.post("/api/v1/auth/setup", async (c) => {
+    const host = c.req.header("host") ?? new URL(c.req.url).host
+    if (!isLoopbackAddress(getClientAddress(c)) || !hasLocalSetupHost(host)) {
+      return c.json({ error: "first-admin setup must be performed locally" }, 403)
+    }
+    const parsed = setupAdminRequestSchema.safeParse(await c.req.json())
+    if (!parsed.success) return c.json({ error: "invalid setup request" }, 400)
+    try {
+      return c.json(await authService.setupAdmin(parsed.data), 201)
+    } catch (error) {
+      if (error instanceof BootstrapSecretInvalidError) return c.json({ error: "invalid bootstrap secret" }, 403)
+      if (error instanceof ServerAlreadyClaimedError) return c.json({ error: "server has already been claimed" }, 409)
+      throw error
+    }
+  })
 
   app.post("/api/v1/auth/registration-invites", requireAuth, requireAccountAuth, async (c) => {
     const parsed = registrationInviteRequestSchema.safeParse(await c.req.json())
-    if (!parsed.success) {
-      return c.json({ error: "invalid registration invitation request" }, 400)
-    }
-
+    if (!parsed.success) return c.json({ error: "invalid registration invitation request" }, 400)
     try {
       const caller = getAuthenticatedUser(c)
       return c.json(await authService.createRegistrationInvite({
@@ -182,64 +159,48 @@ export function registerAuthRoutes(
         ttlMs: parsed.data.ttlMs,
       }), 201)
     } catch (error) {
-      if (error instanceof NotAdminError) {
-        return c.json({ error: "only an active admin may issue registration invitations" }, 403)
-      }
+      if (error instanceof NotAdminError) return c.json({ error: "only an active admin may issue registration invitations" }, 403)
       throw error
     }
   })
+}
+
+/** Public client enrollment and self-service credential routes. */
+export function registerClientAuthRoutes(app: Hono, deps: AuthRouteDependencies): void {
+  const { authService } = deps
+  const requireAuth = createBearerAuthMiddleware(authService)
 
   app.post("/api/v1/auth/register", async (c) => {
     const parsed = registerRequestSchema.safeParse(await c.req.json())
-    if (!parsed.success) {
-      return c.json({ error: "invalid registration request" }, 400)
-    }
-
+    if (!parsed.success) return c.json({ error: "invalid registration request" }, 400)
     try {
       return c.json(await authService.register({ ...parsed.data, requestId: randomUUID() }), 201)
     } catch (error) {
-      if (error instanceof UsernameConflictError) {
-        return c.json({ error: "username is already registered" }, 409)
-      }
-      if (error instanceof RegistrationInviteInvalidError || error instanceof AuthServiceError) {
-        return c.json({ error: "registration failed" }, 400)
-      }
+      if (error instanceof UsernameConflictError) return c.json({ error: "username is already registered" }, 409)
+      if (error instanceof RegistrationInviteInvalidError || error instanceof AuthServiceError) return c.json({ error: "registration failed" }, 400)
       throw error
     }
   })
 
   app.post("/api/v1/auth/enroll", requireAuth, requireAccountAuth, async (c) => {
     const parsed = enrollRequestSchema.safeParse(await c.req.json())
-    if (!parsed.success) {
-      return c.json({ error: "invalid enrollment request" }, 400)
-    }
-
+    if (!parsed.success) return c.json({ error: "invalid enrollment request" }, 400)
     try {
-      return c.json({ user: await authService.enrollLegacy({
-        userId: getAuthenticatedUser(c).userId,
-        ...parsed.data,
-      }) })
+      return c.json({ user: await authService.enrollLegacy({ userId: getAuthenticatedUser(c).userId, ...parsed.data }) })
     } catch (error) {
-      if (error instanceof LegacyEnrollmentError || error instanceof AuthServiceError) {
-        return c.json({ error: "legacy enrollment failed" }, 400)
-      }
+      if (error instanceof LegacyEnrollmentError || error instanceof AuthServiceError) return c.json({ error: "legacy enrollment failed" }, 400)
       throw error
     }
   })
 
   app.post("/api/v1/auth/pairing-invites", (c) => c.json({ error: "pairing invitations retired" }, 410))
   app.post("/api/v1/auth/pairing-invites/redeem", (c) => c.json({ error: "pairing invitation redemption retired" }, 410))
-
   app.post("/api/v1/auth/credentials/:id/revoke", requireAuth, requireAccountAuth, async (c) => {
-    const { userId } = getAuthenticatedUser(c)
     try {
-      await authService.revokeCredential({ requesterUserId: userId, credentialId: c.req.param("id") })
+      await authService.revokeCredential({ requesterUserId: getAuthenticatedUser(c).userId, credentialId: c.req.param("id") })
       return c.body(null, 204)
     } catch (error) {
-      if (error instanceof CredentialNotFoundError) {
-        return c.json({ error: "credential not found" }, 404)
-      }
-      if (error instanceof Error && error.message.includes("only be revoked by its own user")) {
+      if (error instanceof CredentialNotFoundError || (error instanceof Error && error.message.includes("only be revoked by its own user"))) {
         return c.json({ error: "credential not found" }, 404)
       }
       throw error

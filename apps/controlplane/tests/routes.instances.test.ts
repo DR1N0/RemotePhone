@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import { createTestDb, resetTestDb } from "../src/persistence/db.js"
-import { createServer } from "../src/server.js"
+import { createClientApiServer } from "../src/server.js"
 import { createAuthService } from "../src/services/auth-service.js"
 import { createInstanceService } from "../src/services/instance-service.js"
 import { createSessionService } from "../src/services/session-service.js"
-import { createAdminAuthFixture, setupAdmin } from "./helpers/admin-auth.js"
+import { createAdminAuthFixture, setupAdminInService } from "./helpers/admin-auth.js"
 
 function createWorkerClient() {
   return {
@@ -40,7 +40,7 @@ const baseInput = {
   launchConfig: { headless: true, readOnly: true, wipeData: false },
 }
 
-const adminAuthFixtures = new WeakMap<object, ReturnType<typeof createAdminAuthFixture>>()
+const adminAuthFixtures = new WeakMap<object, { fixture: ReturnType<typeof createAdminAuthFixture>; authService: ReturnType<typeof createAuthService> }>()
 const temporaryFixtures: Array<ReturnType<typeof createAdminAuthFixture>> = []
 
 function buildApp() {
@@ -51,7 +51,7 @@ function buildApp() {
   const workerClient = createWorkerClient()
   const instanceService = createInstanceService({ db, workerClient })
   const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
-  const app = createServer({
+  const app = createClientApiServer({
     workerClient,
     instanceService,
     sessionService,
@@ -59,25 +59,27 @@ function buildApp() {
     db,
     getClientAddress: () => "127.0.0.1",
   })
-  adminAuthFixtures.set(app, fixture)
+  adminAuthFixtures.set(app, { fixture, authService })
   return { app, db, authService }
 }
 
 async function claim(app: ReturnType<typeof buildApp>["app"]) {
-  const fixture = adminAuthFixtures.get(app)
-  if (fixture == null) {
-    throw new Error("missing admin auth fixture")
-  }
-  return await setupAdmin(app, fixture)
+  const seeded = adminAuthFixtures.get(app)
+  if (seeded == null) throw new Error("missing admin auth fixture")
+  return await setupAdminInService(seeded.authService, seeded.fixture)
 }
 
 async function registerInvitedUser(app: ReturnType<typeof buildApp>["app"], ownerToken: string, username = "registered_user") {
-  const inviteRes = await app.request("/api/v1/auth/registration-invites", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ ttlMs: 30 * 60_000 }),
+  const seeded = adminAuthFixtures.get(app)
+  if (seeded == null) throw new Error("missing admin auth fixture")
+  const caller = await seeded.authService.authenticate(ownerToken)
+  if (caller == null) throw new Error("missing owner credential")
+  const { token: inviteToken } = await seeded.authService.createRegistrationInvite({
+    actorUserId: caller.userId,
+    actorCredentialId: caller.credentialId,
+    requestId: "test-registration-invite",
+    ttlMs: 30 * 60_000,
   })
-  const { token: inviteToken } = await inviteRes.json() as { token: string }
   const registerRes = await app.request("/api/v1/auth/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -199,12 +201,19 @@ describe("instance routes", () => {
     expect(second.status).toBe(409)
   })
 
-  it("lets an admin operate another user's instance without becoming its session owner", async () => {
+  it("keeps an admin credential owner-only on generic instance routes and session creation", async () => {
     const { app } = buildApp()
     const { token: adminToken } = await claim(app)
     const { token: ownerToken } = await registerInvitedUser(app, adminToken)
     const ownerAuth = { Authorization: `Bearer ${ownerToken}`, "content-type": "application/json" }
     const adminAuth = { Authorization: `Bearer ${adminToken}`, "content-type": "application/json" }
+
+    const adminInstanceRes = await app.request("/api/v1/instances", {
+      method: "POST",
+      headers: adminAuth,
+      body: JSON.stringify({ ...baseInput, name: "admin-instance" }),
+    })
+    const adminInstance = await adminInstanceRes.json() as { instance: { id: string } }
 
     const createRes = await app.request("/api/v1/instances", {
       method: "POST",
@@ -214,9 +223,12 @@ describe("instance routes", () => {
     expect(createRes.status).toBe(201)
     const { instance } = await createRes.json() as { instance: { id: string } }
 
-    expect((await app.request(`/api/v1/instances/${instance.id}`, { headers: adminAuth })).status).toBe(200)
-    expect((await app.request(`/api/v1/instances/${instance.id}/start`, { method: "POST", headers: adminAuth })).status).toBe(200)
-    expect((await app.request(`/api/v1/instances/${instance.id}/stop`, { method: "POST", headers: adminAuth })).status).toBe(200)
+    const listRes = await app.request("/api/v1/instances", { headers: adminAuth })
+    expect((await listRes.json() as { instances: Array<{ id: string }> }).instances.map(({ id }) => id)).toEqual([adminInstance.instance.id])
+    expect((await app.request(`/api/v1/instances/${instance.id}`, { headers: adminAuth })).status).toBe(403)
+    expect((await app.request(`/api/v1/instances/${instance.id}/start`, { method: "POST", headers: adminAuth })).status).toBe(403)
+    expect((await app.request(`/api/v1/instances/${instance.id}/stop`, { method: "POST", headers: adminAuth })).status).toBe(403)
+    expect((await app.request(`/api/v1/instances/${instance.id}`, { method: "DELETE", headers: adminAuth })).status).toBe(403)
 
     const sessionRes = await app.request("/api/v1/sessions", {
       method: "POST",
@@ -224,8 +236,6 @@ describe("instance routes", () => {
       body: JSON.stringify({ instanceId: instance.id, ownerClientId: "admin-client" }),
     })
     expect(sessionRes.status).toBe(403)
-
-    expect((await app.request(`/api/v1/instances/${instance.id}`, { method: "DELETE", headers: adminAuth })).status).toBe(204)
   })
 
   it("rejects attachment-scoped credentials on every instance route", async () => {

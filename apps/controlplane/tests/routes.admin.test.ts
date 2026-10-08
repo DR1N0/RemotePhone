@@ -7,7 +7,7 @@ import { createCredential, getCredentialByTokenHash } from "../src/persistence/r
 import { createInstance } from "../src/persistence/repositories/instances.js"
 import { createSession } from "../src/persistence/repositories/sessions.js"
 import { createUser, getUserById } from "../src/persistence/repositories/users.js"
-import { createServer } from "../src/server.js"
+import { createAdminServer } from "../src/server.js"
 import { createAdminService } from "../src/services/admin-service.js"
 import { createAuthService } from "../src/services/auth-service.js"
 import { createInstanceService } from "../src/services/instance-service.js"
@@ -41,7 +41,7 @@ function buildApp() {
   const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
   const adminService = createAdminService({ db })
   return {
-    app: createServer({ workerClient, authService, adminService, instanceService, sessionService, getClientAddress: () => "127.0.0.1" }),
+    app: createAdminServer({ workerClient, authService, adminService, instanceService, sessionService, getClientAddress: () => "127.0.0.1" }),
     db,
     fixture,
     authService,
@@ -153,7 +153,7 @@ describe("admin routes", () => {
       method: "POST",
       headers: { Authorization: `Bearer ${admin.token}`, "content-type": "application/json" },
       body: JSON.stringify({ sessionId: "session_one", attachmentId: "guest_attachment", sdpOffer: "v=0" }),
-    })).status).toBe(403)
+    })).status).toBe(404)
   })
 
   it("lists only safe registered and admin account metadata with account-admin authorization", async () => {
@@ -379,6 +379,87 @@ describe("admin routes", () => {
     expect(JSON.stringify(body)).not.toContain("private-worker")
     expect(JSON.stringify(body)).not.toContain("stateDataRef")
     expect(JSON.stringify(body)).not.toContain("runtimeHandle")
+  })
+
+  it("uses local admin lifecycle routes for cross-owner operations with safe responses and attributed audits", async () => {
+    const { app, db, fixture, authService, workerClient } = buildApp()
+    const admin = await setupAdmin(app, fixture)
+    createUser(db, {
+      id: "instance_owner",
+      displayName: "Instance Owner",
+      userType: "registered",
+      username: "instance_owner",
+      passwordHash: null,
+      enrollmentRequired: false,
+      isServerOwner: false,
+      status: "active",
+    })
+    createInstance(db, {
+      id: "owner_instance",
+      ownerId: "instance_owner",
+      name: "private phone",
+      runtimeClass: "android-studio-emulator",
+      templateId: "template",
+      placementPolicy: { kind: "local-only" },
+      resourceProfile: { cpuMillicores: 1000, memoryMb: 4096, diskMb: 8192, accelerationMode: "auto", streamProfile: "prototype" },
+      launchConfig: { headless: true, readOnly: true, wipeData: false },
+      desiredState: "stopped",
+      observedState: "stopped",
+      runtimeHandle: null,
+      stateDataRef: "private-instance-data",
+      lastError: null,
+    })
+    workerClient.startInstance.mockResolvedValue({ state: "starting", handle: { workerId: "private-worker", pid: 1234 } })
+    workerClient.stopInstance.mockResolvedValue({ state: "stopped", handle: { workerId: "private-worker", pid: 1234 } })
+    const ownerToken = authService.issueAccountCredential("instance_owner", "owner-client")
+    const adminHeaders = { Authorization: `Bearer ${admin.token}` }
+
+    expect((await app.request("/api/v1/admin/instances/owner_instance/start", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    })).status).toBe(403)
+
+    const started = await app.request("/api/v1/admin/instances/owner_instance/start", { method: "POST", headers: adminHeaders })
+    expect(started.status).toBe(200)
+    const startedBody = await started.json()
+    expect(startedBody).toEqual({ instance: expect.objectContaining({
+      id: "owner_instance", ownerId: "instance_owner", observedState: "starting",
+    }) })
+    expect(JSON.stringify(startedBody)).not.toContain("private-instance-data")
+    expect(JSON.stringify(startedBody)).not.toContain("private-worker")
+
+    const stopped = await app.request("/api/v1/admin/instances/owner_instance/stop", { method: "POST", headers: adminHeaders })
+    expect(stopped.status).toBe(200)
+    expect(JSON.stringify(await stopped.json())).not.toContain("private-worker")
+    expect(workerClient.startInstance).toHaveBeenCalledTimes(1)
+    expect(workerClient.stopInstance).toHaveBeenCalledTimes(1)
+
+    expect((await app.request("/api/v1/admin/instances/owner_instance", { method: "DELETE", headers: adminHeaders })).status).toBe(204)
+    expect((await app.request("/api/v1/instances/owner_instance", { headers: adminHeaders })).status).toBe(404)
+
+    const audit = await app.request("/api/v1/admin/audit?limit=20", { headers: adminHeaders })
+    const auditEvents = (await audit.json() as { items: Array<Record<string, unknown>> }).items
+    const adminCredential = getCredentialByTokenHash(db, hashToken(admin.token))
+    for (const action of ["instance.start", "instance.stop", "instance.delete"]) {
+      const events = auditEvents.filter((event) => event.action === action)
+      expect(events).not.toEqual([])
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          targetId: "owner_instance",
+          actorUserId: admin.user.id,
+          actorCredentialId: adminCredential?.id,
+          requestId: expect.any(String),
+        }),
+      ]))
+      expect(new Set(events.map((event) => event.requestId)).size).toBe(1)
+    }
+    expect(auditEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "instance.start", outcome: "attempt" }),
+      expect.objectContaining({ action: "instance.start", outcome: "success" }),
+      expect.objectContaining({ action: "instance.stop", outcome: "attempt" }),
+      expect.objectContaining({ action: "instance.stop", outcome: "success" }),
+      expect.objectContaining({ action: "instance.delete", outcome: "success" }),
+    ]))
   })
 
   it("rejects a registered user's administration requests", async () => {

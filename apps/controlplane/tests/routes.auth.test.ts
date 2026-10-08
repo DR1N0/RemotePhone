@@ -7,29 +7,51 @@ import { getCredentialByTokenHash } from "../src/persistence/repositories/creden
 import { createInstance } from "../src/persistence/repositories/instances.js"
 import { createSession } from "../src/persistence/repositories/sessions.js"
 import { countAdmins, createUser, getUserById, listUsers } from "../src/persistence/repositories/users.js"
-import { createServer } from "../src/server.js"
+import { createAdminServer, createClientApiServer } from "../src/server.js"
 import { hashPassword } from "../src/services/password.js"
 import { createAdminService } from "../src/services/admin-service.js"
 import { createAuthService } from "../src/services/auth-service.js"
+import { createInstanceService } from "../src/services/instance-service.js"
 import { hashToken } from "../src/services/token.js"
 import { createAdminAuthFixture, setupAdmin } from "./helpers/admin-auth.js"
 
-const workerClient = { listWorkers: async () => [], listTemplates: async () => [] }
+const workerClient = {
+  listWorkers: async () => [],
+  listTemplates: async () => [],
+  startInstance: async () => ({ state: "starting", handle: { workerId: "local", pid: 1 } }),
+  inspectInstance: async () => ({ state: "running", handle: { workerId: "local", pid: 1 } }),
+  stopInstance: async () => ({ state: "stopped", handle: { workerId: "local", pid: 1 } }),
+  createTransportSession: async () => ({
+    sessionId: "session", attachmentId: "attachment", instanceId: "instance", runtimeClass: "android-studio-emulator" as const,
+    mode: "webrtc" as const, status: "ready" as const, workerBaseUrl: "", sessionToken: "",
+  }),
+  updateTransportRole: async () => {},
+  destroyTransportSession: async () => {},
+  forwardOffer: async () => ({ sdpAnswer: "" }),
+  forwardICECandidate: async () => {},
+}
 const fixtures: Array<{ cleanup: () => void }> = []
 
-function buildApp(overrides: { getClientAddress?: () => string | undefined } = {}) {
+function buildApp(
+  overrides: { getClientAddress?: () => string | undefined } = {},
+  surface: "admin" | "client" = "admin",
+) {
   const db = createTestDb()
   const fixture = createAdminAuthFixture()
   fixtures.push(fixture)
   const authService = createAuthService({ db, bootstrapSecretPath: fixture.bootstrapSecretPath })
   const adminService = createAdminService({ db })
-  const app = createServer({
+  const instanceService = createInstanceService({ db, workerClient })
+  const deps = {
     workerClient,
     authService,
     adminService,
+    instanceService,
     getClientAddress: overrides.getClientAddress ?? (() => "127.0.0.1"),
-  })
-  return { app, authService, db, fixture }
+  }
+  const app = surface === "admin" ? createAdminServer(deps) : createClientApiServer(deps)
+  const clientApp = createClientApiServer(deps)
+  return { app, clientApp, authService, db, fixture }
 }
 
 async function login(app: ReturnType<typeof buildApp>["app"], input: Record<string, string> = {}) {
@@ -227,17 +249,17 @@ describe("auth routes", () => {
   })
 
   it("revokes a caller's own account credential through the credential revoke route", async () => {
-    const { app, authService, fixture } = buildApp()
+    const { app, clientApp, authService, fixture } = buildApp()
     await setupAdmin(app, fixture)
     const loginResponse = await login(app)
     const token = (await loginResponse.json() as { token: string }).token
     const authenticated = await authService.authenticate(token)
     expect(authenticated).not.toBeNull()
-    expect((await app.request(`/api/v1/auth/credentials/${authenticated!.credentialId}/revoke`, {
+    expect((await clientApp.request(`/api/v1/auth/credentials/${authenticated!.credentialId}/revoke`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
     })).status).toBe(204)
-    expect((await app.request("/api/v1/auth/me", {
+    expect((await clientApp.request("/api/v1/auth/me", {
       headers: { Authorization: `Bearer ${token}` },
     })).status).toBe(401)
   })
@@ -274,7 +296,7 @@ describe("auth routes", () => {
   })
 
   it("requires account scope for credential revocation and ban routes", async () => {
-    const { app, authService, db, fixture } = buildApp()
+    const { app, clientApp, authService, db, fixture } = buildApp()
     const owner = await setupAdmin(app, fixture)
     createInstance(db, {
       id: "instance-1",
@@ -313,7 +335,7 @@ describe("auth routes", () => {
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     })
 
-    expect((await app.request("/api/v1/auth/credentials/does-not-exist/revoke", {
+    expect((await clientApp.request("/api/v1/auth/credentials/does-not-exist/revoke", {
       method: "POST",
       headers: { Authorization: `Bearer ${attachmentToken}` },
     })).status).toBe(403)
@@ -324,10 +346,10 @@ describe("auth routes", () => {
   })
 
   it("issues hashed registration invitations and atomically registers one password account", async () => {
-    const { app, db, fixture } = buildApp()
+    const { app, clientApp, db, fixture } = buildApp()
     const admin = await setupAdmin(app, fixture)
 
-    expect((await app.request("/api/v1/auth/register", {
+    expect((await clientApp.request("/api/v1/auth/register", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ username: "new_user", password: "long-password-for-test", deviceLabel: "phone" }),
@@ -341,7 +363,7 @@ describe("auth routes", () => {
     expect(invitation.status).toBe(201)
     const { token } = await invitation.json() as { token: string }
 
-    const register = (username: string) => app.request("/api/v1/auth/register", {
+    const register = (username: string) => clientApp.request("/api/v1/auth/register", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ inviteToken: token, username, password: "long-password-for-test", deviceLabel: "phone" }),
@@ -354,7 +376,7 @@ describe("auth routes", () => {
   })
 
   it("allows a legacy credential to enroll only its authenticated user", async () => {
-    const { app, authService, db } = buildApp()
+    const { clientApp, authService, db } = buildApp()
     for (const id of ["legacy_one", "legacy_two"]) {
       createUser(db, {
         id,
@@ -369,7 +391,7 @@ describe("auth routes", () => {
     }
     const token = authService.issueAccountCredential("legacy_one", "legacy-client")
 
-    const response = await app.request("/api/v1/auth/enroll", {
+    const response = await clientApp.request("/api/v1/auth/enroll", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ username: "legacy_one", password: "long-password-for-test" }),
@@ -380,7 +402,7 @@ describe("auth routes", () => {
   })
 
   it("rejects legacy enrollment with an already-taken normalized username without changing either user", async () => {
-    const { app, authService, db } = buildApp()
+    const { clientApp, authService, db } = buildApp()
     createUser(db, {
       id: "legacy_user",
       displayName: "Legacy User",
@@ -403,7 +425,7 @@ describe("auth routes", () => {
     })
     const token = authService.issueAccountCredential("legacy_user", "legacy-client")
 
-    const response = await app.request("/api/v1/auth/enroll", {
+    const response = await clientApp.request("/api/v1/auth/enroll", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ username: "TAKEN_NAME", password: "long-password-for-test" }),
@@ -419,9 +441,9 @@ describe("auth routes", () => {
   })
 
   it("retires passwordless pairing invitation routes", async () => {
-    const { app } = buildApp()
-    expect((await app.request("/api/v1/auth/pairing-invites", { method: "POST" })).status).toBe(410)
-    expect((await app.request("/api/v1/auth/pairing-invites/redeem", { method: "POST" })).status).toBe(410)
+    const { clientApp } = buildApp()
+    expect((await clientApp.request("/api/v1/auth/pairing-invites", { method: "POST" })).status).toBe(410)
+    expect((await clientApp.request("/api/v1/auth/pairing-invites/redeem", { method: "POST" })).status).toBe(410)
   })
 
   it("does not trust forwarded loopback headers and retires the legacy claim route", async () => {

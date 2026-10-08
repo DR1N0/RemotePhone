@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { createTestDb, resetTestDb } from "../src/persistence/db.js"
 import { createUser } from "../src/persistence/repositories/users.js"
-import { createServer } from "../src/server.js"
+import { createClientApiServer } from "../src/server.js"
 import { createAuthService } from "../src/services/auth-service.js"
 import { createInstanceService } from "../src/services/instance-service.js"
 import { createSessionService } from "../src/services/session-service.js"
-import { createAdminAuthFixture, setupAdmin } from "./helpers/admin-auth.js"
+import { createAdminAuthFixture, setupAdminInService } from "./helpers/admin-auth.js"
 
 const temporaryFixtures: Array<ReturnType<typeof createAdminAuthFixture>> = []
 
@@ -45,8 +45,8 @@ async function createAppWithSession() {
   const authService = createAuthService({ db, bootstrapSecretPath: fixture.bootstrapSecretPath })
   const instanceService = createInstanceService({ db, workerClient })
   const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
-  const app = createServer({ workerClient, instanceService, sessionService, authService, db, getClientAddress: () => "127.0.0.1" })
-  const owner = await setupAdmin(app, fixture)
+  const app = createClientApiServer({ workerClient, instanceService, sessionService, authService, db, getClientAddress: () => "127.0.0.1" })
+  const owner = await setupAdminInService(authService, fixture)
   const auth = { Authorization: `Bearer ${owner.token}`, "content-type": "application/json" }
   const createInstance = await app.request("/api/v1/instances", {
     method: "POST",
@@ -82,7 +82,7 @@ async function createAppWithSession() {
 }
 
 async function redeemSessionAttachment(input: {
-  app: ReturnType<typeof createServer>
+  app: ReturnType<typeof createClientApiServer>
   sessionId: string
   ownerAuth: HeadersInit
   mode: "guest" | "registered"

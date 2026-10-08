@@ -3,12 +3,12 @@ import os from "node:os"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
-import { createServer } from "../src/server.js"
+import { createAdminServer } from "../src/server.js"
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url))
 
 function createApp(adminDistPath: string, enableSessionDiagnostic = false) {
-  return createServer({
+  return createAdminServer({
     workerClient: { listWorkers: async () => [], listTemplates: async () => [] },
     adminDistPath,
     enableSessionDiagnostic,

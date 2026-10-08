@@ -69,6 +69,29 @@ describe("admin API client", () => {
     expect(fetch).toHaveBeenNthCalledWith(2, "/api/v1/auth/registration-invites", expect.objectContaining({ method: "POST" }))
   })
 
+  it("uses local admin lifecycle endpoints and returns only safe instance metadata", async () => {
+    adminSession.setToken("admin-token")
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify({ instance: {
+        id: "instance-1", ownerId: "owner-1", name: "Phone", runtimeClass: "android", templateId: "pixel",
+        desiredState: "running", observedState: "running", lastError: null, createdAt: "2026-10-08", updatedAt: "2026-10-08",
+      } })))
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify({ instance: {
+        id: "instance-1", ownerId: "owner-1", name: "Phone", runtimeClass: "android", templateId: "pixel",
+        desiredState: "stopped", observedState: "stopped", lastError: null, createdAt: "2026-10-08", updatedAt: "2026-10-08",
+      } })))
+      .mockResolvedValueOnce(mockResponse(204))
+    vi.stubGlobal("fetch", fetch)
+
+    await expect(api.startInstance("instance-1")).resolves.toMatchObject({ id: "instance-1", ownerId: "owner-1" })
+    await expect(api.stopInstance("instance-1")).resolves.toMatchObject({ id: "instance-1", observedState: "stopped" })
+    await expect(api.deleteInstance("instance-1")).resolves.toBeUndefined()
+
+    expect(fetch).toHaveBeenNthCalledWith(1, "/api/v1/admin/instances/instance-1/start", expect.objectContaining({ method: "POST" }))
+    expect(fetch).toHaveBeenNthCalledWith(2, "/api/v1/admin/instances/instance-1/stop", expect.objectContaining({ method: "POST" }))
+    expect(fetch).toHaveBeenNthCalledWith(3, "/api/v1/admin/instances/instance-1", expect.objectContaining({ method: "DELETE" }))
+  })
+
   it("uses a supplied attachment bearer for diagnostics instead of the admin account token", async () => {
     adminSession.setToken("admin-token")
     const fetch = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify({ session: { id: "session-1" } })))

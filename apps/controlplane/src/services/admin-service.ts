@@ -54,7 +54,9 @@ function toAdminCredentialDto(row: CredentialRow): AdminCredentialDto {
   }
 }
 
-function toAdminInstanceDto(row: InstanceRow): AdminInstanceDto {
+export function toAdminInstanceDto(row: Pick<InstanceRow,
+  "id" | "ownerId" | "name" | "runtimeClass" | "templateId" | "desiredState" | "observedState" | "lastError" | "createdAt" | "updatedAt"
+>): AdminInstanceDto {
   return {
     id: row.id,
     ownerId: row.ownerId,

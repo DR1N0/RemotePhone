@@ -1,5 +1,8 @@
 export type ControlPlaneEnv = {
+  /** Public client API port; retained for the existing TLS proxy upstream. */
   port: number
+  /** Loopback-only WebUI and administration API port. */
+  adminPort: number
   listenHostname: "127.0.0.1"
   workerBaseUrl: string
   databasePath: string
@@ -38,8 +41,15 @@ function parsePositiveInteger(value: string | undefined, fallback: number, name:
 }
 
 export function loadEnv(env: NodeJS.ProcessEnv = process.env): ControlPlaneEnv {
+  const port = parsePort(env.MAKO_CONTROLPLANE_PORT ?? env.PORT, 3000)
+  const adminPort = parsePort(env.MAKO_ADMIN_PORT, 3001)
+  if (port === adminPort) {
+    throw new Error(`Client and admin ports must differ: ${port}`)
+  }
+
   return {
-    port: parsePort(env.MAKO_CONTROLPLANE_PORT ?? env.PORT, 3000),
+    port,
+    adminPort,
     listenHostname: "127.0.0.1",
     workerBaseUrl: (env.MAKO_WORKER_BASE_URL ?? "http://127.0.0.1:7780").replace(/\/$/, ""),
     databasePath: env.MAKO_CONTROLPLANE_DB_PATH ?? "./data/mako.db",

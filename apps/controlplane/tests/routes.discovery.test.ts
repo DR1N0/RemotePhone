@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { createServer } from "../src/server.js"
+import { createAdminServer, createClientApiServer } from "../src/server.js"
+import { createTestDb } from "../src/persistence/db.js"
+import { createAuthService } from "../src/services/auth-service.js"
+import { createAdminAuthFixture, setupAdminInService } from "./helpers/admin-auth.js"
 
 describe("control-plane discovery routes", () => {
   it("returns control-plane metadata at the root endpoint", async () => {
-    const app = createServer({
+    const app = createAdminServer({
       workerClient: {
         listWorkers: vi.fn().mockResolvedValue([]),
         listTemplates: vi.fn().mockResolvedValue([]),
@@ -21,7 +24,7 @@ describe("control-plane discovery routes", () => {
   })
 
   it("returns ok from the health endpoint", async () => {
-    const app = createServer({
+    const app = createAdminServer({
       workerClient: {
         listWorkers: vi.fn().mockResolvedValue([]),
         listTemplates: vi.fn().mockResolvedValue([]),
@@ -53,7 +56,7 @@ describe("control-plane discovery routes", () => {
       ]),
       listTemplates: vi.fn().mockResolvedValue([]),
     }
-    const app = createServer({ workerClient })
+    const app = createAdminServer({ workerClient })
 
     const res = await app.request("/api/v1/workers")
 
@@ -93,11 +96,16 @@ describe("control-plane discovery routes", () => {
         },
       ]),
     }
-    const app = createServer({ workerClient })
+    const db = createTestDb()
+    const fixture = createAdminAuthFixture()
+    try {
+      const authService = createAuthService({ db, bootstrapSecretPath: fixture.bootstrapSecretPath })
+      const app = createClientApiServer({ workerClient, authService })
+      expect((await app.request("/api/v1/templates")).status).toBe(401)
+      const { token } = await setupAdminInService(authService, fixture)
+      const res = await app.request("/api/v1/templates", { headers: { Authorization: `Bearer ${token}` } })
 
-    const res = await app.request("/api/v1/templates")
-
-    expect(res.status).toBe(200)
+      expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
       templates: [
         {
@@ -110,7 +118,10 @@ describe("control-plane discovery routes", () => {
         },
       ],
     })
-    expect(workerClient.listTemplates).toHaveBeenCalledTimes(1)
-    expect(workerClient.listWorkers).not.toHaveBeenCalled()
+      expect(workerClient.listTemplates).toHaveBeenCalledTimes(1)
+      expect(workerClient.listWorkers).not.toHaveBeenCalled()
+    } finally {
+      fixture.cleanup()
+    }
   })
 })

@@ -3,12 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createTestDb, resetTestDb } from "../src/persistence/db.js"
 import { getCredentialByTokenHash } from "../src/persistence/repositories/credentials.js"
 import { createUser, getUserById, listUsers } from "../src/persistence/repositories/users.js"
-import { createServer } from "../src/server.js"
+import { createClientApiServer } from "../src/server.js"
 import { createAuthService } from "../src/services/auth-service.js"
 import { createInstanceService } from "../src/services/instance-service.js"
 import { createSessionService } from "../src/services/session-service.js"
 import { hashToken } from "../src/services/token.js"
-import { createAdminAuthFixture, setupAdmin } from "./helpers/admin-auth.js"
+import { createAdminAuthFixture, setupAdminInService } from "./helpers/admin-auth.js"
 
 const temporaryFixtures: Array<ReturnType<typeof createAdminAuthFixture>> = []
 
@@ -69,7 +69,7 @@ async function createAppWithSession() {
   const authService = createAuthService({ db, bootstrapSecretPath: fixture.bootstrapSecretPath })
 
   const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
-  const app = createServer({
+  const app = createClientApiServer({
     workerClient,
     instanceService,
     sessionService,
@@ -78,7 +78,7 @@ async function createAppWithSession() {
     baseUrl: "http://localhost:3000",
     getClientAddress: () => "127.0.0.1",
   })
-  const owner = await setupAdmin(app, fixture)
+  const owner = await setupAdminInService(authService, fixture)
   const auth = { Authorization: `Bearer ${owner.token}`, "content-type": "application/json" }
 
   const createInstanceRes = await app.request("/api/v1/instances", {
@@ -109,7 +109,7 @@ async function createAppWithSession() {
   return { app, authService, db, owner, ownerAuth: auth, sessionId }
 }
 
-async function issueInvite(app: ReturnType<typeof createServer>, sessionId: string, headers: HeadersInit) {
+async function issueInvite(app: ReturnType<typeof createClientApiServer>, sessionId: string, headers: HeadersInit) {
   const response = await app.request(`/api/v1/sessions/${sessionId}/invites`, { method: "POST", headers })
   expect(response.status).toBe(201)
   return await response.json() as { token: string; expiresAt: string }

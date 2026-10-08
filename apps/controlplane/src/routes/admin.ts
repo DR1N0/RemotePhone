@@ -16,8 +16,16 @@ import {
   LastActiveAdminError,
   NotAdminError,
   UserNotFoundError,
+  toAdminInstanceDto,
   type AdminService,
 } from "../services/admin-service.js"
+import {
+  InstanceConflictError,
+  InstanceForbiddenError,
+  InstanceNotFoundError,
+  InvalidRequestError,
+  type InstanceService,
+} from "../services/instance-service.js"
 import type { AuthService } from "../services/auth-service.js"
 import { createAuditContext, type AuditContext } from "../services/audit-service.js"
 import type { SessionService } from "../services/session-service.js"
@@ -26,6 +34,7 @@ import { TransportUnavailableError, type TransportService } from "../services/tr
 export function registerAdminRoutes(app: Hono, deps: {
   adminService: AdminService
   authService: AuthService
+  instanceService: InstanceService
   sessionService?: SessionService
   transportService?: TransportService
 }): void {
@@ -42,7 +51,16 @@ export function registerAdminRoutes(app: Hono, deps: {
     ) {
       return c.json({ error: error.message }, 404)
     }
-    if (error instanceof InvalidAuditCursorError || error instanceof RangeError) {
+    if (error instanceof InstanceNotFoundError) {
+      return c.json({ error: error.message }, 404)
+    }
+    if (error instanceof InstanceForbiddenError) {
+      return c.json({ error: error.message }, 403)
+    }
+    if (error instanceof InstanceConflictError) {
+      return c.json({ error: error.message }, 409)
+    }
+    if (error instanceof InvalidRequestError || error instanceof InvalidAuditCursorError || error instanceof RangeError) {
       return c.json({ error: error.message }, 400)
     }
     if (error instanceof TransportUnavailableError) {
@@ -116,6 +134,48 @@ export function registerAdminRoutes(app: Hono, deps: {
       return c.json({ items: deps.adminService.listInstances({
         actorUserId: getAuthenticatedUser(c).userId,
       }) })
+    } catch (error) {
+      return mapAdminError(error, c)
+    }
+  })
+
+  app.post("/api/v1/admin/instances/:id/start", requireAuth, requireAccountAuth, requireAdmin, async (c) => {
+    try {
+      const caller = getAuthenticatedUser(c)
+      const instance = await deps.instanceService.startAdminManagedInstance(
+        c.req.param("id"),
+        caller.userId,
+        createAuditContext(caller.userId, caller.credentialId, randomUUID()),
+      )
+      return c.json({ instance: toAdminInstanceDto(instance) })
+    } catch (error) {
+      return mapAdminError(error, c)
+    }
+  })
+
+  app.post("/api/v1/admin/instances/:id/stop", requireAuth, requireAccountAuth, requireAdmin, async (c) => {
+    try {
+      const caller = getAuthenticatedUser(c)
+      const instance = await deps.instanceService.stopAdminManagedInstance(
+        c.req.param("id"),
+        caller.userId,
+        createAuditContext(caller.userId, caller.credentialId, randomUUID()),
+      )
+      return c.json({ instance: toAdminInstanceDto(instance) })
+    } catch (error) {
+      return mapAdminError(error, c)
+    }
+  })
+
+  app.delete("/api/v1/admin/instances/:id", requireAuth, requireAccountAuth, requireAdmin, async (c) => {
+    try {
+      const caller = getAuthenticatedUser(c)
+      await deps.instanceService.deleteAdminManagedInstance(
+        c.req.param("id"),
+        caller.userId,
+        createAuditContext(caller.userId, caller.credentialId, randomUUID()),
+      )
+      return c.body(null, 204)
     } catch (error) {
       return mapAdminError(error, c)
     }

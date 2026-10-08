@@ -1,6 +1,6 @@
 # Local Transport End-to-End Acceptance Runbook
 
-This runbook records the real local transport acceptance flow. It is intentionally limited to macOS, Android Studio Emulator, and Google Chrome on localhost or a controlled LAN.
+This runbook records local Worker/transport acceptance and the supported browser development diagnostic. It is intentionally limited to macOS, Android Studio Emulator, and Google Chrome on the server host. The ordinary native client is a separate project; this admin WebUI is not its browser replacement.
 
 ## Prerequisites
 
@@ -19,11 +19,11 @@ This runbook records the real local transport acceptance flow. It is intentional
 
   Before starting the flow, the chosen emulator must appear in the output with state `device`.
 
-- Google Chrome. Use two separate Chrome profiles/windows: one owner and one observer.
+- Google Chrome on the Control Plane host for the optional development diagnostic.
 - Go 1.24 or later (the Worker module declares `go 1.24`).
 - Node.js and npm compatible with the checked-in lockfiles. The execution environment must record the exact versions below.
-- A controlled network: `127.0.0.1` for a single-machine run, or a trusted LAN with the Worker and Control Plane explicitly bound and addressed for that LAN. Public NAT traversal/TURN is not part of this flow.
-- Available local ports: Worker `127.0.0.1:7780`, Control Plane `127.0.0.1:3000`, and the Chrome remote-debugging ports used below (`9222` and `9223`).
+- A controlled network: the Control Plane's client and management listeners remain loopback-only. Public NAT traversal/TURN is not part of this flow.
+- Available local ports: Worker `127.0.0.1:7780`, client API `127.0.0.1:3000`, management WebUI/API `127.0.0.1:3001`, and (optionally) Chrome remote debugging `9222`.
 
 ### Environment captured for this run
 
@@ -43,8 +43,9 @@ This runbook records the real local transport acceptance flow. It is intentional
 Run these commands from the repository root. `npm ci` is required; do not replace it with `npm install`.
 
 ```bash
-# Build the Admin before launching the Control Plane; it serves apps/admin/dist at /admin.
-cd apps/admin && npm ci && npm run build
+# Build the Admin before launching the Control Plane. The diagnostic is absent unless
+# this build-time flag is true.
+cd apps/admin && npm ci && VITE_MAKO_ENABLE_SESSION_DIAGNOSTIC=true npm run build
 
 # Terminal 1: local Worker. The explicit SDK settings make Emulator discovery repeatable.
 cd apps/worker
@@ -54,42 +55,39 @@ MAKO_WORKER_LISTEN_ADDR="127.0.0.1:7780" \
 MAKO_WORKER_BASE_URL="http://127.0.0.1:7780" \
 go run ./cmd/mako-worker
 
-# Terminal 2: Control Plane (after the Admin build).
+# Terminal 2: Control Plane. The backend diagnostic route also requires an explicit flag.
 cd apps/controlplane
 MAKO_CONTROLPLANE_PORT="3000" \
+MAKO_ADMIN_PORT="3001" \
+MAKO_ENABLE_SESSION_DIAGNOSTIC="true" \
 MAKO_WORKER_BASE_URL="http://127.0.0.1:7780" \
 npm run dev
 
-# Terminal 3: verify services, then open the Admin in an actual headed Google Chrome owner profile.
+# Terminal 3: verify the Worker and local management app, then open the WebUI.
 curl -fsS http://127.0.0.1:7780/healthz
-curl -fsS http://127.0.0.1:3000/healthz
+curl -fsS http://127.0.0.1:3001/healthz
 open -na "Google Chrome" --args \
-  --user-data-dir=/tmp/mako-chrome-owner \
+  --user-data-dir=/tmp/mako-chrome-diagnostic \
   --remote-debugging-port=9222 \
-  http://127.0.0.1:3000/admin
+  http://127.0.0.1:3001/admin
 ```
 
-For the observer, create and copy an invite from the owner session, then open that invite URL in a distinct Chrome profile:
+`http://127.0.0.1:3000/admin` is intentionally a JSON `404`, not a redirect. Do not point Chrome at client port `3000` for setup, status, administration, documentation, or the WebUI.
 
-```bash
-open -na "Google Chrome" --args \
-  --user-data-dir=/tmp/mako-chrome-observer \
-  --remote-debugging-port=9223 \
-  '<copied-invite-url>'
-```
+## Development diagnostic procedure
 
-## Acceptance procedure
+The browser Session page is an explicitly enabled **development diagnostic** on the local management app only. It is not a general browser/native client, does not create Sessions or redeem invites, and does not grant media access to an administrator credential.
 
-1. Start a real AVD (`Medium_Phone_API_36.1` for this run) and wait until `adb devices -l` reports its serial as `device`; wait for the Android home screen.
-2. Build the Admin, start the Worker, then start the Control Plane using the commands above. Confirm `/admin` loads in the owner Chrome profile.
-3. Create an instance from the Android Studio Emulator template, start it, and wait for the Android home screen to appear in the owner Chrome video element.
-4. Click or tap a visible Android home-screen element in the owner video. Verify the corresponding visible change in the emulator window and/or `adb` state.
-5. Create an invite and open it in the observer Chrome profile. Verify its video arrives. Attempt input and verify the Worker rejects it and Android does not change.
-6. In the owner window, promote the observer. Verify observer input changes Android. Demote the same attachment and verify input is once again rejected.
-7. Close the observer tab/window. Confirm the Worker adapter/capture stops; if immediate inspection is unavailable, reconnect that attachment and confirm a safe replacement adapter creates video without a competing capture.
-8. Stop the instance from the owner dashboard. Confirm all of its adapters are removed and no Mako screen-capture process remains.
+1. Use the separate native client/client API flow to create or redeem a Session and obtain the exact attachment ID plus its Attachment bearer credential. Keep this credential out of URLs, query strings, and logs.
+2. On the server host, open `http://127.0.0.1:3001/admin/session/<session-id>` in Chrome.
+3. Paste the attachment ID and its Attachment bearer credential into the diagnostic form. The page stores them in `sessionStorage` for that session ID and sends them as the normal `Authorization: Bearer` header for Session reads, SDP/ICE, and disconnect.
+4. Verify the diagnostic only with the matching Attachment. An account/admin bearer is rejected and is never a substitute.
 
-## Execution notes
+The former `/session/:id` invite redirect and query-string Attachment authority no longer exist. Do not use the retired owner/observer Chrome invite procedure below as current instructions; use the diagnostic procedure above for browser-only development checks, and use the native client for ordinary client/guest flows.
+
+## Historical execution notes (pre-dual-surface)
+
+The evidence below predates the `3000` client / `3001` management split. It is retained as historical transport evidence only. Any old `localhost:3000/admin`, browser invite redirect, or query-string credential reference is obsolete; follow the development diagnostic procedure above.
 
 - **2026-09-20 13:20:15 CST — AVD readiness: PASS.** Command: `"$HOME/Library/Android/sdk/emulator/emulator" -avd Medium_Phone_API_36.1 -no-snapshot -no-boot-anim`, followed by `adb devices -l`, `adb -s emulator-5554 shell getprop sys.boot_completed`, and `adb -s emulator-5554 shell dumpsys window`. Actual result: `emulator-5554` reported `device`, `sys.boot_completed=1`, and the focused activity was `com.google.android.apps.nexuslauncher/.NexusLauncherActivity` (Android home screen).
 - **2026-09-20 13:20–13:21 CST — Services and headed Chrome Admin: PASS.** The Worker `/healthz` returned `{"status":"ok","workerId":"local","hostOs":"macos","arch":"arm64","installedRuntimes":[{"runtimeClass":"android-studio-emulator","displayName":"Android Studio Emulator"}]}`. The Control Plane `/healthz` returned `{"status":"ok"}` and `GET /admin` returned `HTTP/1.1 200 OK` with `content-type: text/html; charset=utf-8`. A headed Google Chrome 152 owner profile opened `/admin`; its rendered body contained `mako admin`, `Create Instance`, and the instance table.

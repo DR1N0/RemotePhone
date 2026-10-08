@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { createTestDb, resetTestDb } from "../src/persistence/db.js"
-import { createServer } from "../src/server.js"
+import { createClientApiServer } from "../src/server.js"
 import { createAuthService } from "../src/services/auth-service.js"
 import { createInstanceService } from "../src/services/instance-service.js"
 import { createSessionService } from "../src/services/session-service.js"
 import { runReconcilePass } from "../src/services/reconciler.js"
 import { createTransportService } from "../src/services/transport-service.js"
-import { createAdminAuthFixture, setupAdmin } from "./helpers/admin-auth.js"
+import { createAdminAuthFixture, setupAdminInService } from "./helpers/admin-auth.js"
 
 const temporaryFixtures: Array<ReturnType<typeof createAdminAuthFixture>> = []
 
@@ -71,10 +71,10 @@ function createWorkerClient() {
 }
 
 async function claimOwnerAuth(
-  app: ReturnType<typeof createServer>,
+  authService: ReturnType<typeof createAuthService>,
   fixture: ReturnType<typeof createAdminAuthFixture>,
 ) {
-  const { token } = await setupAdmin(app, fixture)
+  const { token } = await setupAdminInService(authService, fixture)
   return { Authorization: `Bearer ${token}`, "content-type": "application/json" }
 }
 
@@ -98,8 +98,8 @@ describe("signaling route", () => {
     const authService = createAuthService({ db, bootstrapSecretPath: fixture.bootstrapSecretPath })
 
     const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
-    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
-    const auth = await claimOwnerAuth(app, fixture)
+    const app = createClientApiServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+    const auth = await claimOwnerAuth(authService, fixture)
 
     const createInstanceRes = await app.request("/api/v1/instances", {
       method: "POST",
@@ -187,8 +187,8 @@ describe("signaling route", () => {
     const authService = createAuthService({ db, bootstrapSecretPath: fixture.bootstrapSecretPath })
 
     const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
-    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
-    const auth = await claimOwnerAuth(app, fixture)
+    const app = createClientApiServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+    const auth = await claimOwnerAuth(authService, fixture)
 
     const createInstanceRes = await app.request("/api/v1/instances", {
       method: "POST",
@@ -255,8 +255,8 @@ describe("signaling route", () => {
     const authService = createAuthService({ db, bootstrapSecretPath: fixture.bootstrapSecretPath })
 
       const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
-      const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
-      const auth = await claimOwnerAuth(app, fixture)
+      const app = createClientApiServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+      const auth = await claimOwnerAuth(authService, fixture)
 
       const createInstanceRes = await app.request("/api/v1/instances", {
         method: "POST",
@@ -379,8 +379,8 @@ describe("signaling route", () => {
     const authService = createAuthService({ db, bootstrapSecretPath: fixture.bootstrapSecretPath })
 
     const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
-    const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
-    const auth = await claimOwnerAuth(app, fixture)
+    const app = createClientApiServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+    const auth = await claimOwnerAuth(authService, fixture)
 
     const createInstanceRes = await app.request("/api/v1/instances", {
       method: "POST",
@@ -458,8 +458,8 @@ describe("signaling route", () => {
       temporaryFixtures.push(fixture)
       const authService = createAuthService({ db, bootstrapSecretPath: fixture.bootstrapSecretPath })
       const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
-      const app = createServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
-      const auth = await claimOwnerAuth(app, fixture)
+      const app = createClientApiServer({ workerClient, instanceService, sessionService, authService, getClientAddress: () => "127.0.0.1" })
+      const auth = await claimOwnerAuth(authService, fixture)
       const instance = await app.request("/api/v1/instances", {
         method: "POST",
         headers: auth,
@@ -541,7 +541,7 @@ describe("signaling route", () => {
     const authService = createAuthService({ db, bootstrapSecretPath: fixture.bootstrapSecretPath })
     const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
     const transportService = createTransportService({ instanceService, sessionService, workerClient })
-    const app = createServer({
+    const app = createClientApiServer({
       workerClient,
       instanceService,
       sessionService,
@@ -549,7 +549,7 @@ describe("signaling route", () => {
       transportService,
       getClientAddress: () => "127.0.0.1",
     })
-    const auth = await claimOwnerAuth(app, fixture)
+    const auth = await claimOwnerAuth(authService, fixture)
     const instanceRes = await app.request("/api/v1/instances", {
       method: "POST",
       headers: auth,

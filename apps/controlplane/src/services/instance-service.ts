@@ -5,7 +5,6 @@ import {
   createInstanceIfOwnerAbsent,
   deleteInstanceById,
   getInstanceById,
-  listInstances,
   listInstancesByOwner,
   updateInstanceLifecycle,
 } from "../persistence/repositories/instances.js"
@@ -117,15 +116,17 @@ function assertCanCreateInstance(db: AppDb, ownerId: string): void {
   }
 }
 
-function assertCanManageInstance(db: AppDb, instance: InstanceRow, callerUserId: string): void {
-  if (instance.ownerId === callerUserId) {
-    return
+function assertCanManageInstance(instance: InstanceRow, callerUserId: string): void {
+  if (instance.ownerId !== callerUserId) {
+    throw new InstanceForbiddenError(`user ${callerUserId} may not manage instance ${instance.id}`)
   }
+}
+
+function assertCanAdminManageInstance(db: AppDb, callerUserId: string): void {
   const caller = getUserById(db, callerUserId)
-  if (caller?.userType === "admin") {
-    return
+  if (caller?.userType !== "admin" || caller.status !== "active") {
+    throw new InstanceForbiddenError(`user ${callerUserId} is not an active admin`)
   }
-  throw new InstanceForbiddenError(`user ${callerUserId} may not manage instance ${instance.id}`)
 }
 
 export function createInstanceService(deps: {
@@ -153,6 +154,86 @@ export function createInstanceService(deps: {
       )
     }
     throw persistenceError
+  }
+
+  async function startInstanceLifecycle(row: InstanceRow, audit: AuditContext): Promise<ManagedInstanceRecord> {
+    auditService.record({ ...audit, action: "instance.start", targetType: "instance", targetId: row.id, outcome: "attempt" })
+    let response: Awaited<ReturnType<typeof workerClient.startInstance>>
+    try {
+      response = await workerClient.startInstance({
+        instanceId: row.id,
+        runtimeClass: row.runtimeClass,
+        templateId: row.templateId,
+        launchConfig: row.launchConfig,
+      })
+    } catch (error) {
+      auditService.record({ ...audit, action: "instance.start", targetType: "instance", targetId: row.id, outcome: "failure" })
+      throw error
+    }
+
+    try {
+      return db.$client.transaction(() => {
+        updateInstanceLifecycle(db, {
+          id: row.id,
+          desiredState: "running",
+          observedState: response.state === "" ? "starting" : response.state as InstanceRow["observedState"],
+          runtimeHandle: response.handle,
+          lastError: response.lastError ?? null,
+        })
+        auditService.record({ ...audit, action: "instance.start", targetType: "instance", targetId: row.id, outcome: "success" })
+        return toManagedInstance(getRequiredInstance(db, row.id))
+      })()
+    } catch (error) {
+      return recordTerminalPersistenceFailure(audit, "instance.start", row.id, error)
+    }
+  }
+
+  async function stopInstanceLifecycle(row: InstanceRow, audit: AuditContext): Promise<ManagedInstanceRecord> {
+    if (row.runtimeHandle == null) {
+      return db.$client.transaction(() => {
+        updateInstanceLifecycle(db, {
+          id: row.id,
+          desiredState: "stopped",
+          observedState: "stopped",
+          runtimeHandle: null,
+          lastError: null,
+        })
+        auditService.record({ ...audit, action: "instance.stop", targetType: "instance", targetId: row.id, outcome: "success" })
+        return toManagedInstance(getRequiredInstance(db, row.id))
+      })()
+    }
+
+    auditService.record({ ...audit, action: "instance.stop", targetType: "instance", targetId: row.id, outcome: "attempt" })
+    let response: Awaited<ReturnType<typeof workerClient.stopInstance>>
+    try {
+      response = await workerClient.stopInstance(row.id)
+    } catch (error) {
+      auditService.record({ ...audit, action: "instance.stop", targetType: "instance", targetId: row.id, outcome: "failure" })
+      throw error
+    }
+
+    try {
+      return db.$client.transaction(() => {
+        updateInstanceLifecycle(db, {
+          id: row.id,
+          desiredState: "stopped",
+          observedState: response.state === "" ? "stopped" : response.state as InstanceRow["observedState"],
+          runtimeHandle: null,
+          lastError: response.lastError ?? null,
+        })
+        auditService.record({ ...audit, action: "instance.stop", targetType: "instance", targetId: row.id, outcome: "success" })
+        return toManagedInstance(getRequiredInstance(db, row.id))
+      })()
+    } catch (error) {
+      return recordTerminalPersistenceFailure(audit, "instance.stop", row.id, error)
+    }
+  }
+
+  function deleteInstanceLifecycle(row: InstanceRow, audit: AuditContext): void {
+    db.$client.transaction(() => {
+      deleteInstanceById(db, row.id)
+      auditService.record({ ...audit, action: "instance.delete", targetType: "instance", targetId: row.id, outcome: "success" })
+    })()
   }
 
   return {
@@ -187,16 +268,12 @@ export function createInstanceService(deps: {
     },
 
     async listManagedInstances(callerUserId: string): Promise<ManagedInstanceRecord[]> {
-      const caller = getUserById(db, callerUserId)
-      const rows = caller?.userType === "admin"
-        ? listInstances(db)
-        : listInstancesByOwner(db, callerUserId)
-      return rows.map(toManagedInstance)
+      return listInstancesByOwner(db, callerUserId).map(toManagedInstance)
     },
 
     async getManagedInstance(id: string, callerUserId: string): Promise<ManagedInstanceRecord> {
       const row = getRequiredInstance(db, id)
-      assertCanManageInstance(db, row, callerUserId)
+      assertCanManageInstance(row, callerUserId)
       return toManagedInstance(row)
     },
 
@@ -206,89 +283,35 @@ export function createInstanceService(deps: {
 
     async startManagedInstance(id: string, callerUserId: string, audit: AuditContext): Promise<ManagedInstanceRecord> {
       const row = getRequiredInstance(db, id)
-      assertCanManageInstance(db, row, callerUserId)
-      auditService.record({ ...audit, action: "instance.start", targetType: "instance", targetId: row.id, outcome: "attempt" })
-      let response: Awaited<ReturnType<typeof workerClient.startInstance>>
-      try {
-        response = await workerClient.startInstance({
-          instanceId: row.id,
-          runtimeClass: row.runtimeClass,
-          templateId: row.templateId,
-          launchConfig: row.launchConfig,
-        })
-      } catch (error) {
-        auditService.record({ ...audit, action: "instance.start", targetType: "instance", targetId: row.id, outcome: "failure" })
-        throw error
-      }
-
-      try {
-        return db.$client.transaction(() => {
-          updateInstanceLifecycle(db, {
-            id: row.id,
-            desiredState: "running",
-            observedState: response.state === "" ? "starting" : response.state as InstanceRow["observedState"],
-            runtimeHandle: response.handle,
-            lastError: response.lastError ?? null,
-          })
-          auditService.record({ ...audit, action: "instance.start", targetType: "instance", targetId: row.id, outcome: "success" })
-          return toManagedInstance(getRequiredInstance(db, id))
-        })()
-      } catch (error) {
-        return recordTerminalPersistenceFailure(audit, "instance.start", row.id, error)
-      }
+      assertCanManageInstance(row, callerUserId)
+      return await startInstanceLifecycle(row, audit)
     },
 
     async stopManagedInstance(id: string, callerUserId: string, audit: AuditContext): Promise<ManagedInstanceRecord> {
       const row = getRequiredInstance(db, id)
-      assertCanManageInstance(db, row, callerUserId)
-
-      if (row.runtimeHandle == null) {
-        return db.$client.transaction(() => {
-          updateInstanceLifecycle(db, {
-            id,
-            desiredState: "stopped",
-            observedState: "stopped",
-            runtimeHandle: null,
-            lastError: null,
-          })
-          auditService.record({ ...audit, action: "instance.stop", targetType: "instance", targetId: row.id, outcome: "success" })
-          return toManagedInstance(getRequiredInstance(db, id))
-        })()
-      }
-
-      auditService.record({ ...audit, action: "instance.stop", targetType: "instance", targetId: row.id, outcome: "attempt" })
-      let response: Awaited<ReturnType<typeof workerClient.stopInstance>>
-      try {
-        response = await workerClient.stopInstance(id)
-      } catch (error) {
-        auditService.record({ ...audit, action: "instance.stop", targetType: "instance", targetId: row.id, outcome: "failure" })
-        throw error
-      }
-
-      try {
-        return db.$client.transaction(() => {
-          updateInstanceLifecycle(db, {
-            id,
-            desiredState: "stopped",
-            observedState: response.state === "" ? "stopped" : response.state as InstanceRow["observedState"],
-            runtimeHandle: null,
-            lastError: response.lastError ?? null,
-          })
-          auditService.record({ ...audit, action: "instance.stop", targetType: "instance", targetId: row.id, outcome: "success" })
-          return toManagedInstance(getRequiredInstance(db, id))
-        })()
-      } catch (error) {
-        return recordTerminalPersistenceFailure(audit, "instance.stop", row.id, error)
-      }
+      assertCanManageInstance(row, callerUserId)
+      return await stopInstanceLifecycle(row, audit)
     },
 
     async deleteManagedInstance(id: string, callerUserId: string, audit: AuditContext): Promise<void> {
       const row = getRequiredInstance(db, id)
-      assertCanManageInstance(db, row, callerUserId)
-      db.$client.transaction(() => {
-        deleteInstanceById(db, id)
-        auditService.record({ ...audit, action: "instance.delete", targetType: "instance", targetId: row.id, outcome: "success" })
-      })()
+      assertCanManageInstance(row, callerUserId)
+      deleteInstanceLifecycle(row, audit)
+    },
+
+    async startAdminManagedInstance(id: string, callerUserId: string, audit: AuditContext): Promise<ManagedInstanceRecord> {
+      assertCanAdminManageInstance(db, callerUserId)
+      return await startInstanceLifecycle(getRequiredInstance(db, id), audit)
+    },
+
+    async stopAdminManagedInstance(id: string, callerUserId: string, audit: AuditContext): Promise<ManagedInstanceRecord> {
+      assertCanAdminManageInstance(db, callerUserId)
+      return await stopInstanceLifecycle(getRequiredInstance(db, id), audit)
+    },
+
+    async deleteAdminManagedInstance(id: string, callerUserId: string, audit: AuditContext): Promise<void> {
+      assertCanAdminManageInstance(db, callerUserId)
+      deleteInstanceLifecycle(getRequiredInstance(db, id), audit)
     },
   }
 }

@@ -147,9 +147,9 @@ export const api = {
 
   listAdminInstances: () =>
     request<{ items: AdminInstance[] }>("/api/v1/admin/instances", undefined, undefined, true).then((result) => result.items),
-  startInstance: (id: string) => request<{ instance: AdminInstance }>(`/api/v1/instances/${encodeURIComponent(id)}/start`, { method: "POST" }, undefined, true).then((result) => result.instance),
-  stopInstance: (id: string) => request<{ instance: AdminInstance }>(`/api/v1/instances/${encodeURIComponent(id)}/stop`, { method: "POST" }, undefined, true).then((result) => result.instance),
-  deleteInstance: (id: string) => request<void>(`/api/v1/instances/${encodeURIComponent(id)}`, { method: "DELETE" }, undefined, true),
+  startInstance: (id: string) => request<{ instance: AdminInstance }>(`/api/v1/admin/instances/${encodeURIComponent(id)}/start`, { method: "POST" }, undefined, true).then((result) => result.instance),
+  stopInstance: (id: string) => request<{ instance: AdminInstance }>(`/api/v1/admin/instances/${encodeURIComponent(id)}/stop`, { method: "POST" }, undefined, true).then((result) => result.instance),
+  deleteInstance: (id: string) => request<void>(`/api/v1/admin/instances/${encodeURIComponent(id)}`, { method: "DELETE" }, undefined, true),
 
   listAudit: (input: { limit: number; cursor: string | null }) =>
     request<Page<AuditEvent>>(`/api/v1/admin/audit?${pageQuery(input)}`, undefined, undefined, true),

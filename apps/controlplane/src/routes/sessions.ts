@@ -190,15 +190,50 @@ export function registerSessionRoutes(
     }
   })
 
-  app.get("/api/v1/sessions/:id", requireAuth, async (c) => {
+  registerSessionReadRoute(app, sessionService, requireAuth)
+}
+
+function registerSessionReadRoute(
+  app: Hono,
+  sessionService: SessionService,
+  requireAuth: ReturnType<typeof createBearerAuthMiddleware>,
+  attachmentOnly = false,
+): void {
+  const handler = async (c: Context) => {
+    const sessionId = c.req.param("id")
+    if (sessionId == null) return c.json({ error: "session not found" }, 404)
     try {
-      const session = await sessionService.getSession(c.req.param("id"), getAuthenticatedUser(c))
+      const session = await sessionService.getSession(sessionId, getAuthenticatedUser(c))
       return c.json({ session })
     } catch (error) {
       // Session reads conceal private existence from valid but unrelated accounts.
-      if (error instanceof SessionForbiddenError) {
-        return c.json({ error: `session not found: ${c.req.param("id")}` }, 404)
-      }
+      if (error instanceof SessionForbiddenError) return c.json({ error: `session not found: ${c.req.param("id")}` }, 404)
+      return jsonError(c, error)
+    }
+  }
+  if (attachmentOnly) app.get("/api/v1/sessions/:id", requireAuth, requireAttachmentAuth, handler)
+  else app.get("/api/v1/sessions/:id", requireAuth, handler)
+}
+
+/** Local development diagnostic: no session creation or role-management capability. */
+export function registerSessionDiagnosticRoutes(
+  app: Hono,
+  sessionService: SessionService,
+  transportService: TransportService | undefined,
+  authService: AuthService,
+): void {
+  const requireAuth = createBearerAuthMiddleware(authService)
+  registerSessionReadRoute(app, sessionService, requireAuth, true)
+  app.post("/api/v1/sessions/:id/attachments/:attachmentId/disconnect", requireAuth, requireAttachmentAuth, async (c) => {
+    try {
+      const sessionId = c.req.param("id")
+      const attachmentId = c.req.param("attachmentId")
+      const caller = getAuthenticatedUser(c)
+      const audit = createAuditContext(caller.userId, caller.credentialId, randomUUID())
+      const session = await sessionService.disconnectAttachment({ sessionId, attachmentId, caller, requestId: audit.requestId })
+      if (transportService != null) await transportService.teardownPendingAttachment({ sessionId, attachmentId, audit })
+      return c.json({ session })
+    } catch (error) {
       return jsonError(c, error)
     }
   })

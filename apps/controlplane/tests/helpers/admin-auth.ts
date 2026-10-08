@@ -2,6 +2,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import type { AuthService } from "../../src/services/auth-service.js"
+
 export type RequestApp = {
   request: (input: string, init?: RequestInit) => Promise<Response>
 }
@@ -12,6 +14,19 @@ export function createAdminAuthFixture(): { bootstrapSecretPath: string; cleanup
     bootstrapSecretPath: join(directory, "bootstrap-secret"),
     cleanup: () => rmSync(directory, { recursive: true, force: true }),
   }
+}
+
+export async function setupAdminInService(
+  authService: AuthService,
+  fixture: { bootstrapSecretPath: string },
+  input: { username?: string; password?: string; deviceLabel?: string } = {},
+): Promise<{ user: { id: string; type: string; username: string }; token: string }> {
+  return await authService.setupAdmin({
+    username: input.username ?? "admin",
+    password: input.password ?? "long-password-for-test",
+    deviceLabel: input.deviceLabel ?? "test-device",
+    bootstrapSecret: readFileSync(fixture.bootstrapSecretPath, "utf8"),
+  })
 }
 
 export async function setupAdmin(

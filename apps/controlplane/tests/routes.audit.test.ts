@@ -6,7 +6,7 @@ import { createAuditEvent } from "../src/persistence/repositories/audit-events.j
 import { createInstance } from "../src/persistence/repositories/instances.js"
 import { createSession } from "../src/persistence/repositories/sessions.js"
 import { createUser } from "../src/persistence/repositories/users.js"
-import { createServer } from "../src/server.js"
+import { createAdminServer } from "../src/server.js"
 import { createAdminService } from "../src/services/admin-service.js"
 import { createAuthService } from "../src/services/auth-service.js"
 import { createInstanceService } from "../src/services/instance-service.js"
@@ -40,7 +40,7 @@ function buildApp() {
   const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
   const adminService = createAdminService({ db })
   return {
-    app: createServer({ workerClient, authService, adminService, instanceService, sessionService, getClientAddress: () => "127.0.0.1" }),
+    app: createAdminServer({ workerClient, authService, adminService, instanceService, sessionService, getClientAddress: () => "127.0.0.1" }),
     db,
     fixture,
     authService,

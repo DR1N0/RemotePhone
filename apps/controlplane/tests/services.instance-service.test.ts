@@ -322,23 +322,26 @@ describe("instance service", () => {
     }))
   })
 
-  it("lets an admin manage any instance without relying on legacy isServerOwner", async () => {
+  it("keeps generic instance access owner-only while allowing an active admin lifecycle operation", async () => {
     const db = createTestDb()
     seedUser(db, { id: "owner_1" })
     seedUser(db, { id: "admin", userType: "admin", isServerOwner: false })
-    const service = createInstanceService({ db, workerClient: createWorkerClient() })
+    const workerClient = createWorkerClient()
+    const service = createInstanceService({ db, workerClient })
     const created = await service.createManagedInstance(baseInput, "owner_1")
+    const audit = { actorUserId: "admin", actorCredentialId: null, requestId: "request-admin-start" }
 
-    const fetched = await service.getManagedInstance(created.id, "admin")
-    expect(fetched.id).toBe(created.id)
-    await service.startManagedInstance(created.id, "admin", {
-      actorUserId: "admin", actorCredentialId: null, requestId: "request-admin-start",
-    })
-    await service.stopManagedInstance(created.id, "admin", {
-      actorUserId: "admin", actorCredentialId: null, requestId: "request-admin-stop",
-    })
+    await expect(service.getManagedInstance(created.id, "admin")).rejects.toBeInstanceOf(InstanceForbiddenError)
+    await expect(service.startManagedInstance(created.id, "admin", audit)).rejects.toBeInstanceOf(InstanceForbiddenError)
+    expect(await service.listManagedInstances("admin")).toEqual([])
+    expect(workerClient.startInstance).not.toHaveBeenCalled()
+    expect(workerClient.stopInstance).not.toHaveBeenCalled()
 
-    const listed = await service.listManagedInstances("admin")
-    expect(listed.map((i) => i.id)).toEqual([created.id])
+    await service.startAdminManagedInstance(created.id, "admin", audit)
+    await service.stopAdminManagedInstance(created.id, "admin", {
+      ...audit, requestId: "request-admin-stop",
+    })
+    expect(workerClient.startInstance).toHaveBeenCalledOnce()
+    expect(workerClient.stopInstance).toHaveBeenCalledOnce()
   })
 })

@@ -6,6 +6,7 @@ describe("control-plane env", () => {
   it("loads the control-plane port, worker base url, database path, owner-absence timeout bounds, and reconciliation settings from env", () => {
     const env = loadEnv({
       MAKO_CONTROLPLANE_PORT: "4010",
+      MAKO_ADMIN_PORT: "4011",
       MAKO_WORKER_BASE_URL: "http://127.0.0.1:7788/",
       MAKO_CONTROLPLANE_DB_PATH: "/tmp/mako.db",
       MAKO_BOOTSTRAP_SECRET_PATH: "/tmp/mako.bootstrap-secret",
@@ -18,6 +19,7 @@ describe("control-plane env", () => {
 
     expect(env).toEqual({
       port: 4010,
+      adminPort: 4011,
       listenHostname: "127.0.0.1",
       workerBaseUrl: "http://127.0.0.1:7788",
       databasePath: "/tmp/mako.db",
@@ -35,6 +37,7 @@ describe("control-plane env", () => {
 
     expect(env).toEqual({
       port: 3000,
+      adminPort: 3001,
       listenHostname: "127.0.0.1",
       workerBaseUrl: "http://127.0.0.1:7780",
       databasePath: "./data/mako.db",
@@ -45,5 +48,11 @@ describe("control-plane env", () => {
       reconcileIntervalMs: 5000,
       enableSessionDiagnostic: false,
     })
+  })
+
+  it("rejects malformed, out-of-range, and equal listener ports", () => {
+    expect(() => loadEnv({ MAKO_CONTROLPLANE_PORT: "nope" })).toThrow("Invalid port")
+    expect(() => loadEnv({ MAKO_ADMIN_PORT: "65536" })).toThrow("Invalid port")
+    expect(() => loadEnv({ MAKO_CONTROLPLANE_PORT: "4100", MAKO_ADMIN_PORT: "4100" })).toThrow("must differ")
   })
 })
