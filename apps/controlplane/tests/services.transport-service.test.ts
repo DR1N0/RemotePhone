@@ -15,6 +15,7 @@ import {
 const sessionId = "session-1"
 const attachmentId = "attachment-1"
 const instanceId = "instance-1"
+const testAudit = { actorUserId: null, actorCredentialId: null, requestId: "request-transport-test" }
 
 const transport: WorkerTransportSession = {
   sessionId,
@@ -32,16 +33,16 @@ function createDependencies(options?: {
   role?: "owner" | "participant" | "observer"
   restrictivePendingRole?: "observer" | null
   pendingTargetRole?: "participant" | "observer" | null
-  sessionStatus?: "active" | "idle" | "closed"
-  idleExpiresAt?: string | null
+  sessionStatus?: "active" | "closed"
   runtimeHandle?: object | null
+  transportTeardownPending?: boolean
 }) {
   const sessionService = {
-    getSession: vi.fn().mockResolvedValue({
+    getSessionUnchecked: vi.fn().mockResolvedValue({
       id: sessionId,
       instanceId,
       status: options?.sessionStatus ?? "active",
-      idleExpiresAt: options?.idleExpiresAt ?? null,
+      ownerAbsenceDeadline: null,
       reconnectToken: null,
       attachments: [{
         id: attachmentId,
@@ -51,13 +52,15 @@ function createDependencies(options?: {
         restrictivePendingRole: options?.restrictivePendingRole ?? null,
         pendingTargetRole: options?.pendingTargetRole ?? null,
         status: options?.attachmentStatus ?? "connected",
+        transportTeardownPending: options?.transportTeardownPending ?? false,
         reconnectToken: null,
         createdAt: "2026-09-18T00:00:00.000Z",
         updatedAt: "2026-09-18T00:00:00.000Z",
       }],
       createdAt: "2026-09-18T00:00:00.000Z",
       updatedAt: "2026-09-18T00:00:00.000Z",
-    })
+    }),
+    completeAttachmentTransportTeardown: vi.fn().mockResolvedValue(undefined),
   } as unknown as SessionService
   const instanceService = {
     getManagedInstanceUnchecked: vi.fn().mockResolvedValue({
@@ -82,7 +85,7 @@ describe("transport service", () => {
     const deps = createDependencies()
     const transportService = createTransportService(deps)
 
-    await expect(transportService.ensureAttachmentTransport({ sessionId, attachmentId }))
+    await expect(transportService.ensureAttachmentTransport({ sessionId, attachmentId, audit: testAudit }))
       .resolves.toEqual(transport)
     expect(deps.workerClient.createTransportSession).toHaveBeenCalledWith({
       sessionId,
@@ -94,6 +97,18 @@ describe("transport service", () => {
     })
   })
 
+  it("destroys stale pending transport before recreating a resumed attachment transport", async () => {
+    const deps = createDependencies({ transportTeardownPending: true })
+    const transportService = createTransportService(deps)
+
+    await transportService.ensureAttachmentTransport({ sessionId, attachmentId, audit: testAudit })
+
+    expect(deps.workerClient.destroyTransportSession).toHaveBeenCalledWith({ instanceId, attachmentId })
+    expect(deps.sessionService.completeAttachmentTransportTeardown).toHaveBeenCalledWith({ sessionId, attachmentId, audit: testAudit })
+    expect(deps.workerClient.destroyTransportSession.mock.invocationCallOrder[0])
+      .toBeLessThan(deps.workerClient.createTransportSession.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY)
+  })
+
   it("uses the restrictive pending observer role for ensure and default synchronization", async () => {
     const deps = createDependencies({
       role: "participant",
@@ -101,8 +116,8 @@ describe("transport service", () => {
     })
     const transportService = createTransportService(deps)
 
-    await transportService.ensureAttachmentTransport({ sessionId, attachmentId })
-    await transportService.syncAttachmentRole({ sessionId, attachmentId })
+    await transportService.ensureAttachmentTransport({ sessionId, attachmentId, audit: testAudit })
+    await transportService.syncAttachmentRole({ sessionId, attachmentId, audit: testAudit })
 
     expect(deps.workerClient.createTransportSession).toHaveBeenCalledWith(
       expect.objectContaining({ role: "observer" }),
@@ -121,29 +136,18 @@ describe("transport service", () => {
     })
     const transportService = createTransportService(deps)
 
-    await transportService.ensureAttachmentTransport({ sessionId, attachmentId })
+    await transportService.ensureAttachmentTransport({ sessionId, attachmentId, audit: testAudit })
 
     expect(deps.workerClient.createTransportSession).toHaveBeenCalledWith(
       expect.objectContaining({ role: "observer" }),
     )
   })
 
-  it("allows a connected attachment on an unexpired idle session", async () => {
-    const deps = createDependencies({
-      sessionStatus: "idle",
-      idleExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-    })
-    const transportService = createTransportService(deps)
-
-    await expect(transportService.ensureAttachmentTransport({ sessionId, attachmentId }))
-      .resolves.toEqual(transport)
-  })
-
   it("rejects disconnected attachments without calling the Worker", async () => {
     const deps = createDependencies({ attachmentStatus: "disconnected" })
     const transportService = createTransportService(deps)
 
-    await expect(transportService.ensureAttachmentTransport({ sessionId, attachmentId }))
+    await expect(transportService.ensureAttachmentTransport({ sessionId, attachmentId, audit: testAudit }))
       .rejects.toThrow("attachment is not connected")
     expect(deps.workerClient.createTransportSession).not.toHaveBeenCalled()
   })
@@ -152,7 +156,7 @@ describe("transport service", () => {
     const deps = createDependencies({ sessionStatus: "closed" })
     const transportService = createTransportService(deps)
 
-    await expect(transportService.ensureAttachmentTransport({ sessionId, attachmentId }))
+    await expect(transportService.ensureAttachmentTransport({ sessionId, attachmentId, audit: testAudit }))
       .rejects.toThrow("session is not transportable")
     expect(deps.workerClient.createTransportSession).not.toHaveBeenCalled()
   })
@@ -161,7 +165,7 @@ describe("transport service", () => {
     const deps = createDependencies({ runtimeHandle: null })
     const transportService = createTransportService(deps)
 
-    await expect(transportService.ensureAttachmentTransport({ sessionId, attachmentId }))
+    await expect(transportService.ensureAttachmentTransport({ sessionId, attachmentId, audit: testAudit }))
       .rejects.toThrow("instance is not running")
     expect(deps.workerClient.createTransportSession).not.toHaveBeenCalled()
   })
@@ -171,15 +175,35 @@ describe("transport service", () => {
     deps.workerClient.createTransportSession.mockRejectedValueOnce(new Error("Worker request failed with status 503"))
     const transportService = createTransportService(deps)
 
-    await expect(transportService.ensureAttachmentTransport({ sessionId, attachmentId }))
+    await expect(transportService.ensureAttachmentTransport({ sessionId, attachmentId, audit: testAudit }))
       .rejects.toThrow(TransportUnavailableError)
+  })
+
+  it("records transport create failure without a fabricated success", async () => {
+    const deps = createDependencies()
+    deps.workerClient.createTransportSession.mockRejectedValueOnce(new Error("worker unavailable"))
+    const auditService = { record: vi.fn() }
+    const transportService = createTransportService({ ...deps, auditService })
+    const audit = { actorUserId: "attachment-user", actorCredentialId: "attachment-credential", requestId: "request-transport-create-failure" }
+
+    await expect(transportService.ensureAttachmentTransport({ sessionId, attachmentId, audit }))
+      .rejects.toThrow(TransportUnavailableError)
+
+    const events = auditService.record.mock.calls.map(([event]) => event)
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "transport.create", requestId: audit.requestId, outcome: "attempt" }),
+      expect.objectContaining({ action: "transport.create", requestId: audit.requestId, outcome: "failure" }),
+    ]))
+    expect(events).not.toContainEqual(expect.objectContaining({
+      action: "transport.create", requestId: audit.requestId, outcome: "success",
+    }))
   })
 
   it("synchronizes the persisted attachment role with the Worker", async () => {
     const deps = createDependencies()
     const transportService = createTransportService(deps)
 
-    await expect(transportService.syncAttachmentRole({ sessionId, attachmentId })).resolves.toBeUndefined()
+    await expect(transportService.syncAttachmentRole({ sessionId, attachmentId, audit: testAudit })).resolves.toBeUndefined()
     expect(deps.workerClient.updateTransportRole).toHaveBeenCalledWith({
       instanceId,
       attachmentId,
@@ -187,11 +211,52 @@ describe("transport service", () => {
     })
   })
 
+  it("records correlated Worker create and role-update outcomes without transport payloads", async () => {
+    const deps = createDependencies()
+    const auditService = { record: vi.fn() }
+    const transportService = createTransportService({ ...deps, auditService })
+    const audit = { actorUserId: "attachment-user", actorCredentialId: "attachment-credential", requestId: "request-transport-operations" }
+
+    await transportService.ensureAttachmentTransport({ sessionId, attachmentId, audit })
+    await transportService.syncAttachmentRole({ sessionId, attachmentId, audit })
+
+    expect(auditService.record.mock.calls.map(([event]) => event)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ...audit, action: "transport.create", targetType: "attachment", targetId: attachmentId, outcome: "attempt" }),
+      expect.objectContaining({ ...audit, action: "transport.create", targetType: "attachment", targetId: attachmentId, outcome: "success" }),
+      expect.objectContaining({ ...audit, action: "transport.role.update", targetType: "attachment", targetId: attachmentId, outcome: "attempt" }),
+      expect.objectContaining({ ...audit, action: "transport.role.update", targetType: "attachment", targetId: attachmentId, outcome: "success" }),
+    ]))
+    expect(JSON.stringify(auditService.record.mock.calls)).not.toContain("token-1")
+  })
+
+  it("records correlated attempt and outcome for Worker transport teardown", async () => {
+    const deps = createDependencies({ attachmentStatus: "disconnected" })
+    const auditService = { record: vi.fn() }
+    const transportService = createTransportService({ ...deps, auditService })
+    const audit = { actorUserId: "admin-1", actorCredentialId: "credential-1", requestId: "request-teardown" }
+
+    await transportService.destroyAttachmentTransport({ sessionId, attachmentId, audit })
+
+    expect(auditService.record).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      ...audit,
+      action: "transport.teardown",
+      targetType: "attachment",
+      targetId: attachmentId,
+      outcome: "attempt",
+    }))
+    expect(auditService.record).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      ...audit,
+      action: "transport.teardown",
+      targetId: attachmentId,
+      outcome: "success",
+    }))
+  })
+
   it("destroys the exact Worker transport after an attachment disconnects", async () => {
     const deps = createDependencies({ attachmentStatus: "disconnected" })
     const transportService = createTransportService(deps)
 
-    await expect(transportService.destroyAttachmentTransport({ sessionId, attachmentId })).resolves.toBeUndefined()
+    await expect(transportService.destroyAttachmentTransport({ sessionId, attachmentId, audit: testAudit })).resolves.toBeUndefined()
     expect(deps.workerClient.destroyTransportSession).toHaveBeenCalledWith({ instanceId, attachmentId })
   })
 
@@ -199,13 +264,13 @@ describe("transport service", () => {
     const roleDeps = createDependencies()
     roleDeps.workerClient.updateTransportRole.mockRejectedValueOnce(new Error("Worker request failed with status 503"))
     const roleService = createTransportService(roleDeps)
-    await expect(roleService.syncAttachmentRole({ sessionId, attachmentId }))
+    await expect(roleService.syncAttachmentRole({ sessionId, attachmentId, audit: testAudit }))
       .rejects.toThrow(TransportUnavailableError)
 
     const destroyDeps = createDependencies()
     destroyDeps.workerClient.destroyTransportSession.mockRejectedValueOnce(new Error("Worker request failed with status 503"))
     const destroyService = createTransportService(destroyDeps)
-    await expect(destroyService.destroyAttachmentTransport({ sessionId, attachmentId }))
+    await expect(destroyService.destroyAttachmentTransport({ sessionId, attachmentId, audit: testAudit }))
       .rejects.toThrow(TransportUnavailableError)
   })
 })

@@ -1,9 +1,12 @@
 import { getConnInfo } from "@hono/node-server/conninfo"
 import type { Context, MiddlewareHandler } from "hono"
 
-import type { AuthenticatedPrincipal, AuthService } from "../services/auth-service.js"
+import type {
+  AuthenticatedUser,
+  AuthService,
+} from "../services/auth-service.js"
 
-const PRINCIPAL_CONTEXT_KEY = "principal"
+const AUTHENTICATED_USER_CONTEXT_KEY = "authenticatedUser"
 
 export function isLoopbackAddress(address: string | undefined): boolean {
   if (address == null) {
@@ -20,13 +23,14 @@ export function defaultGetClientAddress(c: Context): string | undefined {
   }
 }
 
-export function getAuthenticatedPrincipal(c: Context): AuthenticatedPrincipal {
-  const principal = c.get(PRINCIPAL_CONTEXT_KEY) as AuthenticatedPrincipal | undefined
-  if (principal == null) {
-    throw new Error("getAuthenticatedPrincipal called without createBearerAuthMiddleware in the request chain")
+export function getAuthenticatedUser(c: Context): AuthenticatedUser {
+  const user = c.get(AUTHENTICATED_USER_CONTEXT_KEY) as AuthenticatedUser | undefined
+  if (user == null) {
+    throw new Error("getAuthenticatedUser called without createBearerAuthMiddleware in the request chain")
   }
-  return principal
+  return user
 }
+
 
 export function createBearerAuthMiddleware(authService: AuthService): MiddlewareHandler {
   return async (c, next) => {
@@ -36,12 +40,24 @@ export function createBearerAuthMiddleware(authService: AuthService): Middleware
       return c.json({ error: "missing bearer token" }, 401)
     }
 
-    const principal = await authService.authenticate(token)
-    if (principal == null) {
+    const user = await authService.authenticate(token)
+    if (user == null) {
       return c.json({ error: "invalid or revoked credential" }, 401)
     }
 
-    c.set(PRINCIPAL_CONTEXT_KEY, principal)
+    c.set(AUTHENTICATED_USER_CONTEXT_KEY, user)
     await next()
   }
 }
+
+export function createScopedAuthMiddleware(scope: AuthenticatedUser["scope"]): MiddlewareHandler {
+  return async (c, next) => {
+    if (getAuthenticatedUser(c).scope !== scope) {
+      return c.json({ error: "credential scope is not authorized" }, 403)
+    }
+    await next()
+  }
+}
+
+export const requireAccountAuth = createScopedAuthMiddleware("account")
+export const requireAttachmentAuth = createScopedAuthMiddleware("attachment")

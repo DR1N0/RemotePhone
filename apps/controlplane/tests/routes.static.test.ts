@@ -7,10 +7,11 @@ import { createServer } from "../src/server.js"
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url))
 
-function createApp(adminDistPath: string) {
+function createApp(adminDistPath: string, enableSessionDiagnostic = false) {
   return createServer({
     workerClient: { listWorkers: async () => [], listTemplates: async () => [] },
     adminDistPath,
+    enableSessionDiagnostic,
   })
 }
 
@@ -34,8 +35,16 @@ describe("static file serving", () => {
       expect(await assetRes.text()).toBe("console.log('asset')")
 
       const routeRes = await app.request("/admin/session/session-1")
-      expect(routeRes.status).toBe(200)
-      expect(await routeRes.text()).toBe("<html><body>Admin SPA</body></html>")
+      expect(routeRes.status).toBe(404)
+      expect(await routeRes.text()).not.toContain("Admin SPA")
+      const diagnosticRootRes = await app.request("/admin/session")
+      expect(diagnosticRootRes.status).toBe(404)
+      expect(await diagnosticRootRes.text()).not.toContain("Admin SPA")
+
+      const enabledApp = createApp(adminDistPath, true)
+      const enabledRouteRes = await enabledApp.request("/admin/session/session-1")
+      expect(enabledRouteRes.status).toBe(200)
+      expect(await enabledRouteRes.text()).toBe("<html><body>Admin SPA</body></html>")
     } finally {
       await rm(adminDistPath, { recursive: true, force: true })
     }

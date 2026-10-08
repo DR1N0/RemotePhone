@@ -1,10 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { createTestDb, resetTestDb } from "../src/persistence/db.js"
+import { getCredentialByTokenHash } from "../src/persistence/repositories/credentials.js"
+import { createUser, getUserById, listUsers } from "../src/persistence/repositories/users.js"
 import { createServer } from "../src/server.js"
 import { createAuthService } from "../src/services/auth-service.js"
 import { createInstanceService } from "../src/services/instance-service.js"
 import { createSessionService } from "../src/services/session-service.js"
+import { hashToken } from "../src/services/token.js"
+import { createAdminAuthFixture, setupAdmin } from "./helpers/admin-auth.js"
+
+const temporaryFixtures: Array<ReturnType<typeof createAdminAuthFixture>> = []
 
 function createWorkerClient() {
   return {
@@ -28,9 +34,7 @@ function createWorkerClient() {
         templateId: "macos-android-studio:Medium_Phone",
         runtimeClass: "android-studio-emulator",
         displayName: "Medium Phone",
-        metadata: {
-          avdName: "Medium_Phone",
-        },
+        metadata: { avdName: "Medium_Phone" },
       },
     ]),
     startInstance: vi.fn().mockImplementation(async (input: { instanceId: string; templateId: string; runtimeClass: string }) => ({
@@ -48,20 +52,11 @@ function createWorkerClient() {
     })),
     inspectInstance: vi.fn(),
     stopInstance: vi.fn(),
-    createTransportSession: vi.fn().mockImplementation(async (input: { sessionId: string; attachmentId: string; instanceId: string; runtimeClass: string }) => ({
-      sessionId: input.sessionId,
-      attachmentId: input.attachmentId,
-      instanceId: input.instanceId,
-      runtimeClass: input.runtimeClass,
-      mode: "prototype-webrtc",
-      status: "stub",
-      workerBaseUrl: "http://127.0.0.1:7780",
-      sessionToken: `stub-${input.sessionId}-${input.attachmentId}`,
-    })),
-    updateTransportRole: vi.fn().mockResolvedValue(undefined),
-    destroyTransportSession: vi.fn().mockResolvedValue(undefined),
-    forwardOffer: vi.fn().mockResolvedValue({ sdpAnswer: "v=0\r\nanswer" }),
-    forwardICECandidate: vi.fn().mockResolvedValue(undefined),
+    createTransportSession: vi.fn(),
+    updateTransportRole: vi.fn(),
+    destroyTransportSession: vi.fn(),
+    forwardOffer: vi.fn(),
+    forwardICECandidate: vi.fn(),
   }
 }
 
@@ -69,8 +64,11 @@ async function createAppWithSession() {
   const db = createTestDb()
   const workerClient = createWorkerClient()
   const instanceService = createInstanceService({ db, workerClient })
-  const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
-  const authService = createAuthService({ db })
+    const fixture = createAdminAuthFixture()
+  temporaryFixtures.push(fixture)
+  const authService = createAuthService({ db, bootstrapSecretPath: fixture.bootstrapSecretPath })
+
+  const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
   const app = createServer({
     workerClient,
     instanceService,
@@ -80,16 +78,9 @@ async function createAppWithSession() {
     baseUrl: "http://localhost:3000",
     getClientAddress: () => "127.0.0.1",
   })
+  const owner = await setupAdmin(app, fixture)
+  const auth = { Authorization: `Bearer ${owner.token}`, "content-type": "application/json" }
 
-  const claimRes = await app.request("/api/v1/auth/claim", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ displayName: "Owner" }),
-  })
-  const { token } = await claimRes.json() as { token: string }
-  const auth = { Authorization: `Bearer ${token}`, "content-type": "application/json" }
-
-  // Create and start an instance
   const createInstanceRes = await app.request("/api/v1/instances", {
     method: "POST",
     headers: auth,
@@ -104,115 +95,143 @@ async function createAppWithSession() {
         accelerationMode: "auto",
         streamProfile: "prototype",
       },
-      launchConfig: {
-        headless: true,
-        readOnly: true,
-        wipeData: false,
-      },
+      launchConfig: { headless: true, readOnly: true, wipeData: false },
     }),
   })
-  const createInstanceBody = await createInstanceRes.json() as { instance: { id: string } }
-
-  const startInstanceRes = await app.request(`/api/v1/instances/${createInstanceBody.instance.id}/start`, {
-    method: "POST",
-    headers: auth,
-  })
-  expect(startInstanceRes.status).toBe(200)
-
-  // Create a session
+  const instanceId = (await createInstanceRes.json() as { instance: { id: string } }).instance.id
+  await app.request(`/api/v1/instances/${instanceId}/start`, { method: "POST", headers: auth })
   const createSessionRes = await app.request("/api/v1/sessions", {
     method: "POST",
     headers: auth,
-    body: JSON.stringify({
-      instanceId: createInstanceBody.instance.id,
-      ownerClientId: "owner-1",
-    }),
+    body: JSON.stringify({ instanceId, ownerClientId: "owner-1" }),
   })
-  expect(createSessionRes.status).toBe(201)
-  const createSessionBody = await createSessionRes.json() as { session: { id: string } }
-
-  return { app, sessionId: createSessionBody.session.id }
+  const sessionId = (await createSessionRes.json() as { session: { id: string } }).session.id
+  return { app, authService, db, owner, ownerAuth: auth, sessionId }
 }
 
-describe("POST /api/v1/sessions/:id/invites", () => {
-  beforeEach(() => {
-    resetTestDb()
-  })
+async function issueInvite(app: ReturnType<typeof createServer>, sessionId: string, headers: HeadersInit) {
+  const response = await app.request(`/api/v1/sessions/${sessionId}/invites`, { method: "POST", headers })
+  expect(response.status).toBe(201)
+  return await response.json() as { token: string; expiresAt: string }
+}
 
-  it("returns an invite URL with a single-use token", async () => {
-    const { app, sessionId } = await createAppWithSession()
-
-    const res = await app.request(`/api/v1/sessions/${sessionId}/invites`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-    })
-    expect(res.status).toBe(201)
-    const body = await res.json() as { inviteUrl: string; token: string; attachmentId: string }
-    expect(body.token).toMatch(/^[a-f0-9-]+$/)
-    expect(body.inviteUrl).toContain(body.token)
-    expect(body.attachmentId).toBeDefined()
-  })
-
-  it("returns 404 for unknown session", async () => {
-    const db = createTestDb()
-    const workerClient = createWorkerClient()
-    const instanceService = createInstanceService({ db, workerClient })
-    const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
-    const app = createServer({
-      workerClient,
-      instanceService,
-      sessionService,
-      db,
-      baseUrl: "http://localhost:3000",
-    })
-
-    const res = await app.request("/api/v1/sessions/does-not-exist/invites", {
-      method: "POST",
-    })
-    expect(res.status).toBe(404)
-  })
+afterEach(() => {
+  for (const fixture of temporaryFixtures.splice(0)) {
+    fixture.cleanup()
+  }
 })
 
-describe("GET /session/:id — token redemption", () => {
+describe("session invite routes", () => {
   beforeEach(() => {
     resetTestDb()
   })
 
-  it("redirects redeemed invites to the Admin SPA session route", async () => {
-    const { app, sessionId } = await createAppWithSession()
+  it("requires the session owner's account credential to issue an invite", async () => {
+    const { app, authService, db, ownerAuth, sessionId } = await createAppWithSession()
+    const unauthenticated = await app.request(`/api/v1/sessions/${sessionId}/invites`, { method: "POST" })
+    expect(unauthenticated.status).toBe(401)
 
-    const inviteRes = await app.request(`/api/v1/sessions/${sessionId}/invites`, { method: "POST" })
-    expect(inviteRes.status).toBe(201)
-    const { token } = await inviteRes.json() as { token: string }
-
-    const redeemRes = await app.request(`/session/${sessionId}?token=${token}`, {
-      redirect: "manual",
+    createUser(db, {
+      id: "non-owner",
+      displayName: "Non Owner",
+      userType: "registered",
+      username: "nonowner",
+      passwordHash: "hash",
+      enrollmentRequired: false,
+      isServerOwner: false,
+      status: "active",
     })
-    expect(redeemRes.status).toBe(302)
-    const location = redeemRes.headers.get("location") ?? ""
-    const attachmentId = new URL(location, "http://localhost").searchParams.get("attachmentId")
-    expect(attachmentId).not.toBeNull()
+    const nonOwner = authService.issueAccountCredential("non-owner", "test")
+    const forbidden = await app.request(`/api/v1/sessions/${sessionId}/invites`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${nonOwner}` },
+    })
+    expect(forbidden.status).toBe(403)
 
-    const sessionRes = await app.request(`/api/v1/sessions/${sessionId}`)
-    expect(sessionRes.status).toBe(200)
-    const sessionBody = await sessionRes.json() as {
-      session: { attachments: Array<{ id: string; status: string }> }
-    }
-    expect(sessionBody.session.attachments).toContainEqual(
-      expect.objectContaining({ id: attachmentId, status: "connected" }),
-    )
-
-    const adminRedirectRes = await app.request(location, { redirect: "manual" })
-    expect(adminRedirectRes.status).toBe(302)
-    expect(adminRedirectRes.headers.get("location")).toBe(
-      `/admin/session/${sessionId}?attachmentId=${attachmentId}`,
-    )
+    const invite = await issueInvite(app, sessionId, ownerAuth)
+    expect(invite.token).toHaveLength(43)
+    const row = db.$client.prepare("SELECT token_hash FROM session_invites").get() as { token_hash: string }
+    expect(row.token_hash).toBe(hashToken(invite.token))
   })
 
-  it("returns 400 when token is invalid", async () => {
-    const { app, sessionId } = await createAppWithSession()
+  it("uses only the authenticated account for registered redemption", async () => {
+    const { app, authService, db, owner, ownerAuth, sessionId } = await createAppWithSession()
+    createUser(db, {
+      id: "registered-user",
+      displayName: "Registered",
+      userType: "registered",
+      username: "registered",
+      passwordHash: "hash",
+      enrollmentRequired: false,
+      isServerOwner: false,
+      status: "active",
+    })
+    const registeredToken = authService.issueAccountCredential("registered-user", "test")
+    const invite = await issueInvite(app, sessionId, ownerAuth)
+    const missingCredential = await app.request("/api/v1/session-invites/redeem", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: invite.token, mode: "registered" }),
+    })
+    expect(missingCredential.status).toBe(401)
 
-    const res = await app.request(`/session/${sessionId}?token=bad-token`)
-    expect(res.status).toBe(400)
+    const response = await app.request("/api/v1/session-invites/redeem", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${registeredToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ token: invite.token, mode: "registered", requesterUserId: owner.user.id }),
+    })
+
+    expect(response.status).toBe(201)
+    const joined = await response.json() as { user: { id: string; username: string }; attachmentToken: string }
+    expect(joined.user).toEqual(expect.objectContaining({ id: "registered-user", username: "registered" }))
+    expect(await authService.authenticate(joined.attachmentToken)).toMatchObject({ userId: "registered-user", scope: "attachment", sessionId })
+  })
+
+  it("rejects every Authorization header for guest redemption and creates an independent guest without one", async () => {
+    const { app, db, ownerAuth, sessionId } = await createAppWithSession()
+    const invite = await issueInvite(app, sessionId, ownerAuth)
+    const withAccount = await app.request("/api/v1/session-invites/redeem", {
+      method: "POST",
+      headers: ownerAuth,
+      body: JSON.stringify({ token: invite.token, mode: "guest", displayName: "Visitor" }),
+    })
+    expect(withAccount.status).toBe(400)
+    expect(listUsers(db)).toHaveLength(1)
+
+    const guest = await app.request("/api/v1/session-invites/redeem", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: invite.token, mode: "guest", displayName: "Visitor" }),
+    })
+    expect(guest.status).toBe(201)
+    const joined = await guest.json() as { user: { id: string; type: string; username: string | null }; attachment: { role: string }; attachmentToken: string }
+    expect(joined.user).toMatchObject({ type: "guest", username: null })
+    expect(getUserById(db, joined.user.id)).toMatchObject({ passwordHash: null, username: null })
+    expect(joined.attachment).toMatchObject({ role: "observer" })
+    expect(joined.attachmentToken).toBeTruthy()
+  })
+
+  it("rejects attachment credentials for registered redemption and has no legacy token redirect", async () => {
+    const { app, authService, ownerAuth, sessionId } = await createAppWithSession()
+    const guestInvite = await issueInvite(app, sessionId, ownerAuth)
+    const guestResponse = await app.request("/api/v1/session-invites/redeem", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: guestInvite.token, mode: "guest" }),
+    })
+    const guestJoined = await guestResponse.json() as { attachmentToken: string }
+    const registeredInvite = await issueInvite(app, sessionId, ownerAuth)
+
+    const response = await app.request("/api/v1/session-invites/redeem", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${guestJoined.attachmentToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ token: registeredInvite.token, mode: "registered" }),
+    })
+    expect(response.status).toBe(403)
+    expect(await authService.authenticate(guestJoined.attachmentToken)).toMatchObject({ scope: "attachment" })
+
+    const legacy = await app.request(`/session/${sessionId}?token=${registeredInvite.token}`, { redirect: "manual" })
+    expect(legacy.status).toBe(404)
+    expect(legacy.headers.get("location")).toBeNull()
   })
 })

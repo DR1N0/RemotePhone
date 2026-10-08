@@ -2,15 +2,30 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
+import { eq } from "drizzle-orm"
 import { beforeEach, describe, expect, it } from "vitest"
 import { createAppDb, createTestDb, resetTestDb } from "../src/persistence/db.js"
-import { principals, credentials, pairingInvites } from "../src/persistence/schema.js"
+import { auditEvents, users, credentials, pairingInvites } from "../src/persistence/schema.js"
 import {
-  createPrincipal,
-  getPrincipalById,
-  getServerOwnerPrincipal,
-  setPrincipalStatus,
-} from "../src/persistence/repositories/principals.js"
+  countActiveAdmins,
+  createUser,
+  getUserById,
+  getUserByUsername,
+  listUsers,
+  toUserDto,
+} from "../src/persistence/repositories/users.js"
+import {
+  consumeSessionInvite,
+  createSessionInvite,
+  getSessionInviteByTokenHash,
+} from "../src/persistence/repositories/session-invites.js"
+import { createAuditEvent } from "../src/persistence/repositories/audit-events.js"
+import {
+  createUser,
+  getUserById,
+  getServerOwnerUser,
+  setUserStatus,
+} from "../src/persistence/repositories/users.js"
 import {
   createCredential,
   getCredentialByTokenHash,
@@ -25,7 +40,6 @@ import {
 import {
   createAttachment,
   getAttachmentById,
-  getAttachmentByInviteToken,
   listAttachmentsForSession,
   setAttachmentPendingTransportRole,
   updateAttachmentRole,
@@ -33,6 +47,7 @@ import {
 } from "../src/persistence/repositories/attachments.js"
 import {
   createInstance,
+  createInstanceIfOwnerAbsent,
   getInstanceById,
   listInstances,
   listInstancesByOwner,
@@ -43,18 +58,21 @@ import {
   putSetting,
 } from "../src/persistence/repositories/settings.js"
 import {
-  activateSession,
+  clearOwnerAbsenceDeadline,
   closeSession,
   createSession,
   findOpenSessionForInstance,
   getSessionById,
-  listIdleSessions,
   listSessionsForInstance,
-  markSessionIdle,
+  listSessionsWithExpiredOwnerAbsence,
+  setOwnerAbsenceDeadline,
 } from "../src/persistence/repositories/sessions.js"
 
-function seedPrincipal(db: ReturnType<typeof createTestDb>, id = "principal_1"): void {
-  createPrincipal(db, {
+function seedUser(db: ReturnType<typeof createTestDb>, id = "user_1"): void {
+  if (db.select().from(users).where(eq(users.id, id)).get() != null) {
+    return
+  }
+  createUser(db, {
     id,
     displayName: "Test Owner",
     isServerOwner: false,
@@ -65,9 +83,9 @@ function seedPrincipal(db: ReturnType<typeof createTestDb>, id = "principal_1"):
 function seedInstance(
   db: ReturnType<typeof createTestDb>,
   id = "inst_1",
-  ownerId = "principal_1",
+  ownerId = "user_1",
 ): void {
-  seedPrincipal(db, ownerId)
+  seedUser(db, ownerId)
   createInstance(db, {
     id,
     ownerId,
@@ -185,31 +203,33 @@ describe("persistence repositories", () => {
       id: "sess_1",
       instanceId: "inst_1",
       status: "active",
-      idleExpiresAt: null,
+      ownerAbsenceDeadline: null,
+      ownerAbsenceTimeoutMs: null,
       reconnectToken: "reconnect-session-1",
     })
 
-    markSessionIdle(db, {
+    setOwnerAbsenceDeadline(db, {
       id: "sess_1",
-      idleExpiresAt: "2026-07-10T12:00:00.000Z",
+      ownerAbsenceDeadline: "2026-07-10T12:00:00.000Z",
     })
 
     let rows = listSessionsForInstance(db, "inst_1")
     expect(rows).toHaveLength(1)
-    expect(getSessionById(db, "sess_1")?.status).toBe("idle")
-    expect(getSessionById(db, "sess_1")?.idleExpiresAt).toBe("2026-07-10T12:00:00.000Z")
+    expect(getSessionById(db, "sess_1")?.status).toBe("active")
+    expect(getSessionById(db, "sess_1")?.ownerAbsenceDeadline).toBe("2026-07-10T12:00:00.000Z")
     expect(findOpenSessionForInstance(db, "inst_1")?.id).toBe("sess_1")
-    expect(listIdleSessions(db)).toEqual([
+    expect(listSessionsWithExpiredOwnerAbsence(db, "2026-07-10T12:00:01.000Z")).toEqual([
       expect.objectContaining({
         id: "sess_1",
         instanceId: "inst_1",
-        status: "idle",
+        status: "active",
       }),
     ])
+    expect(listSessionsWithExpiredOwnerAbsence(db, "2026-07-10T11:59:59.000Z")).toEqual([])
 
-    activateSession(db, { id: "sess_1" })
+    clearOwnerAbsenceDeadline(db, { id: "sess_1" })
     expect(getSessionById(db, "sess_1")?.status).toBe("active")
-    expect(getSessionById(db, "sess_1")?.idleExpiresAt).toBeNull()
+    expect(getSessionById(db, "sess_1")?.ownerAbsenceDeadline).toBeNull()
 
     closeSession(db, { id: "sess_1" })
     rows = listSessionsForInstance(db, "inst_1")
@@ -227,7 +247,8 @@ describe("persistence repositories", () => {
       id: "sess_1",
       instanceId: "inst_1",
       status: "active",
-      idleExpiresAt: null,
+      ownerAbsenceDeadline: null,
+      ownerAbsenceTimeoutMs: null,
       reconnectToken: "reconnect-session-1",
     })
 
@@ -299,7 +320,9 @@ describe("persistence repositories", () => {
     expect(listTableNames(testDb)).toEqual(expect.arrayContaining([
       "__drizzle_migrations",
       "attachments",
+      "audit_events",
       "instances",
+      "session_invites",
       "sessions",
       "settings",
     ]))
@@ -311,7 +334,9 @@ describe("persistence repositories", () => {
     expect(listTableNames(db)).toEqual(expect.arrayContaining([
       "__drizzle_migrations",
       "attachments",
+      "audit_events",
       "instances",
+      "session_invites",
       "sessions",
       "settings",
     ]))
@@ -328,7 +353,8 @@ describe("persistence repositories", () => {
         id: "sess_orphan",
         instanceId: "missing-instance",
         status: "active",
-        idleExpiresAt: null,
+        ownerAbsenceDeadline: null,
+      ownerAbsenceTimeoutMs: null,
         reconnectToken: "reconnect-missing-session",
       }),
     ).toThrow()
@@ -347,53 +373,202 @@ describe("persistence repositories", () => {
     ).toThrow()
   })
 
-  it("stores and retrieves invite token", () => {
+  it("normalizes usernames on insert and lookup and returns safe user DTOs", () => {
     const db = createTestDb()
 
-    seedInstance(db)
+    createUser(db, {
+      id: "registered-user",
+      displayName: "Registered User",
+      userType: "registered",
+      username: "  ALIce  ",
+      passwordHash: "password-hash",
+      enrollmentRequired: false,
+      isServerOwner: false,
+      status: "active",
+    })
 
+    const user = getUserByUsername(db, " Alice ")
+    expect(user).toMatchObject({ id: "registered-user", username: "alice" })
+    expect(getUserById(db, "registered-user")).toEqual(user)
+    expect(toUserDto(user!)).toEqual({
+      id: "registered-user",
+      type: "registered",
+      username: "alice",
+      displayName: "Registered User",
+      status: "active",
+    })
+    expect(() => createUser(db, {
+      id: "duplicate-user",
+      displayName: "Duplicate User",
+      userType: "registered",
+      username: "alice",
+      passwordHash: "password-hash",
+      enrollmentRequired: false,
+      isServerOwner: false,
+      status: "active",
+    })).toThrow()
+
+    createUser(db, {
+      id: "active-admin",
+      displayName: "Active Admin",
+      userType: "admin",
+      username: "Root",
+      passwordHash: "password-hash",
+      enrollmentRequired: false,
+      isServerOwner: true,
+      status: "active",
+    })
+    expect(listUsers(db).map((row) => row.id)).toEqual(expect.arrayContaining([
+      "registered-user",
+      "active-admin",
+    ]))
+    expect(countActiveAdmins(db)).toBe(1)
+  })
+
+  it("rejects a guest user with a login username", () => {
+    const db = createTestDb()
+
+    expect(() => createUser(db, {
+      id: "guest-with-login",
+      displayName: "Guest",
+      userType: "guest",
+      username: "guest-login",
+      passwordHash: null,
+      enrollmentRequired: false,
+      isServerOwner: false,
+      status: "active",
+    })).toThrow("guest users cannot have a login username")
+    expect(getUserById(db, "guest-with-login")).toBeUndefined()
+  })
+
+  it("consumes a valid session invite exactly once", () => {
+    const db = createTestDb()
+    seedInstance(db)
     createSession(db, {
-      id: "sess_1",
+      id: "sess_invite",
       instanceId: "inst_1",
       status: "active",
-      idleExpiresAt: null,
-      reconnectToken: "reconnect-session-1",
+      ownerAbsenceDeadline: null,
+      ownerAbsenceTimeoutMs: null,
+      reconnectToken: "reconnect-session-invite",
+    })
+    createSessionInvite(db, {
+      id: "session-invite-1",
+      sessionId: "sess_invite",
+      createdByUserId: "user_1",
+      tokenHash: "session-invite-hash",
+      expiresAt: "2026-10-03T00:00:00.000Z",
+      consumedAt: null,
     })
 
-    createAttachment(db, {
-      id: "att-invite-1",
-      sessionId: "sess_1",
-      clientId: "client-1",
-      role: "observer",
-      status: "disconnected",
-      reconnectToken: null,
-      inviteToken: "tok-abc123",
+    expect(consumeSessionInvite(db, {
+      id: "session-invite-1",
+      consumedAt: "2026-10-02T12:00:00.000Z",
+      now: "2026-10-02T12:00:00.000Z",
+    })).toBe(true)
+    expect(consumeSessionInvite(db, {
+      id: "session-invite-1",
+      consumedAt: "2026-10-02T12:00:01.000Z",
+      now: "2026-10-02T12:00:01.000Z",
+    })).toBe(false)
+    expect(getSessionInviteByTokenHash(db, "session-invite-hash")?.consumedAt).toBe(
+      "2026-10-02T12:00:00.000Z",
+    )
+  })
+
+  it("writes audit events through the repository", () => {
+    const db = createTestDb()
+    seedUser(db)
+
+    createAuditEvent(db, {
+      id: "audit-event-1",
+      actorUserId: "user_1",
+      actorCredentialId: null,
+      action: "session.invite.issue",
+      targetType: "session",
+      targetId: "sess_1",
+      requestId: "request-1",
+      outcome: "success",
     })
 
-    const row = getAttachmentByInviteToken(db, "tok-abc123")
-    expect(row).toBeDefined()
-    expect(row?.id).toBe("att-invite-1")
+    expect(db.select().from(auditEvents).get()).toMatchObject({
+      id: "audit-event-1",
+      actorUserId: "user_1",
+      action: "session.invite.issue",
+      outcome: "success",
+    })
+  })
+
+  it("preserves duplicate instance owners for later conflict remediation", () => {
+    const db = createTestDb()
+    seedInstance(db, "inst_duplicate_a", "duplicate-owner")
+    seedInstance(db, "inst_duplicate_b", "duplicate-owner")
+
+    expect(listInstancesByOwner(db, "duplicate-owner").map((instance) => instance.id)).toEqual([
+      "inst_duplicate_a",
+      "inst_duplicate_b",
+    ])
+  })
+
+  it("blocks another instance for a duplicated owner without deleting legacy rows", () => {
+    const db = createTestDb()
+    seedInstance(db, "inst_duplicate_a", "duplicate-owner")
+    seedInstance(db, "inst_duplicate_b", "duplicate-owner")
+
+    expect(createInstanceIfOwnerAbsent(db, {
+      id: "inst_duplicate_c",
+      ownerId: "duplicate-owner",
+      name: "phone-3",
+      runtimeClass: "android-studio-emulator",
+      templateId: "macos-android-studio:Medium_Phone",
+      placementPolicy: { kind: "local-only" },
+      resourceProfile: {
+        cpuMillicores: 1000,
+        memoryMb: 4096,
+        diskMb: 8192,
+        accelerationMode: "auto",
+        streamProfile: "prototype",
+      },
+      launchConfig: { headless: true, readOnly: true, wipeData: false },
+      desiredState: "stopped",
+      observedState: "stopped",
+      runtimeHandle: null,
+      stateDataRef: null,
+      lastError: null,
+    })).toBe(false)
+    expect(listInstancesByOwner(db, "duplicate-owner").map((instance) => instance.id)).toEqual([
+      "inst_duplicate_a",
+      "inst_duplicate_b",
+    ])
   })
 })
 
-describe("principals, credentials, pairing_invites schema", () => {
+describe("users, credentials, pairing_invites schema", () => {
   beforeEach(() => {
     resetTestDb()
   })
 
-  it("round-trips a principal, a credential, and a pairing invite", () => {
+  it("round-trips compatible user identities and account credentials", () => {
     const db = createTestDb()
 
-    db.insert(principals).values({
-      id: "principal_1",
+    db.insert(users).values({
+      id: "owner-1",
       displayName: "Server Owner",
       isServerOwner: true,
+      userType: "admin",
+      status: "active",
+    }).run()
+    db.insert(users).values({
+      id: "guest-1",
+      displayName: "Guest",
+      isServerOwner: false,
+      userType: "guest",
       status: "active",
     }).run()
 
     db.insert(credentials).values({
-      id: "credential_1",
-      principalId: "principal_1",
+      id: "device-1",
+      userId: "owner-1",
       tokenHash: "deadbeef",
       deviceLabel: "laptop-chrome",
       revokedAt: null,
@@ -402,72 +577,93 @@ describe("principals, credentials, pairing_invites schema", () => {
     db.insert(pairingInvites).values({
       id: "invite_1",
       tokenHash: "cafef00d",
-      createdBy: "principal_1",
+      createdBy: "owner-1",
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       consumedAt: null,
-      consumedByPrincipalId: null,
+      consumedByUserId: null,
     }).run()
 
-    const principalRow = db.select().from(principals).all()[0]
-    expect(principalRow).toMatchObject({
-      id: "principal_1",
-      displayName: "Server Owner",
-      isServerOwner: true,
-      status: "active",
+    expect(db.select().from(users).where(eq(users.id, "owner-1")).get()).toMatchObject({
+      id: "owner-1",
+      userType: "admin",
+      enrollmentRequired: true,
     })
-
-    const credentialRow = db.select().from(credentials).all()[0]
-    expect(credentialRow).toMatchObject({
-      id: "credential_1",
-      principalId: "principal_1",
-      tokenHash: "deadbeef",
-      deviceLabel: "laptop-chrome",
-      revokedAt: null,
+    expect(db.select().from(users).where(eq(users.id, "guest-1")).get()).toMatchObject({
+      id: "guest-1",
+      userType: "guest",
+      username: null,
+    })
+    expect(db.select().from(credentials).where(eq(credentials.id, "device-1")).get()).toMatchObject({
+      id: "device-1",
+      userId: "owner-1",
+      scope: "account",
     })
 
     const inviteRow = db.select().from(pairingInvites).all()[0]
     expect(inviteRow).toMatchObject({
       id: "invite_1",
       tokenHash: "cafef00d",
-      createdBy: "principal_1",
+      createdBy: "owner-1",
       consumedAt: null,
-      consumedByPrincipalId: null,
+      consumedByUserId: null,
     })
   })
 
-  it("creates and looks up a server owner principal and its credential", () => {
+  it("rejects duplicate usernames regardless of case", () => {
     const db = createTestDb()
 
-    createPrincipal(db, {
-      id: "principal_owner",
+    db.insert(users).values({
+      id: "registered-1",
+      displayName: "Registered User",
+      isServerOwner: false,
+      userType: "registered",
+      username: "Alice",
+      status: "active",
+    }).run()
+
+    expect(() => db.insert(users).values({
+      id: "registered-2",
+      displayName: "Duplicate User",
+      isServerOwner: false,
+      userType: "registered",
+      username: "alice",
+      status: "active",
+    }).run()).toThrow()
+  })
+
+  it("creates and looks up a server owner user and its credential", () => {
+    const db = createTestDb()
+
+    createUser(db, {
+      id: "user_owner",
       displayName: "Server Owner",
       isServerOwner: true,
       status: "active",
     })
 
-    createPrincipal(db, {
-      id: "principal_other",
+    createUser(db, {
+      id: "user_other",
       displayName: "Someone Else",
       isServerOwner: false,
       status: "active",
     })
 
-    expect(getPrincipalById(db, "principal_owner")?.displayName).toBe("Server Owner")
-    expect(getServerOwnerPrincipal(db)?.id).toBe("principal_owner")
+    expect(getUserById(db, "user_owner")?.displayName).toBe("Server Owner")
+    expect(getServerOwnerUser(db)?.id).toBe("user_owner")
 
-    setPrincipalStatus(db, { id: "principal_other", status: "banned" })
-    expect(getPrincipalById(db, "principal_other")?.status).toBe("banned")
+    setUserStatus(db, { id: "user_other", status: "banned" })
+    expect(getUserById(db, "user_other")?.status).toBe("banned")
 
     createCredential(db, {
       id: "credential_owner",
-      principalId: "principal_owner",
+      userId: "user_owner",
       tokenHash: "hash-owner",
       deviceLabel: "laptop-chrome",
       revokedAt: null,
     })
 
     expect(getCredentialByTokenHash(db, "hash-owner")?.id).toBe("credential_owner")
-    expect(getCredentialById(db, "credential_owner")?.principalId).toBe("principal_owner")
+    expect(getCredentialById(db, "credential_owner")?.userId).toBe("user_owner")
 
     revokeCredential(db, { id: "credential_owner", revokedAt: "2026-09-21T00:00:00.000Z" })
     expect(getCredentialById(db, "credential_owner")?.revokedAt).toBe("2026-09-21T00:00:00.000Z")
@@ -476,8 +672,8 @@ describe("principals, credentials, pairing_invites schema", () => {
   it("creates, looks up, and consumes a pairing invite", () => {
     const db = createTestDb()
 
-    createPrincipal(db, {
-      id: "principal_owner",
+    createUser(db, {
+      id: "user_owner",
       displayName: "Server Owner",
       isServerOwner: true,
       status: "active",
@@ -486,29 +682,30 @@ describe("principals, credentials, pairing_invites schema", () => {
     createPairingInvite(db, {
       id: "invite_2",
       tokenHash: "hash-invite-2",
-      createdBy: "principal_owner",
+      createdBy: "user_owner",
       expiresAt: "2026-09-22T00:00:00.000Z",
       consumedAt: null,
-      consumedByPrincipalId: null,
+      consumedByUserId: null,
     })
 
     expect(getPairingInviteByTokenHash(db, "hash-invite-2")?.id).toBe("invite_2")
 
-    createPrincipal(db, {
-      id: "principal_new",
+    createUser(db, {
+      id: "user_new",
       displayName: "New Person",
       isServerOwner: false,
       status: "active",
     })
 
-    consumePairingInvite(db, {
+    expect(consumePairingInvite(db, {
       id: "invite_2",
       consumedAt: "2026-09-21T12:00:00.000Z",
-      consumedByPrincipalId: "principal_new",
-    })
+      consumedByUserId: "user_new",
+      now: "2026-09-21T12:00:00.000Z",
+    })).toBe(true)
 
     const consumed = getPairingInviteByTokenHash(db, "hash-invite-2")
     expect(consumed?.consumedAt).toBe("2026-09-21T12:00:00.000Z")
-    expect(consumed?.consumedByPrincipalId).toBe("principal_new")
+    expect(consumed?.consumedByUserId).toBe("user_new")
   })
 })

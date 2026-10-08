@@ -1,8 +1,16 @@
+import { randomUUID } from "node:crypto"
+
 import type { Context, Hono } from "hono"
 
-import { createSessionRequestSchema, joinSessionRequestSchema, resumeSessionRequestSchema } from "../domain/schemas.js"
-import { createBearerAuthMiddleware, getAuthenticatedPrincipal } from "../middleware/auth.js"
+import { createSessionRequestSchema } from "../domain/schemas.js"
+import {
+  createBearerAuthMiddleware,
+  getAuthenticatedUser,
+  requireAccountAuth,
+  requireAttachmentAuth,
+} from "../middleware/auth.js"
 import type { AuthService } from "../services/auth-service.js"
+import { createAuditContext } from "../services/audit-service.js"
 import {
   AttachmentNotFoundError,
   SessionConflictError,
@@ -11,35 +19,19 @@ import {
   SessionNotFoundError,
   type SessionService,
 } from "../services/session-service.js"
-import {
-  TransportUnavailableError,
-  type TransportService,
-} from "../services/transport-service.js"
+import { TransportUnavailableError, type TransportService } from "../services/transport-service.js"
 
 function errorStatus(error: unknown): 400 | 403 | 404 | 409 | 500 | 502 {
-  if (error instanceof TransportUnavailableError) {
-    return 502
-  }
-  if (error instanceof SessionInvalidRequestError) {
-    return 400
-  }
-  if (error instanceof SessionForbiddenError) {
-    return 403
-  }
-  if (error instanceof SessionNotFoundError || error instanceof AttachmentNotFoundError) {
-    return 404
-  }
-  if (error instanceof SessionConflictError) {
-    return 409
-  }
+  if (error instanceof TransportUnavailableError) return 502
+  if (error instanceof SessionInvalidRequestError) return 400
+  if (error instanceof SessionForbiddenError) return 403
+  if (error instanceof SessionNotFoundError || error instanceof AttachmentNotFoundError) return 404
+  if (error instanceof SessionConflictError) return 409
   return 500
 }
 
 function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-  return "unexpected error"
+  return error instanceof Error ? error.message : "unexpected error"
 }
 
 function jsonError(c: Context, error: unknown) {
@@ -55,75 +47,75 @@ export function registerSessionRoutes(
 ): void {
   const requireAuth = createBearerAuthMiddleware(authService)
 
-  async function getOptionalPrincipalId(c: Context): Promise<string | undefined> {
-    const header = c.req.header("Authorization")
-    if (!header?.startsWith("Bearer ")) {
-      return undefined
-    }
-    const principal = await authService.authenticate(header.slice("Bearer ".length))
-    return principal?.principalId
-  }
-
-  app.post("/api/v1/sessions", requireAuth, async (c) => {
-    const { principalId } = getAuthenticatedPrincipal(c)
+  app.post("/api/v1/sessions", requireAuth, requireAccountAuth, async (c) => {
     try {
       const input = createSessionRequestSchema.parse(await c.req.json())
-      const session = await sessionService.createSession({ ...input, requesterPrincipalId: principalId })
+      const created = await sessionService.createSession({ ...input, caller: getAuthenticatedUser(c) })
       c.status(201)
-      return c.json({ session })
+      return c.json(created)
     } catch (error) {
       return jsonError(c, error)
     }
   })
 
-  app.post("/api/v1/sessions/:id/join", async (c) => {
-    try {
-      const input = joinSessionRequestSchema.parse(await c.req.json())
-      const attachment = await sessionService.joinSession({
-        sessionId: c.req.param("id"),
-        clientId: input.clientId,
-      })
-      c.status(201)
-      return c.json({ attachment })
-    } catch (error) {
-      return jsonError(c, error)
-    }
+  app.post("/api/v1/sessions/:id/join", (c) => {
+    return c.json({ error: "session join is retired; redeem a session invite" }, 410)
   })
 
-  app.post("/api/v1/sessions/:id/resume", async (c) => {
-    try {
-      const input = resumeSessionRequestSchema.parse(await c.req.json())
-      const attachment = await sessionService.resumeAttachment({
-        sessionId: c.req.param("id"),
-        reconnectToken: input.reconnectToken,
-      })
-      return c.json({ attachment })
-    } catch (error) {
-      return jsonError(c, error)
-    }
+  app.post("/api/v1/sessions/:id/resume", (c) => {
+    return c.json({ error: "session resume requires an attachment credential" }, 410)
   })
 
-  app.post("/api/v1/sessions/:id/attachments/:attachmentId/disconnect", async (c) => {
-    let reconnectToken: string | undefined
-    try {
-      const body = await c.req.json() as { reconnectToken?: string }
-      reconnectToken = body.reconnectToken
-    } catch {
-      reconnectToken = undefined
-    }
-    const requesterPrincipalId = await getOptionalPrincipalId(c)
+  app.post(
+    "/api/v1/sessions/:id/attachments/:attachmentId/resume",
+    requireAuth,
+    requireAttachmentAuth,
+    async (c) => {
+      try {
+        const result = await sessionService.resumeAttachment({
+          sessionId: c.req.param("id"),
+          attachmentId: c.req.param("attachmentId"),
+          caller: getAuthenticatedUser(c),
+        })
+        return c.json(result)
+      } catch (error) {
+        return jsonError(c, error)
+      }
+    },
+  )
 
+  app.post(
+    "/api/v1/sessions/:id/attachments/:attachmentId/credentials/refresh",
+    requireAuth,
+    requireAttachmentAuth,
+    async (c) => {
+      try {
+        const result = await sessionService.refreshAttachmentCredential({
+          sessionId: c.req.param("id"),
+          attachmentId: c.req.param("attachmentId"),
+          caller: getAuthenticatedUser(c),
+        })
+        return c.json(result)
+      } catch (error) {
+        return jsonError(c, error)
+      }
+    },
+  )
+
+  app.post("/api/v1/sessions/:id/attachments/:attachmentId/disconnect", requireAuth, async (c) => {
     try {
       const sessionId = c.req.param("id")
       const attachmentId = c.req.param("attachmentId")
+      const caller = getAuthenticatedUser(c)
+      const audit = createAuditContext(caller.userId, caller.credentialId, randomUUID())
       const session = await sessionService.disconnectAttachment({
         sessionId,
         attachmentId,
-        requesterPrincipalId,
-        requesterReconnectToken: reconnectToken,
+        caller,
+        requestId: audit.requestId,
       })
       if (transportService != null) {
-        await transportService.destroyAttachmentTransport({ sessionId, attachmentId })
+        await transportService.teardownPendingAttachment({ sessionId, attachmentId, audit })
       }
       return c.json({ session })
     } catch (error) {
@@ -131,36 +123,26 @@ export function registerSessionRoutes(
     }
   })
 
-  app.post("/api/v1/sessions/:id/attachments/:attachmentId/promote", requireAuth, async (c) => {
-    const { principalId } = getAuthenticatedPrincipal(c)
+  app.post("/api/v1/sessions/:id/attachments/:attachmentId/promote", requireAuth, requireAccountAuth, async (c) => {
     try {
       const sessionId = c.req.param("id")
       const attachmentId = c.req.param("attachmentId")
-      const attachment = await sessionService.promoteAttachment({ sessionId, attachmentId, requesterPrincipalId: principalId })
+      const caller = getAuthenticatedUser(c)
+      const audit = createAuditContext(caller.userId, caller.credentialId, randomUUID())
+      const attachment = await sessionService.promoteAttachment({
+        sessionId,
+        attachmentId,
+        caller,
+        requestId: audit.requestId,
+      })
       if (transportService != null) {
         try {
-          await transportService.syncAttachmentRole({
-            sessionId,
-            attachmentId,
-            role: attachment.role,
-          })
-          await sessionService.setAttachmentPendingTransportRole({
-            sessionId,
-            attachmentId,
-            targetRole: null,
-          })
+          await transportService.syncAttachmentRole({ sessionId, attachmentId, role: attachment.role, audit })
+          await sessionService.setAttachmentPendingTransportRole({ sessionId, attachmentId, targetRole: null })
         } catch (error) {
-          await sessionService.setAttachmentPendingTransportRole({
-            sessionId,
-            attachmentId,
-            targetRole: "participant",
-          })
+          await sessionService.setAttachmentPendingTransportRole({ sessionId, attachmentId, targetRole: "participant" })
           try {
-            await transportService.syncAttachmentRole({
-              sessionId,
-              attachmentId,
-              role: "observer",
-            })
+            await transportService.syncAttachmentRole({ sessionId, attachmentId, role: "observer", audit })
           } catch {
             // A later ensure uses the durable restrictive pending role.
           }
@@ -173,44 +155,33 @@ export function registerSessionRoutes(
     }
   })
 
-  app.post("/api/v1/sessions/:id/attachments/:attachmentId/demote", requireAuth, async (c) => {
-    const { principalId } = getAuthenticatedPrincipal(c)
+  app.post("/api/v1/sessions/:id/attachments/:attachmentId/demote", requireAuth, requireAccountAuth, async (c) => {
     try {
       const sessionId = c.req.param("id")
       const attachmentId = c.req.param("attachmentId")
+      const caller = getAuthenticatedUser(c)
+      const audit = createAuditContext(caller.userId, caller.credentialId, randomUUID())
+      await sessionService.authorizeSessionModeration(sessionId, caller)
       if (transportService != null) {
         try {
-          await transportService.syncAttachmentRole({
-            sessionId,
-            attachmentId,
-            role: "observer",
-          })
+          await transportService.syncAttachmentRole({ sessionId, attachmentId, role: "observer", audit })
         } catch (error) {
-          await sessionService.setAttachmentPendingTransportRole({
-            sessionId,
-            attachmentId,
-            targetRole: "observer",
-          })
+          await sessionService.setAttachmentPendingTransportRole({ sessionId, attachmentId, targetRole: "observer" })
           throw error
         }
       }
       try {
-        const attachment = await sessionService.demoteAttachment({ sessionId, attachmentId, requesterPrincipalId: principalId })
-        if (transportService != null) {
-          await sessionService.setAttachmentPendingTransportRole({
-            sessionId,
-            attachmentId,
-            targetRole: null,
-          })
-        }
+        const attachment = await sessionService.demoteAttachment({
+          sessionId,
+          attachmentId,
+          caller,
+          requestId: audit.requestId,
+        })
+        if (transportService != null) await sessionService.setAttachmentPendingTransportRole({ sessionId, attachmentId, targetRole: null })
         return c.json({ attachment })
       } catch (error) {
         if (transportService != null) {
-          await sessionService.setAttachmentPendingTransportRole({
-            sessionId,
-            attachmentId,
-            targetRole: "observer",
-          })
+          await sessionService.setAttachmentPendingTransportRole({ sessionId, attachmentId, targetRole: "observer" })
         }
         throw error
       }
@@ -219,11 +190,15 @@ export function registerSessionRoutes(
     }
   })
 
-  app.get("/api/v1/sessions/:id", async (c) => {
+  app.get("/api/v1/sessions/:id", requireAuth, async (c) => {
     try {
-      const session = await sessionService.getSession(c.req.param("id"))
+      const session = await sessionService.getSession(c.req.param("id"), getAuthenticatedUser(c))
       return c.json({ session })
     } catch (error) {
+      // Session reads conceal private existence from valid but unrelated accounts.
+      if (error instanceof SessionForbiddenError) {
+        return c.json({ error: `session not found: ${c.req.param("id")}` }, 404)
+      }
       return jsonError(c, error)
     }
   })

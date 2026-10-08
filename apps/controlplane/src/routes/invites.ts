@@ -1,83 +1,143 @@
 import { randomUUID } from "node:crypto"
-import type { Hono } from "hono"
+
+import type { Context, Hono } from "hono"
 
 import {
-  createAttachment,
-  getAttachmentByInviteToken,
-  setAttachmentInviteToken,
-} from "../persistence/repositories/attachments.js"
-import type { AppDb } from "../persistence/db.js"
+  createBearerAuthMiddleware,
+  getAuthenticatedUser,
+  requireAccountAuth,
+} from "../middleware/auth.js"
+import type { AuthService } from "../services/auth-service.js"
 import {
+  SessionForbiddenError,
+  SessionInvalidRequestError,
   SessionNotFoundError,
-  type SessionService,
 } from "../services/session-service.js"
+import {
+  SessionInviteInvalidError,
+  type SessionInviteService,
+} from "../services/session-invite-service.js"
+
+function invalidRequest(c: Context, message: string) {
+  return c.json({ error: message }, 400)
+}
+
+function issueErrorStatus(error: unknown): 400 | 403 | 404 | 500 {
+  if (error instanceof SessionInvalidRequestError || error instanceof SessionInviteInvalidError) {
+    return 400
+  }
+  if (error instanceof SessionForbiddenError) {
+    return 403
+  }
+  if (error instanceof SessionNotFoundError) {
+    return 404
+  }
+  return 500
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "unexpected error"
+}
 
 export function registerInviteRoutes(
   app: Hono,
   deps: {
-    db: AppDb
-    sessionService: SessionService
-    baseUrl: string
+    sessionInviteService: SessionInviteService
+    authService: AuthService
   },
 ): void {
-  // Create a single-use invite token for a session
-  app.post("/api/v1/sessions/:id/invites", async (c) => {
-    const sessionId = c.req.param("id")
+  const requireAuth = createBearerAuthMiddleware(deps.authService)
+
+  app.post("/api/v1/sessions/:id/invites", requireAuth, requireAccountAuth, async (c) => {
+    let body: { ttlMs?: unknown } = {}
     try {
-      await deps.sessionService.getSession(sessionId)
-    } catch (e) {
-      if (e instanceof SessionNotFoundError) {
-        return c.json({ error: "session not found" }, 404)
-      }
-      return c.json({ error: "unexpected error" }, 500)
+      body = await c.req.json() as { ttlMs?: unknown }
+    } catch {
+      // An omitted body selects the default ten-minute TTL.
     }
 
-    // Create a disconnected observer attachment with an invite token
-    const attachmentId = randomUUID()
-    const token = randomUUID()
-    createAttachment(deps.db, {
-      id: attachmentId,
-      sessionId,
-      clientId: `invite-${attachmentId}`,
-      role: "observer",
-      status: "disconnected",
-      reconnectToken: null,
-      inviteToken: token,
-    })
-
-    const inviteUrl = `${deps.baseUrl}/session/${sessionId}?token=${token}`
-    return c.json({ token, inviteUrl, attachmentId }, 201)
+    try {
+      const caller = getAuthenticatedUser(c)
+      const invite = await deps.sessionInviteService.createSessionInvite({
+        sessionId: c.req.param("id"),
+        actorUserId: caller.userId,
+        actorCredentialId: caller.credentialId,
+        requestId: randomUUID(),
+        ttlMs: body.ttlMs as number | undefined,
+      })
+      c.status(201)
+      return c.json(invite)
+    } catch (error) {
+      return c.json({ error: errorMessage(error) }, issueErrorStatus(error))
+    }
   })
 
-  // Redeem an invite token — activate the attachment and redirect the browser
-  app.get("/session/:id", async (c) => {
-    const token = c.req.query("token")
-    const attachmentId = c.req.query("attachmentId")
-
-    // If attachmentId already present, redirect to admin page
-    if (attachmentId != null) {
-      return c.redirect(`/admin/session/${c.req.param("id")}?attachmentId=${attachmentId}`)
+  app.post("/api/v1/session-invites/redeem", async (c) => {
+    let body: { token?: unknown; mode?: unknown; displayName?: unknown }
+    try {
+      body = await c.req.json() as { token?: unknown; mode?: unknown; displayName?: unknown }
+    } catch {
+      return invalidRequest(c, "a JSON body is required")
+    }
+    if (typeof body.token !== "string") {
+      return invalidRequest(c, "token is required")
     }
 
-    if (token == null) {
-      return c.json({ error: "token or attachmentId required" }, 400)
+    if (body.mode === "guest") {
+      if (c.req.header("Authorization") != null) {
+        return invalidRequest(c, "guest redemption must not include an Authorization header")
+      }
+      if (body.displayName != null && typeof body.displayName !== "string") {
+        return invalidRequest(c, "displayName must be a string")
+      }
+      if (
+        typeof body.displayName === "string"
+        && (body.displayName.length < 1 || body.displayName.length > 40 || body.displayName.trim().length === 0)
+      ) {
+        return invalidRequest(c, "displayName must be 1 to 40 non-whitespace characters")
+      }
+      try {
+        const joined = await deps.sessionInviteService.redeemSessionInvite({
+          token: body.token,
+          mode: "guest",
+          actorCredentialId: null,
+          requestId: randomUUID(),
+          displayName: typeof body.displayName === "string" ? body.displayName : undefined,
+        })
+        c.status(201)
+        return c.json(joined)
+      } catch (error) {
+        return c.json({ error: errorMessage(error) }, issueErrorStatus(error))
+      }
     }
 
-    const row = getAttachmentByInviteToken(deps.db, token)
-    if (row == null || row.sessionId !== c.req.param("id")) {
-      return c.json({ error: "invalid or expired token" }, 400)
+    if (body.mode !== "registered") {
+      return invalidRequest(c, "mode must be registered or guest")
     }
-
-    // Connect the attachment before consuming its single-use token.
-    await deps.sessionService.connectAttachment({
-      sessionId: row.sessionId,
-      attachmentId: row.id,
-    })
-    setAttachmentInviteToken(deps.db, { id: row.id, inviteToken: null })
-
-    return c.redirect(
-      `/session/${row.sessionId}?attachmentId=${row.id}`,
-      302,
-    )
+    const header = c.req.header("Authorization")
+    const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : undefined
+    if (token == null || token.length === 0) {
+      return c.json({ error: "missing bearer token" }, 401)
+    }
+    const authenticated = await deps.authService.authenticate(token)
+    if (authenticated == null) {
+      return c.json({ error: "invalid or revoked credential" }, 401)
+    }
+    if (authenticated.scope !== "account") {
+      return c.json({ error: "credential scope is not authorized" }, 403)
+    }
+    try {
+      const joined = await deps.sessionInviteService.redeemSessionInvite({
+        token: body.token,
+        mode: "registered",
+        requesterUserId: authenticated.userId,
+        actorCredentialId: authenticated.credentialId,
+        requestId: randomUUID(),
+      })
+      c.status(201)
+      return c.json(joined)
+    } catch (error) {
+      return c.json({ error: errorMessage(error) }, issueErrorStatus(error))
+    }
   })
 }

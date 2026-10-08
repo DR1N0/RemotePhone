@@ -1,9 +1,14 @@
 export type ControlPlaneEnv = {
   port: number
+  listenHostname: "127.0.0.1"
   workerBaseUrl: string
   databasePath: string
-  sessionIdleTtlMs: number
+  bootstrapSecretPath: string
+  ownerAbsenceTimeoutMs: number
+  ownerAbsenceTimeoutMinMs: number
+  ownerAbsenceTimeoutMaxMs: number
   reconcileIntervalMs: number
+  enableSessionDiagnostic: boolean
 }
 
 function parsePort(value: string | undefined, fallback: number): number {
@@ -35,9 +40,14 @@ function parsePositiveInteger(value: string | undefined, fallback: number, name:
 export function loadEnv(env: NodeJS.ProcessEnv = process.env): ControlPlaneEnv {
   return {
     port: parsePort(env.MAKO_CONTROLPLANE_PORT ?? env.PORT, 3000),
+    listenHostname: "127.0.0.1",
     workerBaseUrl: (env.MAKO_WORKER_BASE_URL ?? "http://127.0.0.1:7780").replace(/\/$/, ""),
     databasePath: env.MAKO_CONTROLPLANE_DB_PATH ?? "./data/mako.db",
-    sessionIdleTtlMs: parsePositiveInteger(env.MAKO_SESSION_IDLE_TTL_MS, 300_000, "session idle ttl"),
+    bootstrapSecretPath: env.MAKO_BOOTSTRAP_SECRET_PATH ?? `${env.MAKO_CONTROLPLANE_DB_PATH ?? "./data/mako.db"}.bootstrap-secret`,
+    ownerAbsenceTimeoutMs: parsePositiveInteger(env.MAKO_OWNER_ABSENCE_TIMEOUT_MS, 300_000, "owner absence timeout"),
+    ownerAbsenceTimeoutMinMs: parsePositiveInteger(env.MAKO_OWNER_ABSENCE_TIMEOUT_MIN_MS, 30_000, "owner absence timeout min"),
+    ownerAbsenceTimeoutMaxMs: parsePositiveInteger(env.MAKO_OWNER_ABSENCE_TIMEOUT_MAX_MS, 3_600_000, "owner absence timeout max"),
     reconcileIntervalMs: parsePositiveInteger(env.MAKO_RECONCILE_INTERVAL_MS, 5_000, "reconcile interval"),
+    enableSessionDiagnostic: env.MAKO_ENABLE_SESSION_DIAGNOSTIC === "true",
   }
 }

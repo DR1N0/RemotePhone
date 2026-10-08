@@ -3,7 +3,6 @@ import {
   createInstanceRequestSchema,
   createSessionRequestSchema,
   hostOsSchema,
-  joinSessionRequestSchema,
   launchConfigSchema,
   placementPolicySchema,
   resourceProfileSchema,
@@ -131,14 +130,6 @@ describe("domain schemas", () => {
     })).toEqual({
       instanceId: "inst_1",
       ownerClientId: "owner_1",
-    })
-  })
-
-  it("accepts a join-session request with a client id only", () => {
-    expect(joinSessionRequestSchema.parse({
-      clientId: "observer_1",
-    })).toEqual({
-      clientId: "observer_1",
     })
   })
 })

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { createTestDb, resetTestDb } from "../src/persistence/db.js"
 import { createServer } from "../src/server.js"
+import { createAuthService } from "../src/services/auth-service.js"
 import { createInstanceService } from "../src/services/instance-service.js"
 import { createSessionService } from "../src/services/session-service.js"
 
@@ -31,8 +32,9 @@ describe("docs routes", () => {
     const workerClient = createWorkerClient()
     const db = createTestDb()
     const instanceService = createInstanceService({ db, workerClient })
-    const sessionService = createSessionService({ db, idleTtlMs: 300_000 })
-    const app = createServer({ workerClient, instanceService, sessionService })
+    const authService = createAuthService({ db })
+    const sessionService = createSessionService({ db, authService, defaultOwnerAbsenceTimeoutMs: 300_000 })
+    const app = createServer({ workerClient, instanceService, sessionService, authService })
 
     const res = await app.request("/openapi.json")
 
@@ -42,6 +44,7 @@ describe("docs routes", () => {
       info: {
         title: "Mako Server API",
         version: "0.1.0",
+        description: expect.stringContaining("loopback"),
       },
       paths: expect.objectContaining({
         "/": expect.any(Object),
@@ -68,10 +71,10 @@ describe("docs routes", () => {
         "/api/v1/sessions/{id}": expect.objectContaining({
           get: expect.any(Object),
         }),
-        "/api/v1/sessions/{id}/join": expect.objectContaining({
+        "/api/v1/sessions/{id}/attachments/{attachmentId}/resume": expect.objectContaining({
           post: expect.any(Object),
         }),
-        "/api/v1/sessions/{id}/resume": expect.objectContaining({
+        "/api/v1/sessions/{id}/attachments/{attachmentId}/credentials/refresh": expect.objectContaining({
           post: expect.any(Object),
         }),
         "/api/v1/sessions/{id}/attachments/{attachmentId}/disconnect": expect.objectContaining({
@@ -84,6 +87,13 @@ describe("docs routes", () => {
           post: expect.any(Object),
         }),
         "/api/v1/signaling/session": expect.any(Object),
+        "/api/v1/auth/status": expect.objectContaining({ get: expect.any(Object) }),
+        "/api/v1/auth/setup": expect.objectContaining({
+          post: expect.objectContaining({ description: expect.stringContaining("Local-server-only") }),
+        }),
+        "/api/v1/auth/login": expect.objectContaining({ post: expect.any(Object) }),
+        "/api/v1/auth/me": expect.objectContaining({ get: expect.any(Object) }),
+        "/api/v1/auth/logout": expect.objectContaining({ post: expect.any(Object) }),
       }),
     })
   })

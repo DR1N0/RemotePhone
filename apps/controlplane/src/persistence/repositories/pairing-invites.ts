@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm"
+import { and, eq, gt, isNull, sql } from "drizzle-orm"
 
 import type { AppDb } from "../db.js"
 import { pairingInvites, type NewPairingInviteRow, type PairingInviteRow } from "../schema.js"
@@ -13,14 +13,19 @@ export function getPairingInviteByTokenHash(db: AppDb, tokenHash: string): Pairi
 
 export function consumePairingInvite(
   db: AppDb,
-  input: { id: string; consumedAt: string; consumedByPrincipalId: string },
-): void {
-  db.update(pairingInvites)
+  input: { id: string; consumedAt: string; consumedByUserId: string; now: string },
+): boolean {
+  const result = db.update(pairingInvites)
     .set({
       consumedAt: input.consumedAt,
-      consumedByPrincipalId: input.consumedByPrincipalId,
+      consumedByUserId: input.consumedByUserId,
       updatedAt: sql`CURRENT_TIMESTAMP`,
     })
-    .where(eq(pairingInvites.id, input.id))
+    .where(and(
+      eq(pairingInvites.id, input.id),
+      isNull(pairingInvites.consumedAt),
+      gt(pairingInvites.expiresAt, input.now),
+    ))
     .run()
+  return result.changes === 1
 }

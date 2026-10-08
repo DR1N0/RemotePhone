@@ -3,9 +3,14 @@ import path from "node:path"
 import type { Hono } from "hono"
 import { serveStatic } from "@hono/node-server/serve-static"
 
-export function registerStaticRoutes(app: Hono, adminDistPath: string): void {
+export function registerStaticRoutes(app: Hono, adminDistPath: string, enableSessionDiagnostic = false): void {
   if (!existsSync(adminDistPath)) {
     return
+  }
+
+  if (!enableSessionDiagnostic) {
+    app.get("/admin/session", (c) => c.notFound())
+    app.get("/admin/session/*", (c) => c.notFound())
   }
 
   // Resolve relative paths for serveStatic (it expects paths relative to cwd)

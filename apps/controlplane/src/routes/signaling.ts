@@ -1,6 +1,15 @@
+import { randomUUID } from "node:crypto"
+
 import type { Context, Hono } from "hono"
 import { z } from "zod"
 
+import {
+  createBearerAuthMiddleware,
+  getAuthenticatedUser,
+  requireAttachmentAuth,
+} from "../middleware/auth.js"
+import type { AuthService } from "../services/auth-service.js"
+import { createAuditContext } from "../services/audit-service.js"
 import type { InstanceService } from "../services/instance-service.js"
 import {
   AttachmentNotFoundError,
@@ -27,7 +36,7 @@ const iceCandidateSchema = z.object({
   candidate: z.string(),
 })
 
-function errorStatus(error: unknown): 400 | 404 | 500 | 502 {
+function errorStatus(error: unknown): 400 | 403 | 404 | 500 | 502 {
   if (error instanceof TransportUnavailableError) return 502
   if (error instanceof SessionInvalidRequestError) return 400
   if (
@@ -54,30 +63,50 @@ export function registerSignalingRoutes(
     instanceService: InstanceService
     signalingService: SignalingService
     transportService: TransportService
+    authService: AuthService
   },
 ): void {
-  app.post("/api/v1/signaling/session", async (c) => {
+  const requireAuth = createBearerAuthMiddleware(deps.authService)
+
+  async function authorizeSignalingTarget(input: { sessionId: string; attachmentId: string }, c: Context) {
+    const caller = getAuthenticatedUser(c)
+    if (caller.scope !== "attachment" || caller.sessionId !== input.sessionId || caller.attachmentId !== input.attachmentId) {
+      return null
+    }
+    const session = await deps.sessionService.getSessionUnchecked(input.sessionId)
+    if (session.status !== "active") {
+      throw new SessionInvalidRequestError(`session is not transportable: ${session.id}`)
+    }
+    const attachment = session.attachments.find((candidate) => candidate.id === input.attachmentId)
+    if (attachment == null) {
+      throw new AttachmentNotFoundError(`attachment not found: ${input.attachmentId}`)
+    }
+    if (attachment.status !== "connected") {
+      throw new SessionInvalidRequestError(`attachment is not connected: ${attachment.id}`)
+    }
+    return { session, attachment }
+  }
+
+  app.post("/api/v1/signaling/session", requireAuth, requireAttachmentAuth, async (c) => {
     try {
       const input = signalingSessionSchema.parse(await c.req.json())
-      const session = await deps.sessionService.getSession(input.sessionId)
-      const attachment = session.attachments.find((a) => a.id === input.attachmentId)
-      if (attachment == null) {
-        throw new AttachmentNotFoundError(`attachment not found: ${input.attachmentId}`)
+      const target = await authorizeSignalingTarget(input, c)
+      if (target == null) {
+        return c.json({ error: "attachment credential does not match signaling target" }, 403)
       }
-      if (attachment.status !== "connected") {
-        throw new SessionInvalidRequestError(`attachment is not connected: ${attachment.id}`)
-      }
-      const instance = await deps.instanceService.getManagedInstanceUnchecked(session.instanceId)
+      const instance = await deps.instanceService.getManagedInstanceUnchecked(target.session.instanceId)
       if (instance.runtimeHandle == null) {
         throw new SessionInvalidRequestError(`instance is not running: ${instance.id}`)
       }
+      const caller = getAuthenticatedUser(c)
       await deps.transportService.ensureAttachmentTransport({
-        sessionId: session.id,
-        attachmentId: attachment.id,
+        sessionId: target.session.id,
+        attachmentId: target.attachment.id,
+        audit: createAuditContext(caller.userId, caller.credentialId, randomUUID()),
       })
       const { sdpAnswer } = await deps.signalingService.relayOffer({
         instanceId: instance.id,
-        attachmentId: attachment.id,
+        attachmentId: target.attachment.id,
         sdpOffer: input.sdpOffer,
       })
       return c.json({ sdpAnswer })
@@ -86,21 +115,20 @@ export function registerSignalingRoutes(
     }
   })
 
-  app.post("/api/v1/signaling/ice-candidate", async (c) => {
+  app.post("/api/v1/signaling/ice-candidate", requireAuth, requireAttachmentAuth, async (c) => {
     try {
       const input = iceCandidateSchema.parse(await c.req.json())
-      const session = await deps.sessionService.getSession(input.sessionId)
-      const attachment = session.attachments.find((a) => a.id === input.attachmentId)
-      if (attachment == null) {
-        throw new AttachmentNotFoundError(`attachment not found: ${input.attachmentId}`)
+      const target = await authorizeSignalingTarget(input, c)
+      if (target == null) {
+        return c.json({ error: "attachment credential does not match signaling target" }, 403)
       }
-      const instance = await deps.instanceService.getManagedInstanceUnchecked(session.instanceId)
+      const instance = await deps.instanceService.getManagedInstanceUnchecked(target.session.instanceId)
       if (instance.runtimeHandle == null) {
         throw new SessionInvalidRequestError(`instance is not running: ${instance.id}`)
       }
       await deps.signalingService.relayICECandidate({
         instanceId: instance.id,
-        attachmentId: attachment.id,
+        attachmentId: target.attachment.id,
         candidate: input.candidate,
       })
       return c.json({ status: "ok" })

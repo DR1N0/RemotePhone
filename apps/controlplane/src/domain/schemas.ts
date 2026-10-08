@@ -43,14 +43,45 @@ export const createInstanceRequestSchema = z.object({
 export const createSessionRequestSchema = z.object({
   instanceId: z.string().min(1),
   ownerClientId: z.string().min(1),
+  ownerAbsenceTimeoutMs: z.number().int().positive().optional(),
 }).strict()
 
-export const joinSessionRequestSchema = z.object({
-  clientId: z.string().min(1),
+const usernameSchema = z.string().regex(/^[a-z0-9_]{3,32}$/)
+const loginUsernameSchema = z.string().trim().toLowerCase().regex(/^[a-z0-9_]{3,32}$/)
+const passwordSchema = z.string().min(12).max(1024)
+const deviceLabelSchema = z.string().trim().min(1).max(128)
+
+export const setupAdminRequestSchema = z.object({
+  username: usernameSchema,
+  password: passwordSchema,
+  deviceLabel: deviceLabelSchema,
+  bootstrapSecret: z.string().min(1).max(256),
 }).strict()
 
-export const resumeSessionRequestSchema = z.object({
-  reconnectToken: z.string().min(1),
+export const loginRequestSchema = z.object({
+  username: loginUsernameSchema,
+  password: passwordSchema,
+  deviceLabel: deviceLabelSchema,
+}).strict()
+
+export const registerRequestSchema = z.object({
+  inviteToken: z.string().min(1),
+  username: loginUsernameSchema,
+  password: passwordSchema,
+  deviceLabel: deviceLabelSchema,
+}).strict()
+
+export const enrollRequestSchema = z.object({
+  username: loginUsernameSchema,
+  password: passwordSchema,
+}).strict()
+
+export const registrationInviteRequestSchema = z.object({
+  ttlMs: z.number().int().min(5 * 60_000).max(7 * 24 * 60 * 60_000).optional(),
+}).strict()
+
+export const setUserTypeRequestSchema = z.object({
+  type: z.enum(["registered", "admin"]),
 }).strict()
 
 export const createSignalingSessionRequestSchema = z.object({

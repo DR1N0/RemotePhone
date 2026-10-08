@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, ne } from "drizzle-orm"
+import { and, eq, isNotNull, lte, ne } from "drizzle-orm"
 import { sql } from "drizzle-orm"
 
 import type { AppDb } from "../db.js"
@@ -22,31 +22,33 @@ export function findOpenSessionForInstance(db: AppDb, instanceId: string): Sessi
     .get()
 }
 
-export function listIdleSessions(db: AppDb): SessionRow[] {
+export function listSessionsWithExpiredOwnerAbsence(db: AppDb, nowIso: string): SessionRow[] {
   return db.select().from(sessions)
-    .where(and(eq(sessions.status, "idle"), isNotNull(sessions.idleExpiresAt)))
+    .where(and(
+      eq(sessions.status, "active"),
+      isNotNull(sessions.ownerAbsenceDeadline),
+      lte(sessions.ownerAbsenceDeadline, nowIso),
+    ))
     .all()
 }
 
-export function markSessionIdle(
+export function setOwnerAbsenceDeadline(
   db: AppDb,
-  input: Pick<NewSessionRow, "id" | "idleExpiresAt">,
+  input: { id: string; ownerAbsenceDeadline: string },
 ): void {
   db.update(sessions)
     .set({
-      status: "idle",
-      idleExpiresAt: input.idleExpiresAt,
+      ownerAbsenceDeadline: input.ownerAbsenceDeadline,
       updatedAt: sql`CURRENT_TIMESTAMP`,
     })
     .where(eq(sessions.id, input.id))
     .run()
 }
 
-export function activateSession(db: AppDb, input: Pick<NewSessionRow, "id">): void {
+export function clearOwnerAbsenceDeadline(db: AppDb, input: { id: string }): void {
   db.update(sessions)
     .set({
-      status: "active",
-      idleExpiresAt: null,
+      ownerAbsenceDeadline: null,
       updatedAt: sql`CURRENT_TIMESTAMP`,
     })
     .where(eq(sessions.id, input.id))
@@ -57,7 +59,7 @@ export function closeSession(db: AppDb, input: Pick<NewSessionRow, "id">): void 
   db.update(sessions)
     .set({
       status: "closed",
-      idleExpiresAt: null,
+      ownerAbsenceDeadline: null,
       updatedAt: sql`CURRENT_TIMESTAMP`,
     })
     .where(eq(sessions.id, input.id))
