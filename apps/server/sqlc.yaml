@@ -1,0 +1,30 @@
+# NOTE: `schema` points at sqlc_schema/, not migrations/, because sqlc
+# v1.31.1's SQLite engine has a parser bug: its identifier() helper
+# (internal/engine/sqlite/convert.go) only strips double-quote quoting,
+# not backtick quoting, so backtick-quoted table/column names (used by
+# the drizzle-kit-generated 0000 and 0004 migrations) register in sqlc's
+# schema catalog with the backticks still embedded in the name, which
+# then fails to match later unquoted ALTER TABLE / query references
+# ("relation \"attachments\" does not exist", etc). sqlc has no SQLite
+# live-introspection mode to work around this.
+#
+# sqlc_schema/ is a byte-for-byte mirror of migrations/, except
+# backticks are replaced with double quotes in 0000 and 0004 (the only
+# two files that use backtick quoting) — semantically identical SQLite
+# identifier quoting, just in a form sqlc's parser handles correctly.
+# migrations/ (used by ApplyMigrations at runtime) is untouched and
+# remains byte-identical to the original TS control-plane migrations.
+# Regenerate sqlc_schema/ after adding/editing a migration with:
+#   for f in internal/controlplane/persistence/migrations/*.sql; do
+#     sed 's/`/"/g' "$f" > "internal/controlplane/persistence/sqlc_schema/$(basename "$f")"
+#   done
+version: "2"
+sql:
+  - engine: "sqlite"
+    queries: "internal/controlplane/persistence/queries"
+    schema: "internal/controlplane/persistence/sqlc_schema"
+    gen:
+      go:
+        package: "repo"
+        out: "internal/controlplane/persistence/repo"
+        emit_json_tags: true
