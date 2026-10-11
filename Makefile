@@ -28,8 +28,8 @@ clean: ## Clean build artifacts
 .PHONY: vendor
 vendor: ## Update and tidy dependencies
 	@echo "Updating dependencies..."
-	@cd apps/worker && go mod tidy
-	@cd apps/worker && go mod vendor
+	@cd apps/server && go mod tidy
+	@cd apps/server && go mod vendor
 	@echo "Dependencies updated."
 
 ##@ Build and Run
@@ -43,7 +43,7 @@ run-frontend: ## Run the frontend application
 build-worker: ## Build the worker application
 	@echo "Building worker..."
 	@mkdir -p $(BUILD_DIR)
-	@cd apps/worker && go build -o ../../$(BUILD_DIR)/worker cmd/mako-worker/main.go
+	@cd apps/server && go build -o ../../$(BUILD_DIR)/worker ./cmd/mako-worker
 
 .PHONY: run-worker
 run-worker: ## Run the worker application
@@ -71,4 +71,4 @@ run-admin: ## Run admin frontend dev server with API proxy to :3000
 .PHONY: build
 build: build-admin ## Build all artifacts
 	cd apps/controlplane && npm run build
-	cd apps/worker && go build ./cmd/mako-worker/
+	cd apps/server && go build ./cmd/mako-worker/
