@@ -1,12 +1,11 @@
 module mako
 
-go 1.24.0
+go 1.26.0
 
 require (
 	github.com/pion/interceptor v0.1.49
 	github.com/pion/webrtc/v3 v3.3.6
-	k8s.io/client-go v0.34.0
-	modernc.org/sqlite v1.46.1
+	modernc.org/sqlite v1.60.1
 )
 
 require (
@@ -33,15 +32,15 @@ require (
 	github.com/stretchr/testify v1.12.1 // indirect
 	github.com/wlynxg/anet v0.0.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/crypto v0.36.0 // indirect
-	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
-	golang.org/x/net v0.38.0 // indirect
-	golang.org/x/sys v0.37.0 // indirect
-	golang.org/x/time v0.14.0 // indirect
-	k8s.io/apimachinery v0.34.0 // indirect
-	k8s.io/klog/v2 v2.130.1 // indirect
-	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397 // indirect
-	modernc.org/libc v1.67.6 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
+	k8s.io/apimachinery v0.37.1 // indirect
+	k8s.io/client-go v0.37.1 // indirect
+	k8s.io/klog/v2 v2.140.0 // indirect
+	k8s.io/utils v0.0.0-20260626114624-be93311217bd // indirect
+	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
