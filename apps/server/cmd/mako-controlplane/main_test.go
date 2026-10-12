@@ -1,13 +1,44 @@
 package main
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
+
+	"mako/internal/controlplane/auth"
+	"mako/internal/controlplane/persistence"
+
+	_ "modernc.org/sqlite"
 )
 
+// newTestServiceForMain constructs a *auth.Service backed by a real
+// temp-file DB (migrated) and a real temp-file bootstrap secret, following
+// the exact pattern established by every other test file in this plan — no
+// in-memory shortcuts or test-only backdoors.
+func newTestServiceForMain(t *testing.T) (*auth.Service, string) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := persistence.ApplyMigrations(db); err != nil {
+		t.Fatalf("ApplyMigrations: %v", err)
+	}
+	secretPath := filepath.Join(t.TempDir(), "bootstrap-secret")
+	svc, err := auth.NewService(db, secretPath)
+	if err != nil {
+		t.Fatalf("auth.NewService: %v", err)
+	}
+	return svc, secretPath
+}
+
 func TestAdminMuxHealthz(t *testing.T) {
-	srv := httptest.NewServer(newAdminMux())
+	svc, _ := newTestServiceForMain(t)
+	srv := httptest.NewServer(newAdminMux(svc))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/healthz")
@@ -21,7 +52,8 @@ func TestAdminMuxHealthz(t *testing.T) {
 }
 
 func TestClientMuxHealthz(t *testing.T) {
-	srv := httptest.NewServer(newClientMux())
+	svc, _ := newTestServiceForMain(t)
+	srv := httptest.NewServer(newClientMux(svc))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/healthz")
@@ -35,7 +67,8 @@ func TestClientMuxHealthz(t *testing.T) {
 }
 
 func TestClientMuxHasNoAdminRoute(t *testing.T) {
-	srv := httptest.NewServer(newClientMux())
+	svc, _ := newTestServiceForMain(t)
+	srv := httptest.NewServer(newClientMux(svc))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/admin/anything")
