@@ -9,6 +9,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"mako/internal/controlplane/persistence/repo"
@@ -22,6 +24,37 @@ const (
 	accountCredentialTTL       = 30 * 24 * time.Hour
 	attachmentCredentialMaxTTL = 24 * time.Hour
 )
+
+// registrationInviteDefaultTTL, registrationInviteMinTTL, and
+// registrationInviteMaxTTL mirror the TS constants governing
+// CreateRegistrationInvite's ttlMs parameter: it defaults to 24h and must
+// fall within the inclusive range [5m, 7d].
+const (
+	registrationInviteDefaultTTL = 24 * time.Hour
+	registrationInviteMinTTL     = 5 * time.Minute
+	registrationInviteMaxTTL     = 7 * 24 * time.Hour
+)
+
+// usernamePattern is the normalized-username validity pattern: lowercase
+// letters, digits, and underscores, 3-32 characters.
+var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,32}$`)
+
+// isValidUsername normalizes username (trim whitespace, lowercase) and
+// reports whether the normalized form satisfies usernamePattern. Used by
+// both CreateRegistrationInvite's callers and Task 9's Register — do not
+// duplicate this logic elsewhere.
+func isValidUsername(username string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(username))
+	return normalized, usernamePattern.MatchString(normalized)
+}
+
+// isValidPassword reports whether password's byte length falls within
+// [12, 1024]. This matches the common case of the TS code's UTF-16
+// code-unit length check; Unicode passwords with multi-byte characters are
+// an accepted, minor fidelity gap versus the TS source.
+func isValidPassword(password string) bool {
+	return len(password) >= 12 && len(password) <= 1024
+}
 
 // Service is the Go port of the TS AuthService. NewService constructs it;
 // Tasks 7-9 add more methods to this same type (SetupAdmin, Login,
@@ -135,6 +168,26 @@ func (s *Service) requireActiveUser(ctx context.Context, userID, scope string) (
 	}
 	if scope == "account" && user.UserType == "guest" {
 		return repo.User{}, NewServiceError("guest users cannot receive account credentials")
+	}
+	return user, nil
+}
+
+// requireActiveAdmin loads actorUserID and checks it is an active admin:
+// not found -> ErrUserNotFound; found but not an active admin (either
+// userType != "admin" or status != "active") -> ErrNotAdmin. A banned admin
+// gets the SAME ErrNotAdmin as a non-admin user — this intentionally does
+// not distinguish "admin but banned" from "not admin at all", matching the
+// TS source exactly.
+func (s *Service) requireActiveAdmin(ctx context.Context, q *repo.Queries, actorUserID string) (repo.User, error) {
+	user, err := q.GetUserByID(ctx, actorUserID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return repo.User{}, fmt.Errorf("%w: %s", ErrUserNotFound, actorUserID)
+		}
+		return repo.User{}, fmt.Errorf("get user: %w", err)
+	}
+	if user.UserType != "admin" || user.Status != "active" {
+		return repo.User{}, fmt.Errorf("%w: %s", ErrNotAdmin, actorUserID)
 	}
 	return user, nil
 }
@@ -550,4 +603,63 @@ func (s *Service) RevokeCredential(ctx context.Context, requesterUserID, credent
 		return fmt.Errorf("revoke credential: %w", err)
 	}
 	return nil
+}
+
+// CreateRegistrationInvite issues a new registration invite on behalf of
+// actorUserID, who must be an active admin. ttlMs, if nil, defaults to 24h;
+// otherwise it must fall within the inclusive range [5m, 7d] or a
+// *ServiceError is returned. The invite row and its audit event are written
+// in the same transaction: both commit, or neither does. Returns the raw
+// (unhashed) invite token and its expiry.
+func (s *Service) CreateRegistrationInvite(ctx context.Context, actorUserID string, actorCredentialID *string, requestID string, ttlMs *int64) (string, time.Time, error) {
+	if _, err := s.requireActiveAdmin(ctx, s.q, actorUserID); err != nil {
+		return "", time.Time{}, err
+	}
+
+	ttl := registrationInviteDefaultTTL
+	if ttlMs != nil {
+		ttl = time.Duration(*ttlMs) * time.Millisecond
+		if ttl < registrationInviteMinTTL || ttl > registrationInviteMaxTTL {
+			return "", time.Time{}, NewServiceError("registration invite ttl must be between 5 minutes and 7 days")
+		}
+	}
+
+	issuedAt := s.now()
+	expiresAt := issuedAt.Add(ttl)
+
+	token, err := GenerateToken()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("generate token: %w", err)
+	}
+
+	err = s.withTx(ctx, func(q *repo.Queries) error {
+		invite, err := q.CreateRegistrationInvite(ctx, repo.CreateRegistrationInviteParams{
+			ID:        uuid.NewString(),
+			TokenHash: HashToken(token),
+			CreatedBy: actorUserID,
+			ExpiresAt: formatTimestamp(expiresAt),
+		})
+		if err != nil {
+			return fmt.Errorf("create registration invite: %w", err)
+		}
+
+		if err := q.CreateAuditEvent(ctx, repo.CreateAuditEventParams{
+			ID:                uuid.NewString(),
+			ActorUserID:       sql.NullString{String: actorUserID, Valid: true},
+			ActorCredentialID: toNullString(actorCredentialID),
+			Action:            "registration.invite.issue",
+			TargetType:        "registration_invite",
+			TargetID:          invite.ID,
+			RequestID:         requestID,
+			Outcome:           "success",
+		}); err != nil {
+			return fmt.Errorf("create audit event: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	return token, expiresAt, nil
 }
