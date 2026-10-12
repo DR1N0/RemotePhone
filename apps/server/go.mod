@@ -3,6 +3,7 @@ module mako
 go 1.26.0
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/pion/interceptor v0.1.49
 	github.com/pion/webrtc/v3 v3.3.6
 	golang.org/x/crypto v0.58.0
@@ -13,7 +14,6 @@ require (
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pion/datachannel v1.5.8 // indirect
