@@ -663,3 +663,140 @@ func (s *Service) CreateRegistrationInvite(ctx context.Context, actorUserID stri
 
 	return token, expiresAt, nil
 }
+
+// registrationInviteValid reports whether invite is still usable as of at:
+// not consumed, and not yet expired (expiresAt strictly after at). Shared by
+// Register's non-transactional pre-check and its transaction-scoped
+// re-check so the two can never drift apart.
+func registrationInviteValid(invite repo.RegistrationInvite, at time.Time) bool {
+	if invite.ConsumedAt.Valid {
+		return false
+	}
+	expiresAt, err := parseTimestamp(invite.ExpiresAt)
+	if err != nil {
+		return false
+	}
+	return expiresAt.After(at)
+}
+
+// Register redeems a registration invite into a new "registered" user and
+// issues it an account credential. The invite is validated twice before any
+// write — once outside the transaction (so an obviously dead invite never
+// pays for the scrypt password hash below) and once again inside the
+// transaction (closing the TOCTOU window between the pre-check and the
+// transaction actually starting) — but neither check is the actual
+// concurrency safety net: that is ConsumeRegistrationInvite's atomic
+// conditional UPDATE and its affected-row count, checked in step 4 below.
+// Only that check is race-safe; the two prior ones are pure fail-fast
+// optimizations and MUST NOT be treated as sufficient on their own.
+func (s *Service) Register(ctx context.Context, inviteToken, username, password, deviceLabel, requestID string) (UserDTO, string, error) {
+	normalizedUsername, ok := isValidUsername(username)
+	if !ok || !isValidPassword(password) {
+		return UserDTO{}, "", NewServiceError("invalid registration credentials")
+	}
+
+	inviteTokenHash := HashToken(inviteToken)
+
+	// Step 2: non-transactional pre-check — fail fast, before hashing.
+	precheckedInvite, err := s.q.GetRegistrationInviteByTokenHash(ctx, inviteTokenHash)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return UserDTO{}, "", fmt.Errorf("get registration invite: %w", err)
+	}
+	if err != nil || !registrationInviteValid(precheckedInvite, s.now()) {
+		return UserDTO{}, "", ErrRegistrationInviteInvalid
+	}
+
+	// HashPassword is slow by design (scrypt) — do it outside the
+	// transaction, same reasoning as SetupAdmin.
+	passwordHash, err := HashPassword(password)
+	if err != nil {
+		return UserDTO{}, "", fmt.Errorf("hash password: %w", err)
+	}
+
+	var user repo.User
+	var token string
+	err = s.withTx(ctx, func(q *repo.Queries) error {
+		registeredAt := s.now()
+
+		// Step 4a: re-check the same conditions, transaction-scoped.
+		invite, err := q.GetRegistrationInviteByTokenHash(ctx, inviteTokenHash)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrRegistrationInviteInvalid
+			}
+			return fmt.Errorf("get registration invite: %w", err)
+		}
+		if !registrationInviteValid(invite, registeredAt) {
+			return ErrRegistrationInviteInvalid
+		}
+
+		// Step 4b: username availability.
+		if _, err := q.GetUserByUsername(ctx, normalizedUsername); err == nil {
+			return ErrUsernameConflict
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("get user by username: %w", err)
+		}
+
+		// Step 4c: create the user.
+		user, err = q.CreateUser(ctx, repo.CreateUserParams{
+			ID:           uuid.NewString(),
+			DisplayName:  normalizedUsername,
+			UserType:     "registered",
+			Username:     sql.NullString{String: normalizedUsername, Valid: true},
+			PasswordHash: sql.NullString{String: passwordHash, Valid: true},
+			Status:       "active",
+		})
+		if err != nil {
+			return fmt.Errorf("create user: %w", err)
+		}
+
+		// Step 4d: atomically consume the invite. This is the ACTUAL
+		// concurrency safety net — the WHERE clause's own
+		// "consumed_at IS NULL AND expires_at > ?" re-validates freshness
+		// as part of the same atomic statement, and a 0 affected-row count
+		// here means someone else's concurrent Register call won the race
+		// between step 4a's read and this UPDATE, even though both step 2
+		// and step 4a already passed.
+		affected, err := q.ConsumeRegistrationInvite(ctx, repo.ConsumeRegistrationInviteParams{
+			ConsumedAt:       sql.NullString{String: formatTimestamp(registeredAt), Valid: true},
+			ConsumedByUserID: sql.NullString{String: user.ID, Valid: true},
+			ID:               invite.ID,
+			ExpiresAt:        formatTimestamp(registeredAt),
+		})
+		if err != nil {
+			return fmt.Errorf("consume registration invite: %w", err)
+		}
+		if affected == 0 {
+			return ErrRegistrationInviteInvalid
+		}
+
+		// Step 4e: audit event.
+		if err := q.CreateAuditEvent(ctx, repo.CreateAuditEventParams{
+			ID:          uuid.NewString(),
+			ActorUserID: sql.NullString{String: user.ID, Valid: true},
+			Action:      "registration.invite.redeem",
+			TargetType:  "registration_invite",
+			TargetID:    invite.ID,
+			RequestID:   requestID,
+			Outcome:     "success",
+		}); err != nil {
+			return fmt.Errorf("create audit event: %w", err)
+		}
+
+		// Step 4f: issue an account credential, same shape as
+		// IssueAccountCredential (inlined because that method's
+		// requireActiveUser check reads via s.q, not the tx-scoped q).
+		expiresAt := registeredAt.Add(accountCredentialTTL)
+		credToken, err := s.createScopedCredential(ctx, q, user.ID, deviceLabel, "account", nil, nil, registeredAt, &expiresAt)
+		if err != nil {
+			return err
+		}
+		token = credToken
+		return nil
+	})
+	if err != nil {
+		return UserDTO{}, "", err
+	}
+
+	return toUserDTO(user), token, nil
+}
