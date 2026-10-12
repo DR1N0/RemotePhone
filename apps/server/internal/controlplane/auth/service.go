@@ -142,9 +142,13 @@ func (s *Service) requireActiveUser(ctx context.Context, userID, scope string) (
 // createScopedCredential generates a fresh raw token, persists only its
 // hash (plus the scope/binding/validity-window metadata), and returns the
 // raw token — the only place in the Service the raw token value exists
-// outside of GenerateToken itself.
+// outside of GenerateToken itself. It takes an explicit q so callers running
+// inside a transaction (e.g. SetupAdmin) can pass the transaction-scoped
+// *repo.Queries instead of s.q, while non-transactional callers just pass
+// s.q.
 func (s *Service) createScopedCredential(
 	ctx context.Context,
+	q *repo.Queries,
 	userID, deviceLabel, scope string,
 	sessionID, attachmentID *string,
 	notBefore time.Time,
@@ -169,7 +173,7 @@ func (s *Service) createScopedCredential(
 		params.ExpiresAt = sql.NullString{String: formatTimestamp(*expiresAt), Valid: true}
 	}
 
-	if _, err := s.q.CreateCredential(ctx, params); err != nil {
+	if _, err := q.CreateCredential(ctx, params); err != nil {
 		return "", fmt.Errorf("create credential: %w", err)
 	}
 	return token, nil
@@ -184,7 +188,7 @@ func (s *Service) IssueAccountCredential(ctx context.Context, userID, deviceLabe
 
 	issuedAt := s.now()
 	expiresAt := issuedAt.Add(accountCredentialTTL)
-	return s.createScopedCredential(ctx, userID, deviceLabel, "account", nil, nil, issuedAt, &expiresAt)
+	return s.createScopedCredential(ctx, s.q, userID, deviceLabel, "account", nil, nil, issuedAt, &expiresAt)
 }
 
 // IssueAttachmentCredential issues a credential bound to sessionID and
@@ -223,7 +227,7 @@ func (s *Service) IssueAttachmentCredential(ctx context.Context, userID, session
 		return "", NewServiceError("attachment is not bound to the credential user and session")
 	}
 
-	return s.createScopedCredential(ctx, userID, "attachment", "attachment", &sessionID, &attachmentID, issuedAt, &expiresAt)
+	return s.createScopedCredential(ctx, s.q, userID, "attachment", "attachment", &sessionID, &attachmentID, issuedAt, &expiresAt)
 }
 
 // RotateAttachmentCredential issues a fresh attachment credential with a
@@ -373,6 +377,159 @@ func (s *Service) RevokeCurrentCredential(ctx context.Context, credentialID stri
 		return fmt.Errorf("revoke credential: %w", err)
 	}
 	return nil
+}
+
+// withTx runs fn inside a database transaction scoped to transaction-local
+// queries, committing on success and rolling back on any error (including
+// re-panicking after rollback on a panic). Every read/write inside fn must
+// go through the *repo.Queries it receives, not s.q, or it won't see a
+// consistent, isolated view of in-flight changes.
+func (s *Service) withTx(ctx context.Context, fn func(q *repo.Queries) error) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			tx.Rollback()
+			panic(p)
+		}
+	}()
+	if err := fn(repo.New(tx)); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetupAdminInput is the input to SetupAdmin. Neither Username nor Password
+// shape is validated here — that is the HTTP route's job (Task 11); this
+// method trusts its caller already validated them.
+type SetupAdminInput struct {
+	Username        string
+	Password        string
+	DeviceLabel     string
+	BootstrapSecret string
+}
+
+// SetupAdmin performs the one-time first-admin bootstrap: it is only ever
+// usable once, guarded by both the "no registered/admin user yet" check and
+// the bootstrap secret. The registered/admin check is performed twice —
+// once outside the transaction (cheap early rejection) and once again
+// inside it (closes the TOCTOU race between the first check and the
+// transaction actually starting) — so concurrent callers converge on
+// exactly one winner.
+func (s *Service) SetupAdmin(ctx context.Context, input SetupAdminInput) (UserDTO, string, error) {
+	count, err := s.q.CountRegisteredOrAdminUsers(ctx)
+	if err != nil {
+		return UserDTO{}, "", fmt.Errorf("count registered or admin users: %w", err)
+	}
+	if count > 0 {
+		return UserDTO{}, "", ErrServerAlreadyClaimed
+	}
+
+	if s.bootstrapSecret == nil {
+		return UserDTO{}, "", ErrBootstrapSecretUnavailable
+	}
+	matches, err := s.bootstrapSecret.Matches(input.BootstrapSecret)
+	if err != nil {
+		return UserDTO{}, "", err
+	}
+	if !matches {
+		return UserDTO{}, "", ErrBootstrapSecretInvalid
+	}
+
+	// HashPassword is slow by design (scrypt) — do it outside the
+	// transaction so we're not holding a write lock while it runs.
+	passwordHash, err := HashPassword(input.Password)
+	if err != nil {
+		return UserDTO{}, "", fmt.Errorf("hash password: %w", err)
+	}
+
+	var user repo.User
+	var token string
+	err = s.withTx(ctx, func(q *repo.Queries) error {
+		count, err := q.CountRegisteredOrAdminUsers(ctx)
+		if err != nil {
+			return fmt.Errorf("count registered or admin users: %w", err)
+		}
+		if count > 0 {
+			return ErrServerAlreadyClaimed
+		}
+
+		user, err = q.CreateUser(ctx, repo.CreateUserParams{
+			ID:           uuid.NewString(),
+			DisplayName:  input.Username,
+			UserType:     "admin",
+			Username:     sql.NullString{String: input.Username, Valid: true},
+			PasswordHash: sql.NullString{String: passwordHash, Valid: true},
+			Status:       "active",
+		})
+		if err != nil {
+			return fmt.Errorf("create user: %w", err)
+		}
+
+		issuedAt := s.now()
+		expiresAt := issuedAt.Add(accountCredentialTTL)
+		credToken, err := s.createScopedCredential(ctx, q, user.ID, input.DeviceLabel, "account", nil, nil, issuedAt, &expiresAt)
+		if err != nil {
+			return err
+		}
+		token = credToken
+		return nil
+	})
+	if err != nil {
+		return UserDTO{}, "", err
+	}
+
+	// Only invalidate the bootstrap secret AFTER the transaction has
+	// committed successfully: the user/credential are already durable at
+	// this point, so a crash here is survivable — any later SetupAdmin call
+	// hits the already-claimed check above before touching the secret
+	// again.
+	if err := s.bootstrapSecret.Invalidate(input.BootstrapSecret); err != nil {
+		return UserDTO{}, "", err
+	}
+
+	return toUserDTO(user), token, nil
+}
+
+// LoginInput is the input to Login. Neither Username nor Password shape is
+// validated here — that is the HTTP route's job (Task 11).
+type LoginInput struct {
+	Username    string
+	Password    string
+	DeviceLabel string
+}
+
+// Login authenticates a username/password pair and, on success, issues a
+// fresh account credential (never reuses or extends an existing one).
+//
+// The anti-enumeration check below is intentionally a single boolean
+// expression rather than sequential early returns: an unknown username and
+// a known username with a wrong password must take observably similar code
+// paths and produce a byte-identical error, or the API becomes a user
+// enumeration oracle. Go's || short-circuits left-to-right exactly like the
+// TS source's, so the expensive VerifyPassword (scrypt) call only runs once
+// every cheaper check has already passed.
+func (s *Service) Login(ctx context.Context, input LoginInput) (UserDTO, string, error) {
+	user, err := s.q.GetUserByUsername(ctx, input.Username)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return UserDTO{}, "", fmt.Errorf("get user by username: %w", err)
+	}
+
+	if err != nil || user.Status != "active" || !user.PasswordHash.Valid || !VerifyPassword(input.Password, user.PasswordHash.String) {
+		return UserDTO{}, "", ErrInvalidLogin
+	}
+
+	issuedAt := s.now()
+	expiresAt := issuedAt.Add(accountCredentialTTL)
+	token, err := s.createScopedCredential(ctx, s.q, user.ID, input.DeviceLabel, "account", nil, nil, issuedAt, &expiresAt)
+	if err != nil {
+		return UserDTO{}, "", err
+	}
+
+	return toUserDTO(user), token, nil
 }
 
 // RevokeCredential is the self-service "revoke one of my other devices"
