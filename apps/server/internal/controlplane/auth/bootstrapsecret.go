@@ -6,9 +6,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"syscall"
 )
 
 const bootstrapSecretBytes = 32
@@ -40,6 +42,19 @@ func (b *BootstrapSecret) GetOrCreate() (string, error) {
 	return b.create()
 }
 
+// create generates a fresh secret and publishes it at b.path.
+//
+// The secret is written in full to a private temp file in the same
+// directory first, then published atomically via os.Link (a hard link
+// succeeds only if b.path does not already exist, and — unlike
+// O_CREATE|O_EXCL on b.path directly — it can never expose a reader to a
+// zero-byte or partially written file: the inode b.path ends up pointing
+// at already contains the complete secret before the link is created).
+// This closes a race where a concurrent create() creates-then-writes
+// b.path directly: a loser of the creation race falling back to
+// readExisting() could otherwise observe the winner's file in the
+// window after O_CREATE|O_EXCL but before the write completed, see
+// empty/partial content, and fail instead of converging.
 func (b *BootstrapSecret) create() (string, error) {
 	raw := make([]byte, bootstrapSecretBytes)
 	if _, err := rand.Read(raw); err != nil {
@@ -47,27 +62,42 @@ func (b *BootstrapSecret) create() (string, error) {
 	}
 	secret := base64.RawURLEncoding.EncodeToString(raw)
 
-	if err := os.MkdirAll(filepath.Dir(b.path), 0700); err != nil {
+	dir := filepath.Dir(b.path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", fmt.Errorf("create bootstrap secret dir: %w", err)
 	}
 
-	f, err := os.OpenFile(b.path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	// Temp file lives in the same directory as b.path so the later
+	// os.Link (which requires both names to be on the same filesystem)
+	// is guaranteed to work.
+	tmp, err := os.CreateTemp(dir, ".bootstrap-secret-*.tmp")
 	if err != nil {
+		return "", fmt.Errorf("create bootstrap secret temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // best-effort cleanup; no-op once already removed below
+
+	if _, err := tmp.WriteString(secret); err != nil {
+		tmp.Close()
+		return "", fmt.Errorf("write bootstrap secret: %w", err)
+	}
+	// Defensive chmod in case the process umask affected the mode the
+	// temp file was actually created with: the published file must be
+	// exactly 0600 regardless of umask.
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return "", fmt.Errorf("chmod bootstrap secret temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close bootstrap secret temp file: %w", err)
+	}
+
+	if err := os.Link(tmpPath, b.path); err != nil {
 		if os.IsExist(err) {
 			// Another caller won the creation race; converge on its value.
 			return b.readExisting()
 		}
-		return "", fmt.Errorf("create bootstrap secret file: %w", err)
-	}
-	defer f.Close()
-
-	if _, err := f.WriteString(secret); err != nil {
-		return "", fmt.Errorf("write bootstrap secret: %w", err)
-	}
-	// Defensive re-chmod in case the process umask affected the mode the
-	// file was actually created with.
-	if err := os.Chmod(b.path, 0600); err != nil {
-		return "", fmt.Errorf("chmod bootstrap secret: %w", err)
+		return "", fmt.Errorf("publish bootstrap secret file: %w", err)
 	}
 	return secret, nil
 }
@@ -78,13 +108,27 @@ func (b *BootstrapSecret) create() (string, error) {
 // secret. Any violation other than the file simply not existing is
 // returned as an error — callers must not treat a validation failure as
 // "doesn't exist" and silently regenerate.
+//
+// The file is opened once with O_NOFOLLOW, and every subsequent check
+// (regular-file, exact-permission) plus the actual read is performed
+// against that same open file descriptor rather than by re-resolving
+// b.path a second time. This closes the TOCTOU window that a separate
+// os.Lstat-then-os.ReadFile pair would leave open: a symlink swapped in
+// between the two path resolutions would otherwise be followed silently
+// by os.ReadFile despite an earlier Lstat rejecting it.
 func (b *BootstrapSecret) readExisting() (string, error) {
-	info, err := os.Lstat(b.path)
+	f, err := os.OpenFile(b.path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
-		return "", err // preserves os.IsNotExist-detectability
+		return "", err // preserves os.IsNotExist-detectability for ENOENT;
+		// a symlink at the final component fails with ELOOP here, which is
+		// NOT os.IsNotExist, so it correctly propagates as a real error
+		// rather than triggering regeneration
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return "", errors.New("bootstrap secret path is a symlink")
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("stat bootstrap secret: %w", err)
 	}
 	if !info.Mode().IsRegular() {
 		return "", errors.New("bootstrap secret path is not a regular file")
@@ -92,7 +136,7 @@ func (b *BootstrapSecret) readExisting() (string, error) {
 	if info.Mode().Perm() != 0600 {
 		return "", fmt.Errorf("bootstrap secret file has permissions %o, want exactly 0600", info.Mode().Perm())
 	}
-	content, err := os.ReadFile(b.path)
+	content, err := io.ReadAll(f)
 	if err != nil {
 		return "", fmt.Errorf("read bootstrap secret: %w", err)
 	}
