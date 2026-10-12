@@ -69,7 +69,7 @@ type Instance struct {
 	OwnerID             string         `json:"owner_id"`
 }
 
-type PairingInvite struct {
+type RegistrationInvite struct {
 	ID               string         `json:"id"`
 	TokenHash        string         `json:"token_hash"`
 	CreatedBy        string         `json:"created_by"`
@@ -108,16 +108,14 @@ type Setting struct {
 }
 
 type User struct {
-	ID                 string         `json:"id"`
-	DisplayName        string         `json:"display_name"`
-	IsServerOwner      int64          `json:"is_server_owner"`
-	Status             string         `json:"status"`
-	CreatedAt          string         `json:"created_at"`
-	UpdatedAt          string         `json:"updated_at"`
-	UserType           string         `json:"user_type"`
-	Username           sql.NullString `json:"username"`
-	PasswordHash       sql.NullString `json:"password_hash"`
-	EnrollmentRequired int64          `json:"enrollment_required"`
+	ID           string         `json:"id"`
+	DisplayName  string         `json:"display_name"`
+	Status       string         `json:"status"`
+	CreatedAt    string         `json:"created_at"`
+	UpdatedAt    string         `json:"updated_at"`
+	UserType     string         `json:"user_type"`
+	Username     sql.NullString `json:"username"`
+	PasswordHash sql.NullString `json:"password_hash"`
 }
 
 type Worker struct {
