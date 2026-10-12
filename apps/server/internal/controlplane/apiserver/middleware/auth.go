@@ -9,6 +9,7 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -43,8 +44,20 @@ func RequireAuth(svc *auth.Service) func(http.Handler) http.Handler {
 				return
 			}
 
+			// A non-nil err here is an infrastructure failure (e.g. a DB
+			// error), distinct from an ordinary invalid/revoked credential
+			// (which Authenticate reports as (nil, nil) — see its doc
+			// comment). Collapsing both into the same 401 would mislead
+			// on-call engineers into reading a DB outage as routine bad
+			// auth, so it panics instead, consistent with this codebase's
+			// established convention of panicking on unmapped/unexpected
+			// service errors and letting net/http's per-request panic
+			// recovery turn it into a 500 for just this one connection.
 			user, err := svc.Authenticate(r.Context(), token)
-			if err != nil || user == nil {
+			if err != nil {
+				panic(fmt.Errorf("authenticate: %w", err))
+			}
+			if user == nil {
 				WriteJSONError(w, http.StatusUnauthorized, "invalid or revoked credential")
 				return
 			}

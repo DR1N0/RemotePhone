@@ -58,7 +58,7 @@ func isValidPassword(password string) bool {
 
 // Service is the Go port of the TS AuthService. NewService constructs it;
 // Tasks 7-9 add more methods to this same type (SetupAdmin, Login,
-// CreateRegistrationInvite, Register, EnrollLegacy) — do not redefine it.
+// CreateRegistrationInvite, Register) — do not redefine it.
 type Service struct {
 	db              *sql.DB
 	q               *repo.Queries
@@ -83,6 +83,16 @@ type AuthenticatedUser struct {
 // file is created eagerly right now rather than lazily on the first setup
 // request, so an operator can read it immediately after server start.
 func NewService(db *sql.DB, bootstrapSecretPath string) (*Service, error) {
+	// SQLite only supports one writer at a time regardless of how many
+	// Go-level pooled connections exist; a larger pool only produces more
+	// SQLITE_BUSY lock-contention errors under concurrent writers, never
+	// more real write parallelism. Serializing all access through a single
+	// connection lets concurrent transactions queue cleanly instead of
+	// erroring out, so the loser of a race gets a clean constraint
+	// violation (mapped to a sentinel error below) rather than a raw
+	// "database is locked" error.
+	db.SetMaxOpenConns(1)
+
 	svc := &Service{
 		db:  db,
 		q:   repo.New(db),
@@ -679,6 +689,29 @@ func registrationInviteValid(invite repo.RegistrationInvite, at time.Time) bool 
 	return expiresAt.After(at)
 }
 
+// mapCreateUserError maps a CreateUser failure caused by the username
+// UNIQUE index (principals_username_ci, case-insensitive) to the same
+// ErrUsernameConflict the step 4b pre-check above would have returned, so a
+// caller who loses the race between 4b's read and this INSERT still gets a
+// clean sentinel instead of a raw, driver-specific SQL error. Under this
+// Service's actual connection topology (NewService caps the pool at a
+// single connection, so writer transactions fully serialize) step 4b
+// already catches essentially every real conflict before CreateUser ever
+// runs, making this a backstop for conditions outside that normal
+// single-process topology (e.g. a future change to the pool size, or a
+// second process sharing the same database file) rather than the primary
+// defense. String-matching the driver error here is a deliberate, narrow
+// exception to this codebase's general anti-pattern of collapsing distinct
+// application-level conditions via message matching: this is a single
+// DB-level constraint violation with no cleaner cross-driver detection
+// available via database/sql. err must be non-nil.
+func mapCreateUserError(err error) error {
+	if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		return ErrUsernameConflict
+	}
+	return fmt.Errorf("create user: %w", err)
+}
+
 // Register redeems a registration invite into a new "registered" user and
 // issues it an account credential. The invite is validated twice before any
 // write — once outside the transaction (so an obviously dead invite never
@@ -737,7 +770,22 @@ func (s *Service) Register(ctx context.Context, inviteToken, username, password,
 			return fmt.Errorf("get user by username: %w", err)
 		}
 
-		// Step 4c: create the user.
+		// Step 4c: create the user. The username-availability check above
+		// (step 4b) is a fail-fast optimization, not the real concurrency
+		// safety net — two concurrent Register calls can both pass it for
+		// the same desired username before either commits. The backstop is
+		// this UNIQUE constraint violation: if the database rejects the
+		// insert because another transaction won the race, map it to the
+		// same ErrUsernameConflict step 4b would have returned, rather than
+		// propagating the raw SQL error (which, depending on the Go SQLite
+		// driver's connection-pool contention behavior, can otherwise
+		// surface as an unrelated "database is locked" error instead of a
+		// clean conflict). String-matching the driver error here is a
+		// legitimate, deliberate exception to this codebase's general
+		// anti-pattern of collapsing distinct application-level conditions
+		// via message matching: this is a single DB-level constraint
+		// violation with no cleaner cross-driver detection available via
+		// database/sql.
 		user, err = q.CreateUser(ctx, repo.CreateUserParams{
 			ID:           uuid.NewString(),
 			DisplayName:  normalizedUsername,
@@ -747,7 +795,7 @@ func (s *Service) Register(ctx context.Context, inviteToken, username, password,
 			Status:       "active",
 		})
 		if err != nil {
-			return fmt.Errorf("create user: %w", err)
+			return mapCreateUserError(err)
 		}
 
 		// Step 4d: atomically consume the invite. This is the ACTUAL

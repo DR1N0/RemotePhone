@@ -73,6 +73,51 @@ func TestRequireAuthRejectsWrongScheme(t *testing.T) {
 	}
 }
 
+// TestRequireAuthPanicsOnInfrastructureError confirms the middleware fix:
+// a non-nil error from svc.Authenticate (an infrastructure failure, per its
+// doc comment) must panic rather than being collapsed into the same 401 as
+// an ordinary invalid/revoked credential. It forces a real, non-sql.ErrNoRows
+// error out of Authenticate by closing the backing *sql.DB out from under a
+// token that would otherwise be valid, then relies on recover() since this
+// test calls handler.ServeHTTP directly rather than going through a real
+// net/http.Server (whose per-request panic recovery is what the production
+// code path relies on).
+func TestRequireAuthPanicsOnInfrastructureError(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if err := persistence.ApplyMigrations(db); err != nil {
+		t.Fatalf("ApplyMigrations: %v", err)
+	}
+	secretPath := filepath.Join(t.TempDir(), "bootstrap-secret")
+	svc, err := auth.NewService(db, secretPath)
+	if err != nil {
+		t.Fatalf("auth.NewService: %v", err)
+	}
+	token := mustIssueTestToken(t, svc, secretPath)
+
+	// Close the DB out from under an otherwise-valid token so Authenticate's
+	// GetCredentialByTokenHash call returns a real "database is closed"
+	// error rather than sql.ErrNoRows.
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close: %v", err)
+	}
+
+	defer func() {
+		if recover() == nil {
+			t.Error("RequireAuth did not panic on a genuine Authenticate infrastructure error")
+		}
+	}()
+
+	handler := RequireAuth(svc)(protectedHandler())
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+}
+
 func TestRequireAuthAcceptsValidToken(t *testing.T) {
 	svc, secretPath := newTestAuthService(t)
 
