@@ -146,7 +146,7 @@ func TestSetupSucceedsFromLoopbackWithLocalHost(t *testing.T) {
 	}
 }
 
-func TestSetupRejectsUnnormalizedUsernameWithoutNormalizing(t *testing.T) {
+func TestSetupNormalizesUsernameLikeLogin(t *testing.T) {
 	svc, secretPath := newTestServiceForAdminAPI(t)
 	mux := http.NewServeMux()
 	adminapi.RegisterAuthRoutes(mux, svc)
@@ -156,10 +156,11 @@ func TestSetupRejectsUnnormalizedUsernameWithoutNormalizing(t *testing.T) {
 		t.Fatalf("read bootstrap secret: %v", err)
 	}
 
-	// Uppercase username: /setup does NOT normalize (unlike /login), so this
-	// must be rejected as invalid rather than silently lowercased.
+	// A mixed-case, whitespace-padded username must be accepted and stored
+	// in its normalized (trimmed, lowercased) form, matching /login and
+	// /register's normalization behavior.
 	body, _ := json.Marshal(map[string]string{
-		"username":        "ADMIN",
+		"username":        "  ADMIN_1  ",
 		"password":        "correct horse battery staple",
 		"deviceLabel":     "d",
 		"bootstrapSecret": string(secret),
@@ -170,8 +171,23 @@ func TestSetupRejectsUnnormalizedUsernameWithoutNormalizing(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 for an unnormalized username on /setup", rec.Code)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		User struct {
+			Username string `json:"username"`
+		} `json:"user"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.User.Username != "admin_1" {
+		t.Errorf("username = %q, want normalized %q", resp.User.Username, "admin_1")
+	}
+	if resp.Token == "" {
+		t.Error("token was empty")
 	}
 }
 

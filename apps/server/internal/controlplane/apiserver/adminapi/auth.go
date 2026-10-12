@@ -20,9 +20,7 @@ import (
 )
 
 // usernamePattern mirrors auth.Service's own (unexported) normalized-username
-// pattern. Unlike commonauth's /login handler, /setup never normalizes the
-// raw username against this pattern (see setup's handler comment below) —
-// this is the TS code's own intentional asymmetry, not a bug to fix.
+// pattern.
 var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,32}$`)
 
 // isValidPassword reports whether password's byte length falls within
@@ -105,11 +103,12 @@ func RegisterAuthRoutes(mux *http.ServeMux, svc *auth.Service) {
 			return
 		}
 
-		// Unlike /login, the username is NOT normalized (no trim/lowercase)
-		// here — this is the TS code's own asymmetry; do not "fix" it to
-		// match /login's normalization.
+		// The username is normalized (trim + lowercase) the same way every
+		// other username-accepting endpoint (/login, /register) does, before
+		// validating it against usernamePattern.
+		normalizedUsername := strings.ToLower(strings.TrimSpace(req.Username))
 		deviceLabel := strings.TrimSpace(req.DeviceLabel)
-		if !usernamePattern.MatchString(req.Username) ||
+		if !usernamePattern.MatchString(normalizedUsername) ||
 			!isValidPassword(req.Password) ||
 			deviceLabel == "" ||
 			req.BootstrapSecret == "" || len(req.BootstrapSecret) > 256 {
@@ -118,7 +117,7 @@ func RegisterAuthRoutes(mux *http.ServeMux, svc *auth.Service) {
 		}
 
 		user, token, err := svc.SetupAdmin(r.Context(), auth.SetupAdminInput{
-			Username:        req.Username,
+			Username:        normalizedUsername,
 			Password:        req.Password,
 			DeviceLabel:     deviceLabel,
 			BootstrapSecret: req.BootstrapSecret,
