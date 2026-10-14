@@ -17,8 +17,6 @@ type Attachment struct {
 	ReconnectToken           sql.NullString `json:"reconnect_token"`
 	CreatedAt                string         `json:"created_at"`
 	UpdatedAt                string         `json:"updated_at"`
-	InviteToken              sql.NullString `json:"invite_token"`
-	RestrictivePendingRole   sql.NullString `json:"restrictive_pending_role"`
 	PendingTargetRole        sql.NullString `json:"pending_target_role"`
 	UserID                   sql.NullString `json:"user_id"`
 	TransportTeardownPending int64          `json:"transport_teardown_pending"`
@@ -101,12 +99,6 @@ type SessionInvite struct {
 	CreatedAt       string         `json:"created_at"`
 }
 
-type Setting struct {
-	Key       string `json:"key"`
-	ValueJson string `json:"value_json"`
-	UpdatedAt string `json:"updated_at"`
-}
-
 type User struct {
 	ID           string         `json:"id"`
 	DisplayName  string         `json:"display_name"`
@@ -116,19 +108,4 @@ type User struct {
 	UserType     string         `json:"user_type"`
 	Username     sql.NullString `json:"username"`
 	PasswordHash sql.NullString `json:"password_hash"`
-}
-
-type Worker struct {
-	ID                    string         `json:"id"`
-	Kind                  string         `json:"kind"`
-	ListenPort            sql.NullInt64  `json:"listen_port"`
-	BaseUrl               sql.NullString `json:"base_url"`
-	Pid                   sql.NullInt64  `json:"pid"`
-	Phase                 string         `json:"phase"`
-	InstalledRuntimesJson sql.NullString `json:"installed_runtimes_json"`
-	ResourceCapacityJson  sql.NullString `json:"resource_capacity_json"`
-	LastHealthCheckAt     sql.NullString `json:"last_health_check_at"`
-	LastError             sql.NullString `json:"last_error"`
-	CreatedAt             string         `json:"created_at"`
-	UpdatedAt             string         `json:"updated_at"`
 }

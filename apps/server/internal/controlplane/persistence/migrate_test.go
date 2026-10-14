@@ -8,7 +8,16 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func TestApplyMigrationsCreatesWorkersTable(t *testing.T) {
+func tableExists(t *testing.T, db *sql.DB, name string) bool {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&count); err != nil {
+		t.Fatalf("query sqlite_master for %s: %v", name, err)
+	}
+	return count == 1
+}
+
+func TestApplyMigrationsDropsWorkersAndSettings(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -20,12 +29,13 @@ func TestApplyMigrationsCreatesWorkersTable(t *testing.T) {
 		t.Fatalf("ApplyMigrations: %v", err)
 	}
 
-	var count int
-	err = db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='workers'`).Scan(&count)
-	if err != nil {
-		t.Fatalf("query sqlite_master: %v", err)
+	if tableExists(t, db, "workers") {
+		t.Error("workers table still exists after migrations, want it dropped (0011)")
 	}
-	if count != 1 {
-		t.Errorf("workers table not created, count = %d", count)
+	if tableExists(t, db, "settings") {
+		t.Error("settings table still exists after migrations, want it dropped (0011)")
+	}
+	if !tableExists(t, db, "instances") {
+		t.Error("instances table missing after migrations")
 	}
 }

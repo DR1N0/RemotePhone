@@ -11,3 +11,8 @@ SELECT * FROM credentials WHERE id = ?;
 
 -- name: RevokeCredential :exec
 UPDATE credentials SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?;
+
+-- name: RevokeAttachmentCredentials :exec
+UPDATE credentials
+SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+WHERE scope = 'attachment' AND session_id = ? AND attachment_id = ?;

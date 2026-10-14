@@ -106,6 +106,22 @@ func (q *Queries) GetCredentialByTokenHash(ctx context.Context, tokenHash string
 	return i, err
 }
 
+const revokeAttachmentCredentials = `-- name: RevokeAttachmentCredentials :exec
+UPDATE credentials
+SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+WHERE scope = 'attachment' AND session_id = ? AND attachment_id = ?
+`
+
+type RevokeAttachmentCredentialsParams struct {
+	SessionID    sql.NullString `json:"session_id"`
+	AttachmentID sql.NullString `json:"attachment_id"`
+}
+
+func (q *Queries) RevokeAttachmentCredentials(ctx context.Context, arg RevokeAttachmentCredentialsParams) error {
+	_, err := q.db.ExecContext(ctx, revokeAttachmentCredentials, arg.SessionID, arg.AttachmentID)
+	return err
+}
+
 const revokeCredential = `-- name: RevokeCredential :exec
 UPDATE credentials SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?
 `
