@@ -1,5 +1,7 @@
 # Control-plane deployment
 
+> **Legacy.** This describes the TypeScript control plane (`apps/controlplane`), which is being retired in favor of a Go implementation at `apps/server`. The Go control plane has no deployment guide yet — it doesn't yet implement HTTPS, PIN-pairing, or most of the API surface described below. See `docs/architecture/overview.md` for current Go-port status.
+
 One Control Plane process runs two **loopback-only** HTTP listeners. Neither raw listener may be exposed on a LAN or the public Internet.
 
 | Surface | Listener | Purpose | Public exposure |

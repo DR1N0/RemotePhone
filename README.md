@@ -1,12 +1,12 @@
 # mako-server
 
-Mako Server hosts Android runtime instances behind a browser-accessible control plane.
+Mako Server hosts Android runtime instances behind a control plane, reachable over a trusted LAN by a future native client. There is no browser-based streaming client.
 
 This repository contains:
-- a TypeScript control plane in `apps/controlplane`
-- a Go local worker in `apps/worker`
+- a Go control plane + worker under active development in `apps/server` (two binaries, one module — `cmd/mako-controlplane` and `cmd/mako-worker`). Auth and instance CRUD/lifecycle are implemented; sessions/transport are in progress; admin, worker lifecycle, pairing, and base images are not yet ported. See [`docs/architecture/overview.md`](docs/architecture/overview.md) for current status.
+- a legacy TypeScript control plane in `apps/controlplane`, being replaced by the above. Still the only end-to-end working flow today (instance creation, sessions, local attachment transport).
 
-## Run locally
+## Run locally (legacy TypeScript flow)
 
 ### Control plane prerequisites
 
@@ -18,7 +18,7 @@ npm install
 ### Start the worker
 
 ```bash
-cd apps/worker
+cd apps/server
 go run ./cmd/mako-worker
 ```
 
