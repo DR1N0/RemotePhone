@@ -8,16 +8,20 @@ import (
 	"testing"
 
 	"mako/internal/controlplane/auth"
+	"mako/internal/controlplane/instance"
 	"mako/internal/controlplane/persistence"
+	"mako/internal/controlplane/placement"
 
 	_ "modernc.org/sqlite"
 )
 
-// newTestServiceForMain constructs a *auth.Service backed by a real
-// temp-file DB (migrated) and a real temp-file bootstrap secret, following
-// the exact pattern established by every other test file in this plan — no
-// in-memory shortcuts or test-only backdoors.
-func newTestServiceForMain(t *testing.T) (*auth.Service, string) {
+// newTestServiceForMain constructs a *auth.Service and an *instance.Service
+// sharing one real temp-file DB (migrated) and a real temp-file bootstrap
+// secret, following the exact pattern established by every other test file
+// in this plan — no in-memory shortcuts or test-only backdoors. The
+// instance.Service's worker client points nowhere real; none of these tests
+// exercise instance routes.
+func newTestServiceForMain(t *testing.T) (*auth.Service, *instance.Service, string) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -33,12 +37,13 @@ func newTestServiceForMain(t *testing.T) (*auth.Service, string) {
 	if err != nil {
 		t.Fatalf("auth.NewService: %v", err)
 	}
-	return svc, secretPath
+	instanceSvc := instance.NewService(db, instance.NewHTTPWorkerClient("http://127.0.0.1:0"), placement.NewSelector())
+	return svc, instanceSvc, secretPath
 }
 
 func TestAdminMuxHealthz(t *testing.T) {
-	svc, _ := newTestServiceForMain(t)
-	srv := httptest.NewServer(newAdminMux(svc))
+	svc, instanceSvc, _ := newTestServiceForMain(t)
+	srv := httptest.NewServer(newAdminMux(svc, instanceSvc))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/healthz")
@@ -52,8 +57,8 @@ func TestAdminMuxHealthz(t *testing.T) {
 }
 
 func TestClientMuxHealthz(t *testing.T) {
-	svc, _ := newTestServiceForMain(t)
-	srv := httptest.NewServer(newClientMux(svc))
+	svc, instanceSvc, _ := newTestServiceForMain(t)
+	srv := httptest.NewServer(newClientMux(svc, instanceSvc))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/healthz")
@@ -67,8 +72,8 @@ func TestClientMuxHealthz(t *testing.T) {
 }
 
 func TestClientMuxHasNoAdminRoute(t *testing.T) {
-	svc, _ := newTestServiceForMain(t)
-	srv := httptest.NewServer(newClientMux(svc))
+	svc, instanceSvc, _ := newTestServiceForMain(t)
+	srv := httptest.NewServer(newClientMux(svc, instanceSvc))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/admin/anything")

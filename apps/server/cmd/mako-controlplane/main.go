@@ -12,26 +12,30 @@ import (
 	"mako/internal/controlplane/apiserver/adminapi"
 	"mako/internal/controlplane/apiserver/clientapi"
 	"mako/internal/controlplane/auth"
+	"mako/internal/controlplane/instance"
 	"mako/internal/controlplane/persistence"
+	"mako/internal/controlplane/placement"
 
 	_ "modernc.org/sqlite"
 )
 
-func newAdminMux(svc *auth.Service) *http.ServeMux {
+func newAdminMux(svc *auth.Service, instanceSvc *instance.Service) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	adminapi.RegisterAuthRoutes(mux, svc)
+	adminapi.RegisterInstanceRoutes(mux, instanceSvc, svc)
 	return mux
 }
 
-func newClientMux(svc *auth.Service) *http.ServeMux {
+func newClientMux(svc *auth.Service, instanceSvc *instance.Service) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	clientapi.RegisterAuthRoutes(mux, svc)
+	clientapi.RegisterInstanceRoutes(mux, instanceSvc, svc)
 	return mux
 }
 
@@ -61,8 +65,15 @@ func run() error {
 		return err
 	}
 
-	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc)}
-	clientSrv := &http.Server{Addr: "127.0.0.1:3000", Handler: newClientMux(svc)}
+	// MAKO_WORKER_BASE_URL matches the worker's own default listen address
+	// (internal/worker/config.Load's MAKO_WORKER_BASE_URL default) — this
+	// phase talks to exactly one externally-started worker; spawning it is
+	// Phase 4's job (see docs/plans/roadmap.md).
+	workerBaseURL := envOrDefault("MAKO_WORKER_BASE_URL", "http://127.0.0.1:7780")
+	instanceSvc := instance.NewService(db, instance.NewHTTPWorkerClient(workerBaseURL), placement.NewSelector())
+
+	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc, instanceSvc)}
+	clientSrv := &http.Server{Addr: "127.0.0.1:3000", Handler: newClientMux(svc, instanceSvc)}
 
 	errCh := make(chan error, 2)
 	go func() { errCh <- adminSrv.ListenAndServe() }()
