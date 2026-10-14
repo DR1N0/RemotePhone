@@ -8,6 +8,19 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-15 — Why mako exists: the problem desktop-streaming tools can't solve
+
+Recorded because it was previously undocumented anywhere, and it reframes how to evaluate this project against superficially-similar tools (general remote-desktop apps, cloud-gaming platforms, other WebRTC streaming clients).
+
+The project's origin: using Artemis+Apollo (a Moonlight/Sunshine-family streaming pair) to play touch-native mobile games on a phone, streamed from a PC. Two problems turned out to be architectural, not implementation gaps in Apollo:
+
+1. **No real touch semantics.** Desktop OSes have no native touchscreen concept. Apollo can only translate touch gestures into a virtual gamepad or mouse — there's no startup flag or config that makes the *server* side understand touch, because the server is streaming a desktop session that was never touch-aware to begin with.
+2. **Single input/output per host, no real multi-instance concurrency.** A physical machine's keyboard/mouse/display are exclusive resources. Two clients can never each independently drive two separate "instances" running on the same host — that's the Windows/macOS multi-seat-input problem (notoriously hard to solve well), not something Apollo left unimplemented.
+
+An Android emulator is touch-first by construction, and running several independent emulator instances on one host is already an ordinary capability (Android Studio runs multiple AVDs in parallel routinely, each with its own isolated input/output). Wrapping each instance's full audio/video/touch I/O in WebRTC sidesteps the multi-seat problem at the root instead of patching around it at the desktop-streaming layer.
+
+**Consequence for how to evaluate this project:** mako is not a general remote-desktop or cloud-gaming competitor. A comparison against things like 网易UU远程 (NetEase-backed, general remote-control + cloud-GPU-rental platform with years of infrastructure investment) or `cloudplayplus_stone`-style Flutter/WebRTC desktop-streaming clients is the wrong lens — both of those are still desktop-streaming-paradigm tools, subject to the same two limits above. Nothing surveyed (Apollo/Sunshine/Moonlight/Artemis, 网易UU远程, `cloudplayplus_stone`, `jacobbo/remote-android`, Google's own `android-emulator-webrtc`/Cuttlefish WebRTC) combines mako's actual scope: self-hosted, Android-*emulator*-specific (not phone mirroring, not desktop streaming), native touch I/O, true per-instance isolation for concurrent multi-user access, versioned base images, and a native-client PIN-pairing trust model (`security-model.md`) instead of an account+relay-server model. This doesn't make mako's engineering easier or guarantee it's worth continuing on its own — it just means the right question is "does it solve the touch-semantics + multi-instance-concurrency problem well for its actual users," not "can it beat a funded cloud-gaming incumbent at streaming quality."
+
 ### 2026-10-14 — Session invites redeem by 6-digit PIN, not an opaque token
 
 TS's session-invite flow issued the same 43-character base64url token shape used for bearer credentials. Revisited while porting: an invite is meant to be read aloud or typed by someone standing nearby, not pasted from a link, so it was redesigned around a short-lived numeric PIN instead. Decided explicitly with the user (not unilaterally):

@@ -2,6 +2,15 @@
 
 This document describes the mako control plane **as it actually exists right now**. Unlike design/planning documents, this file is edited in place as reality changes — if it disagrees with the code, the code wins and this file is wrong.
 
+## Motivation (why this exists instead of Moonlight/Sunshine/Apollo/Artemis)
+
+The project started from two structural limits hit while using Artemis+Apollo (a Moonlight/Sunshine-family streaming pair) to play touch-native mobile games on a phone over a streamed PC session:
+
+1. **No real touch semantics.** Desktop OSes have no native touchscreen concept; Apollo can only translate touch gestures into a virtual gamepad/mouse, which doesn't match games actually designed for touch input.
+2. **Single input/output, no real multi-instance concurrency.** A physical host's keyboard/mouse/display are exclusive resources — two clients can never each independently drive two separate "instances" on the same host. That's the Windows/macOS multi-seat-input problem, not a gap in Apollo's implementation.
+
+An Android emulator is touch-first by construction, and running several independent instances on one host is already an ordinary, solved capability (Android Studio runs multiple AVDs in parallel routinely). Wrapping each instance's full audio/video/touch I/O in WebRTC sidesteps the multi-seat problem entirely, rather than patching around it at the desktop-streaming layer. This is why mako is scoped to Android emulator instances specifically, not general desktop/game streaming — see `decisions-log.md` (2026-10-15) for the full discussion, including why this means mako isn't actually competing with desktop-streaming tools or general remote-desktop/cloud-gaming products (e.g. 网易UU远程) on "best streaming experience" — those solve a different problem than the one mako exists for.
+
 ## Status
 
 - **`apps/server` (Go) is the active implementation.** One Go module (`module mako`, Go 1.27.2), two binaries: `cmd/mako-controlplane` and `cmd/mako-worker`. Auth and instance CRUD/lifecycle are fully ported and live; session, admin, image, pairing, and real worker-lifecycle management are still empty stub packages.

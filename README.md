@@ -2,6 +2,15 @@
 
 Mako Server hosts Android runtime instances behind a control plane, reachable over a trusted LAN by a future native client. There is no browser-based streaming client.
 
+## Why not just use Moonlight/Sunshine/Apollo/Artemis?
+
+This project started from hitting two structural limits of desktop-streaming tools (Artemis+Apollo, and the same is true of Moonlight/Sunshine) while trying to play touch-native mobile games on a phone over a PC game stream:
+
+1. **No real touch semantics.** Desktop OSes have no native touchscreen concept — Apollo can only translate touch input into a virtual gamepad/mouse, which doesn't match games designed for actual touch input.
+2. **Single input/output, no real multi-instance concurrency.** A physical machine's keyboard/mouse/display are exclusive resources, so two clients can never each independently drive "two separate instances on the same host" — that's the hard multi-seat-input problem on Windows/macOS, not something Apollo failed to implement.
+
+An Android emulator is touch-first by construction, and running several independent emulator instances on one host is already a solved, ordinary capability (Android Studio runs several AVDs in parallel routinely). Wrapping each instance's full audio/video/touch I/O in WebRTC sidesteps the multi-seat problem entirely instead of patching around it at the desktop-streaming layer. Mako isn't competing with desktop-streaming tools or general cloud-gaming/remote-desktop products on "best PC streaming experience" — it's solving something they're architecturally unable to: native touch input plus true per-instance isolation for multiple concurrent users.
+
 This repository contains:
 - a Go control plane + worker under active development in `apps/server` (two binaries, one module — `cmd/mako-controlplane` and `cmd/mako-worker`). Auth and instance CRUD/lifecycle are implemented; sessions/transport are in progress; admin, worker lifecycle, pairing, and base images are not yet ported. See [`docs/architecture/overview.md`](docs/architecture/overview.md) for current status.
 - a legacy TypeScript control plane in `apps/controlplane`, being replaced by the above. Still the only end-to-end working flow today (instance creation, sessions, local attachment transport).
