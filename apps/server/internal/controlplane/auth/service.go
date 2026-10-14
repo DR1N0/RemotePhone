@@ -166,7 +166,15 @@ func (s *Service) GetUser(ctx context.Context, userID string) (UserDTO, error) {
 // ErrUserBanned; guest user requesting an "account" scoped credential ->
 // ServiceError (guests ARE allowed "attachment" scoped credentials).
 func (s *Service) requireActiveUser(ctx context.Context, userID, scope string) (repo.User, error) {
-	user, err := s.q.GetUserByID(ctx, userID)
+	return s.requireActiveUserTx(ctx, s.q, userID, scope)
+}
+
+// requireActiveUserTx is requireActiveUser against an explicit q, so callers
+// holding their own transaction (e.g. session.Service.CreateSession, which
+// must see its own as-yet-uncommitted session/attachment rows) can run this
+// check without a second connection — see issueAttachmentCredentialTx.
+func (s *Service) requireActiveUserTx(ctx context.Context, q *repo.Queries, userID, scope string) (repo.User, error) {
+	user, err := q.GetUserByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return repo.User{}, fmt.Errorf("%w: %s", ErrUserNotFound, userID)
@@ -259,7 +267,27 @@ func (s *Service) IssueAccountCredential(ctx context.Context, userID, deviceLabe
 // must be strictly in the future and at most 24h out). Guest users ARE
 // allowed attachment credentials.
 func (s *Service) IssueAttachmentCredential(ctx context.Context, userID, sessionID, attachmentID string, expiresAt time.Time) (string, error) {
-	if _, err := s.requireActiveUser(ctx, userID, "attachment"); err != nil {
+	return s.issueAttachmentCredentialTx(ctx, s.q, userID, sessionID, attachmentID, expiresAt)
+}
+
+// IssueAttachmentCredentialTx is IssueAttachmentCredential against an
+// explicit q, for callers (session.Service.CreateSession) that must issue
+// the credential inside their OWN open transaction so session+attachment+
+// credential either all commit or none do — matching the TS source, where
+// every DB operation during one synchronous better-sqlite3 transaction
+// callback is atomic together regardless of which service object issued
+// it. Go's explicit *sql.Tx threading has no equivalent for free, hence
+// this method: s.q (used by the plain IssueAttachmentCredential) is bound
+// to the top-level *sql.DB, a different connection-pool slot than a
+// transaction's *sql.Tx — calling it while a caller's transaction holds the
+// (pool-size-1, see NewService) only connection would deadlock, not just
+// miss uncommitted rows.
+func (s *Service) IssueAttachmentCredentialTx(ctx context.Context, q *repo.Queries, userID, sessionID, attachmentID string, expiresAt time.Time) (string, error) {
+	return s.issueAttachmentCredentialTx(ctx, q, userID, sessionID, attachmentID, expiresAt)
+}
+
+func (s *Service) issueAttachmentCredentialTx(ctx context.Context, q *repo.Queries, userID, sessionID, attachmentID string, expiresAt time.Time) (string, error) {
+	if _, err := s.requireActiveUserTx(ctx, q, userID, "attachment"); err != nil {
 		return "", err
 	}
 
@@ -268,7 +296,7 @@ func (s *Service) IssueAttachmentCredential(ctx context.Context, userID, session
 		return "", NewServiceError("attachment credential expiration must be within 24 hours")
 	}
 
-	status, err := s.q.GetSessionStatusForAuth(ctx, sessionID)
+	status, err := q.GetSessionStatusForAuth(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", NewServiceError("session is not active: " + sessionID)
@@ -279,7 +307,7 @@ func (s *Service) IssueAttachmentCredential(ctx context.Context, userID, session
 		return "", NewServiceError("session is not active: " + sessionID)
 	}
 
-	attachment, err := s.q.GetAttachmentForAuth(ctx, attachmentID)
+	attachment, err := q.GetAttachmentForAuth(ctx, attachmentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", NewServiceError("attachment is not bound to the credential user and session")
@@ -290,16 +318,26 @@ func (s *Service) IssueAttachmentCredential(ctx context.Context, userID, session
 		return "", NewServiceError("attachment is not bound to the credential user and session")
 	}
 
-	return s.createScopedCredential(ctx, s.q, userID, "attachment", "attachment", &sessionID, &attachmentID, issuedAt, &expiresAt)
+	return s.createScopedCredential(ctx, q, userID, "attachment", "attachment", &sessionID, &attachmentID, issuedAt, &expiresAt)
 }
 
 // RotateAttachmentCredential issues a fresh attachment credential with a
-// full 24h TTL from now, and revokes the old one. It performs no
-// transaction of its own: per the TS source's comment, the caller owns the
-// surrounding transaction so attachment state and credential rotation
-// commit together.
+// full 24h TTL from now, and revokes the old one.
 func (s *Service) RotateAttachmentCredential(ctx context.Context, credentialID, userID, sessionID, attachmentID string) (string, error) {
-	cred, err := s.q.GetCredentialByID(ctx, credentialID)
+	return s.rotateAttachmentCredentialTx(ctx, s.q, credentialID, userID, sessionID, attachmentID)
+}
+
+// RotateAttachmentCredentialTx is RotateAttachmentCredential against an
+// explicit q — see IssueAttachmentCredentialTx's doc comment for why this
+// exists. session.Service.ResumeAttachment calls this from within its own
+// transaction so the credential rotation and the attachment's
+// status/owner-absence-deadline updates commit together.
+func (s *Service) RotateAttachmentCredentialTx(ctx context.Context, q *repo.Queries, credentialID, userID, sessionID, attachmentID string) (string, error) {
+	return s.rotateAttachmentCredentialTx(ctx, q, credentialID, userID, sessionID, attachmentID)
+}
+
+func (s *Service) rotateAttachmentCredentialTx(ctx context.Context, q *repo.Queries, credentialID, userID, sessionID, attachmentID string) (string, error) {
+	cred, err := q.GetCredentialByID(ctx, credentialID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", fmt.Errorf("%w: attachment credential is not valid for rotation", ErrCredentialNotFound)
@@ -323,12 +361,12 @@ func (s *Service) RotateAttachmentCredential(ctx context.Context, credentialID, 
 	}
 
 	newExpiresAt := s.now().Add(attachmentCredentialMaxTTL)
-	newToken, err := s.IssueAttachmentCredential(ctx, userID, sessionID, attachmentID, newExpiresAt)
+	newToken, err := s.issueAttachmentCredentialTx(ctx, q, userID, sessionID, attachmentID, newExpiresAt)
 	if err != nil {
 		return "", err
 	}
 
-	if err := s.q.RevokeCredential(ctx, credentialID); err != nil {
+	if err := q.RevokeCredential(ctx, credentialID); err != nil {
 		return "", fmt.Errorf("revoke old credential: %w", err)
 	}
 	return newToken, nil
