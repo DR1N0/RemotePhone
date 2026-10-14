@@ -8,6 +8,19 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-14 — Session invites redeem by 6-digit PIN, not an opaque token
+
+TS's session-invite flow issued the same 43-character base64url token shape used for bearer credentials. Revisited while porting: an invite is meant to be read aloud or typed by someone standing nearby, not pasted from a link, so it was redesigned around a short-lived numeric PIN instead. Decided explicitly with the user (not unilaterally):
+
+- **6-digit numeric PIN** (1,000,000 combinations), not alphanumeric — optimizes for "dictate it to a friend," matching Zoom/Meet/WiFi-share conventions.
+- **Fixed 5-minute TTL**, no longer a caller-configurable 1–60 minute range — a PIN's much smaller space makes the window part of the safety margin, not just a UX knob.
+- **Global lookup, no instance/session id in the redeem request** — `host:port/join/<pin>` is the whole link. At this project's scale, a collision between two simultaneously-active invites in a 1-in-a-million space is a non-issue, and it's the shortest possible link.
+- **Guest redemption still creates a lightweight `users` row** (`user_type = 'guest'`, display name only), exactly like TS's `createGuestUser` — a fully stateless alternative (name stored directly on the attachment, no user row at all) was considered and explicitly declined for this pass.
+- PIN hashes reuse `auth.HashToken` (unsalted SHA-256), same as every other credential in this schema, accepting that a 6-digit space is cheaply precomputable by anyone with DB read access. Not treated as a gap worth a peppered-hash scheme here — DB read access already exposes far more.
+- **No brute-force rate-limiting/attempt-cap added.** Flagged as a deliberately deferred hardening item (nothing else in this port rate-limits a redemption endpoint either), not an oversight — revisit before this leaves a trusted-LAN deployment model.
+
+No migration needed: `session_invites.token_hash` already stores an opaque hash with no length/format assumption anywhere in the schema or queries. See `docs/plans/session-transport-redesign.md`'s "Session invite redesign" section for the full writeup.
+
 ### 2026-10-14 — Drop the `workers` and `settings` tables (decided; migration not yet written)
 
 While scoping the instance/placement phase, re-examined whether a persisted `workers` registry (added `0009`, unused by any code) was actually needed. The original justification was a shared pool of long-lived local worker processes requiring health-based placement selection and restart affinity. Two things undermined that:

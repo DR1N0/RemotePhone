@@ -151,7 +151,15 @@ func (s *Service) GetSetupStatus(ctx context.Context) (bool, error) {
 
 // GetUser returns the DTO for userID, or a wrapped ErrUserNotFound.
 func (s *Service) GetUser(ctx context.Context, userID string) (UserDTO, error) {
-	row, err := s.q.GetUserByID(ctx, userID)
+	return s.GetUserTx(ctx, s.q, userID)
+}
+
+// GetUserTx is GetUser against an explicit q — for callers (session.Service's
+// invite redemption) that must read a user row created earlier in the SAME
+// still-open transaction (e.g. a just-created guest user), for the same
+// pool-size-1 reason as IssueAttachmentCredentialTx.
+func (s *Service) GetUserTx(ctx context.Context, q *repo.Queries, userID string) (UserDTO, error) {
+	row, err := q.GetUserByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return UserDTO{}, fmt.Errorf("%w: %s", ErrUserNotFound, userID)
