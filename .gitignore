@@ -1,7 +1,5 @@
 # Agents
 .claude
-.superpowers
-docs/superpowers
 
 # Binaries and data
 .bin
@@ -11,3 +9,4 @@ docs/superpowers
 node_modules/
 dist/
 
+docs/plans
