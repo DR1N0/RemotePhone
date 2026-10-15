@@ -41,6 +41,21 @@ func (f *fakeWorkerClient) InspectInstance(ctx context.Context, instanceID strin
 func (f *fakeWorkerClient) StopInstance(ctx context.Context, instanceID string) (workerapi.StopInstanceResponse, error) {
 	return workerapi.StopInstanceResponse{State: "stopped"}, nil
 }
+func (f *fakeWorkerClient) CreateTransportSession(ctx context.Context, req workerapi.CreateTransportSessionRequest) (workerapi.TransportSessionResponse, error) {
+	return workerapi.TransportSessionResponse{}, nil
+}
+func (f *fakeWorkerClient) UpdateTransportRole(ctx context.Context, req workerapi.UpdateTransportSessionRoleRequest) error {
+	return nil
+}
+func (f *fakeWorkerClient) DestroyTransportSession(ctx context.Context, instanceID, attachmentID string) error {
+	return nil
+}
+func (f *fakeWorkerClient) ForwardOffer(ctx context.Context, req workerapi.TransportOfferRequest) (workerapi.TransportOfferResponse, error) {
+	return workerapi.TransportOfferResponse{}, nil
+}
+func (f *fakeWorkerClient) ForwardICECandidate(ctx context.Context, req workerapi.ICECandidateRequest) error {
+	return nil
+}
 
 func newTestInstanceSetup(t *testing.T) (*auth.Service, *instance.Service, string) {
 	t.Helper()

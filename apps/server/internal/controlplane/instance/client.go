@@ -28,14 +28,20 @@ func (e *ErrWorkerRequestFailed) Error() string {
 }
 
 // WorkerClient talks to the mako-worker process serving one instance.
-// Phase 1 only needs template discovery and instance lifecycle;
-// transport-session methods belong to Phase 2 (session/transport), added to
-// this same interface when that work lands — not a separate client type.
+// Phase 2's transport package needs the transport-session/signaling methods
+// below in addition to Phase 1's template discovery and instance lifecycle —
+// added to this same interface rather than a separate client type, matching
+// worker-client.ts's single ManagedInstanceWorkerClient interface.
 type WorkerClient interface {
 	ListTemplates(ctx context.Context) ([]runtime.Template, error)
 	StartInstance(ctx context.Context, req workerapi.StartInstanceRequest) (workerapi.StartInstanceResponse, error)
 	InspectInstance(ctx context.Context, instanceID string) (workerapi.InspectInstanceResponse, error)
 	StopInstance(ctx context.Context, instanceID string) (workerapi.StopInstanceResponse, error)
+	CreateTransportSession(ctx context.Context, req workerapi.CreateTransportSessionRequest) (workerapi.TransportSessionResponse, error)
+	UpdateTransportRole(ctx context.Context, req workerapi.UpdateTransportSessionRoleRequest) error
+	DestroyTransportSession(ctx context.Context, instanceID, attachmentID string) error
+	ForwardOffer(ctx context.Context, req workerapi.TransportOfferRequest) (workerapi.TransportOfferResponse, error)
+	ForwardICECandidate(ctx context.Context, req workerapi.ICECandidateRequest) error
 }
 
 // HTTPWorkerClient is the only WorkerClient implementation: a plain HTTP
@@ -117,4 +123,33 @@ func (c *HTTPWorkerClient) StopInstance(ctx context.Context, instanceID string) 
 		return workerapi.StopInstanceResponse{}, err
 	}
 	return out, nil
+}
+
+func (c *HTTPWorkerClient) CreateTransportSession(ctx context.Context, req workerapi.CreateTransportSessionRequest) (workerapi.TransportSessionResponse, error) {
+	var out workerapi.TransportSessionResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/transport/session", req, &out); err != nil {
+		return workerapi.TransportSessionResponse{}, err
+	}
+	return out, nil
+}
+
+func (c *HTTPWorkerClient) UpdateTransportRole(ctx context.Context, req workerapi.UpdateTransportSessionRoleRequest) error {
+	return c.doJSON(ctx, http.MethodPatch, "/v1/transport/session/role", req, nil)
+}
+
+func (c *HTTPWorkerClient) DestroyTransportSession(ctx context.Context, instanceID, attachmentID string) error {
+	query := url.Values{"instanceId": {instanceID}, "attachmentId": {attachmentID}}
+	return c.doJSON(ctx, http.MethodDelete, "/v1/transport/session?"+query.Encode(), nil, nil)
+}
+
+func (c *HTTPWorkerClient) ForwardOffer(ctx context.Context, req workerapi.TransportOfferRequest) (workerapi.TransportOfferResponse, error) {
+	var out workerapi.TransportOfferResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/transport/offer", req, &out); err != nil {
+		return workerapi.TransportOfferResponse{}, err
+	}
+	return out, nil
+}
+
+func (c *HTTPWorkerClient) ForwardICECandidate(ctx context.Context, req workerapi.ICECandidateRequest) error {
+	return c.doJSON(ctx, http.MethodPost, "/v1/transport/ice-candidate", req, nil)
 }
