@@ -51,8 +51,9 @@ apps/server/
 | `placement/` | **Implemented, deliberately trivial.** `Selector.Validate` rejects any policy kind but `local-only` — there's no worker pool to select among yet. See `decisions-log.md` (2026-10-14). |
 | `persistence/` | **Implemented.** Migration runner + sqlc-generated repo layer, migrations through `0012`. See `data-model.md`. |
 | `controller/` | **Skeleton only.** `Reconciler` interface and workqueue-based dispatch exist; no real probes (worker-liveness, owner-absence) are registered yet. |
-| `session/` | **Partial.** Session/attachment CRUD lifecycle, `KeyedMutex` request-time serialization, and the two low-level role-transition primitives (`SetAttachmentPendingTargetRole`/`ConfirmAttachmentRole`) are implemented. Session invites and HTTP routes are not wired yet. See `docs/plans/session-transport-redesign.md`. |
-| `transport/`, `admin/`, `image/`, `pairing/`, `tlsidentity/` | **Stub.** Each is an empty package with only a `doc.go` describing its intended responsibility. No implementation yet. |
+| `session/` | **Implemented.** Session/attachment CRUD lifecycle, session invites (6-digit PIN redemption, see `decisions-log.md`), and `KeyedMutex` request-time serialization. HTTP routes are not wired yet. See `docs/plans/session-transport-redesign.md`. |
+| `transport/` | **Implemented.** Worker transport-session establish/teardown, signaling relay, and `TransitionAttachmentRole` (the promote/demote redesign — one method owns persist+worker-sync+retry, replacing four-times-patched route-layer orchestration). HTTP routes are not wired yet. |
+| `admin/`, `image/`, `pairing/`, `tlsidentity/` | **Stub.** Each is an empty package with only a `doc.go` describing its intended responsibility. No implementation yet. |
 
 ## Networking (current, not target)
 
