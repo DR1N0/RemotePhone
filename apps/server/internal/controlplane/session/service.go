@@ -531,64 +531,130 @@ func (s *Service) CompleteAttachmentTransportTeardown(ctx context.Context, sessi
 	return nil
 }
 
-// CloseSession disconnects every attachment, revokes their credentials,
-// marks them all transport-teardown-pending, and closes the session — one
-// transaction. Unlike session-service.ts's closeSession, it does not take
-// an injected destroyAttachmentTransport callback and does not attempt the
-// worker-side teardown itself (that TS version silently swallowed
+// closeSessionTx is the shared core of CloseSession/CloseSessionTx: it
+// disconnects every attachment, revokes their credentials, marks them all
+// transport-teardown-pending, and closes the session, all against the
+// caller-supplied q. Unlike session-service.ts's closeSession, it does not
+// take an injected destroyAttachmentTransport callback and does not attempt
+// the worker-side teardown itself (that TS version silently swallowed
 // per-attachment teardown failures inside a try/catch). Instead it returns
 // the closed record plus the IDs that still need worker teardown; the
-// caller (transport.Service, Phase 2's wiring) drives that loop and calls
-// CompleteAttachmentTransportTeardown per attachment once each succeeds,
-// so failures stay visible instead of being swallowed.
+// caller drives that loop (transport.Service.TeardownPendingAttachment) once
+// its own transaction has committed, so failures stay visible instead of
+// being swallowed.
+func (s *Service) closeSessionTx(ctx context.Context, q *repo.Queries, sessionID string, actor audit.Context) (SessionRecord, []string, error) {
+	if _, err := s.getRequiredSessionTx(ctx, q, sessionID); err != nil {
+		return SessionRecord{}, nil, err
+	}
+	attachments, err := q.ListAttachmentsForSession(ctx, sessionID)
+	if err != nil {
+		return SessionRecord{}, nil, fmt.Errorf("list attachments for session: %w", err)
+	}
+	var attachmentIDs []string
+	for _, a := range attachments {
+		if a.Status != "disconnected" {
+			if err := q.UpdateAttachmentStatus(ctx, repo.UpdateAttachmentStatusParams{Status: "disconnected", ID: a.ID}); err != nil {
+				return SessionRecord{}, nil, fmt.Errorf("update attachment status: %w", err)
+			}
+		}
+		if err := q.RevokeAttachmentCredentials(ctx, repo.RevokeAttachmentCredentialsParams{
+			SessionID:    sql.NullString{String: sessionID, Valid: true},
+			AttachmentID: sql.NullString{String: a.ID, Valid: true},
+		}); err != nil {
+			return SessionRecord{}, nil, fmt.Errorf("revoke attachment credentials: %w", err)
+		}
+		if err := q.SetAttachmentTransportTeardownPending(ctx, repo.SetAttachmentTransportTeardownPendingParams{
+			TransportTeardownPending: 1,
+			ID:                       a.ID,
+		}); err != nil {
+			return SessionRecord{}, nil, fmt.Errorf("set transport teardown pending: %w", err)
+		}
+		attachmentIDs = append(attachmentIDs, a.ID)
+	}
+	if err := q.CloseSession(ctx, sessionID); err != nil {
+		return SessionRecord{}, nil, fmt.Errorf("close session: %w", err)
+	}
+	if err := audit.Record(ctx, q, actor, actionSessionClose, targetTypeSession, sessionID, audit.OutcomeSuccess); err != nil {
+		return SessionRecord{}, nil, err
+	}
+	record, err := s.getSessionRecordTx(ctx, q, sessionID)
+	if err != nil {
+		return SessionRecord{}, nil, err
+	}
+	return record, attachmentIDs, nil
+}
+
+// CloseSession closes sessionID unconditionally, in its own transaction.
 func (s *Service) CloseSession(ctx context.Context, sessionID string, actor audit.Context) (SessionRecord, []string, error) {
 	var result SessionRecord
 	var attachmentIDs []string
 	err := s.withTx(ctx, func(q *repo.Queries) error {
-		if _, err := s.getRequiredSessionTx(ctx, q, sessionID); err != nil {
-			return err
-		}
-		attachments, err := q.ListAttachmentsForSession(ctx, sessionID)
-		if err != nil {
-			return fmt.Errorf("list attachments for session: %w", err)
-		}
-		for _, a := range attachments {
-			if a.Status != "disconnected" {
-				if err := q.UpdateAttachmentStatus(ctx, repo.UpdateAttachmentStatusParams{Status: "disconnected", ID: a.ID}); err != nil {
-					return fmt.Errorf("update attachment status: %w", err)
-				}
-			}
-			if err := q.RevokeAttachmentCredentials(ctx, repo.RevokeAttachmentCredentialsParams{
-				SessionID:    sql.NullString{String: sessionID, Valid: true},
-				AttachmentID: sql.NullString{String: a.ID, Valid: true},
-			}); err != nil {
-				return fmt.Errorf("revoke attachment credentials: %w", err)
-			}
-			if err := q.SetAttachmentTransportTeardownPending(ctx, repo.SetAttachmentTransportTeardownPendingParams{
-				TransportTeardownPending: 1,
-				ID:                       a.ID,
-			}); err != nil {
-				return fmt.Errorf("set transport teardown pending: %w", err)
-			}
-			attachmentIDs = append(attachmentIDs, a.ID)
-		}
-		if err := q.CloseSession(ctx, sessionID); err != nil {
-			return fmt.Errorf("close session: %w", err)
-		}
-		if err := audit.Record(ctx, q, actor, actionSessionClose, targetTypeSession, sessionID, audit.OutcomeSuccess); err != nil {
-			return err
-		}
-		record, err := s.getSessionRecordTx(ctx, q, sessionID)
-		if err != nil {
-			return err
-		}
-		result = record
-		return nil
+		record, ids, err := s.closeSessionTx(ctx, q, sessionID, actor)
+		result, attachmentIDs = record, ids
+		return err
 	})
 	if err != nil {
 		return SessionRecord{}, nil, err
 	}
 	return result, attachmentIDs, nil
+}
+
+// CloseSessionTx is CloseSession against an explicit q, for callers (the
+// admin package's ban flow) that need the close to commit atomically with
+// other work in their own transaction — same pattern as
+// auth.Service.RequireActiveAdmin taking an external q.
+func (s *Service) CloseSessionTx(ctx context.Context, q *repo.Queries, sessionID string, actor audit.Context) (SessionRecord, []string, error) {
+	return s.closeSessionTx(ctx, q, sessionID, actor)
+}
+
+// CloseExpiredOwnerAbsenceSession closes sessionID only if, as of now, it is
+// still active with an owner-absence deadline that has passed — checked and
+// acted on inside one transaction, so a concurrent resume (which clears the
+// deadline) can't race it. closed is false, with no error, whenever the
+// session is no longer eligible (already closed, deadline cleared, or
+// deadline not yet reached) — the caller, the owner-absence Reconciler, can
+// call this repeatedly and safely treat it as a no-op in that case.
+func (s *Service) CloseExpiredOwnerAbsenceSession(ctx context.Context, sessionID string, now time.Time, actor audit.Context) (record SessionRecord, attachmentIDs []string, closed bool, err error) {
+	nowStr := formatTimestamp(now)
+	err = s.withTx(ctx, func(q *repo.Queries) error {
+		sess, txErr := s.getRequiredSessionTx(ctx, q, sessionID)
+		if txErr != nil {
+			if errors.Is(txErr, ErrSessionNotFound) {
+				return nil
+			}
+			return txErr
+		}
+		if sess.Status != "active" || !sess.OwnerAbsenceDeadline.Valid || sess.OwnerAbsenceDeadline.String > nowStr {
+			return nil
+		}
+		r, ids, txErr := s.closeSessionTx(ctx, q, sessionID, actor)
+		if txErr != nil {
+			return txErr
+		}
+		record, attachmentIDs, closed = r, ids, true
+		return nil
+	})
+	if err != nil {
+		return SessionRecord{}, nil, false, err
+	}
+	return record, attachmentIDs, closed, nil
+}
+
+// ListExpiredOwnerAbsenceSessionIDs returns the IDs of active sessions whose
+// owner-absence deadline has passed as of now. This is candidate discovery
+// for the owner-absence Reconciler's periodic resync only — Reconcile itself
+// always re-verifies via CloseExpiredOwnerAbsenceSession, so this list is
+// never required to be race-free against a concurrent resume.
+func (s *Service) ListExpiredOwnerAbsenceSessionIDs(ctx context.Context, now time.Time) ([]string, error) {
+	rows, err := s.q.ListSessionsWithExpiredOwnerAbsence(ctx, sql.NullString{String: formatTimestamp(now), Valid: true})
+	if err != nil {
+		return nil, fmt.Errorf("list sessions with expired owner absence: %w", err)
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids, nil
 }
 
 // SetAttachmentPendingTargetRole and ConfirmAttachmentRole are the two

@@ -166,7 +166,7 @@ func (s *Service) GetUserTx(ctx context.Context, q *repo.Queries, userID string)
 		}
 		return UserDTO{}, fmt.Errorf("get user: %w", err)
 	}
-	return toUserDTO(row), nil
+	return ToUserDTO(row), nil
 }
 
 // requireActiveUser loads userID and checks it is eligible to receive a
@@ -198,13 +198,15 @@ func (s *Service) requireActiveUserTx(ctx context.Context, q *repo.Queries, user
 	return user, nil
 }
 
-// requireActiveAdmin loads actorUserID and checks it is an active admin:
+// RequireActiveAdmin loads actorUserID and checks it is an active admin:
 // not found -> ErrUserNotFound; found but not an active admin (either
 // userType != "admin" or status != "active") -> ErrNotAdmin. A banned admin
 // gets the SAME ErrNotAdmin as a non-admin user — this intentionally does
 // not distinguish "admin but banned" from "not admin at all", matching the
-// TS source exactly.
-func (s *Service) requireActiveAdmin(ctx context.Context, q *repo.Queries, actorUserID string) (repo.User, error) {
+// TS source exactly. Exported (not just s.q-bound) so callers outside this
+// package — namely the admin package — can run the check against their own
+// transaction-scoped *repo.Queries, same as requireActiveUserTx.
+func (s *Service) RequireActiveAdmin(ctx context.Context, q *repo.Queries, actorUserID string) (repo.User, error) {
 	user, err := q.GetUserByID(ctx, actorUserID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -600,7 +602,7 @@ func (s *Service) SetupAdmin(ctx context.Context, input SetupAdminInput) (UserDT
 		return UserDTO{}, "", err
 	}
 
-	return toUserDTO(user), token, nil
+	return ToUserDTO(user), token, nil
 }
 
 // LoginInput is the input to Login. Neither Username nor Password shape is
@@ -638,7 +640,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (UserDTO, string,
 		return UserDTO{}, "", err
 	}
 
-	return toUserDTO(user), token, nil
+	return ToUserDTO(user), token, nil
 }
 
 // RevokeCredential is the self-service "revoke one of my other devices"
@@ -668,7 +670,7 @@ func (s *Service) RevokeCredential(ctx context.Context, requesterUserID, credent
 // in the same transaction: both commit, or neither does. Returns the raw
 // (unhashed) invite token and its expiry.
 func (s *Service) CreateRegistrationInvite(ctx context.Context, actorUserID string, actorCredentialID *string, requestID string, ttlMs *int64) (string, time.Time, error) {
-	if _, err := s.requireActiveAdmin(ctx, s.q, actorUserID); err != nil {
+	if _, err := s.RequireActiveAdmin(ctx, s.q, actorUserID); err != nil {
 		return "", time.Time{}, err
 	}
 
@@ -892,5 +894,5 @@ func (s *Service) Register(ctx context.Context, inviteToken, username, password,
 		return UserDTO{}, "", err
 	}
 
-	return toUserDTO(user), token, nil
+	return ToUserDTO(user), token, nil
 }

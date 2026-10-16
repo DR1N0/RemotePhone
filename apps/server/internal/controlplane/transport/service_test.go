@@ -3,8 +3,12 @@ package transport
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,63 +24,113 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// fakeWorkerClient implements instance.WorkerClient so transport.Service
-// tests never shell out to a real mako-worker process. Instance-lifecycle
-// methods have fixed canned results (tests here only need a running
-// instance as a precondition); transport-session methods record calls and
-// support error injection, since that's what this package's tests exercise.
+// fakeWorkerClient backs an httptest.Server standing in for a worker's HTTP
+// API — transport.Service no longer takes a WorkerClient directly (Phase 4:
+// every worker interaction resolves a client from the specific instance's
+// persisted RuntimeHandle.WorkerBaseURL via instanceSvc.WorkerClientFor), so
+// the test double operates at the HTTP boundary. Field/method names match
+// the pre-Phase-4 fake so the rest of this file (which configures
+// worker.createErr, reads worker.destroyIDs, etc.) is unchanged.
+// Instance-lifecycle routes have fixed canned results (tests here only need
+// a running instance as a precondition); transport-session routes record
+// calls and support error injection, since that's what this package's own
+// tests exercise.
 type fakeWorkerClient struct {
 	createResult workerapi.TransportSessionResponse
 	createErr    error
 	updateErr    error
 	destroyErr   error
 
+	mu          sync.Mutex
 	createCalls []workerapi.CreateTransportSessionRequest
 	updateCalls []workerapi.UpdateTransportSessionRoleRequest
 	destroyIDs  []string
+
+	server *httptest.Server
 }
 
-func (f *fakeWorkerClient) ListTemplates(ctx context.Context) ([]runtime.Template, error) {
-	return []runtime.Template{{TemplateID: "t-1", RuntimeClass: "android-studio-emulator"}}, nil
-}
-
-func (f *fakeWorkerClient) StartInstance(ctx context.Context, req workerapi.StartInstanceRequest) (workerapi.StartInstanceResponse, error) {
-	return workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{PID: 42}}, nil
-}
-
-func (f *fakeWorkerClient) InspectInstance(ctx context.Context, instanceID string) (workerapi.InspectInstanceResponse, error) {
-	return workerapi.InspectInstanceResponse{}, nil
-}
-
-func (f *fakeWorkerClient) StopInstance(ctx context.Context, instanceID string) (workerapi.StopInstanceResponse, error) {
-	return workerapi.StopInstanceResponse{State: "stopped"}, nil
-}
-
-func (f *fakeWorkerClient) CreateTransportSession(ctx context.Context, req workerapi.CreateTransportSessionRequest) (workerapi.TransportSessionResponse, error) {
-	f.createCalls = append(f.createCalls, req)
-	if f.createErr != nil {
-		return workerapi.TransportSessionResponse{}, f.createErr
+func (f *fakeWorkerClient) httpServer() *httptest.Server {
+	if f.server != nil {
+		return f.server
 	}
-	return f.createResult, nil
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("GET /v1/templates", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(workerapi.TemplateListResponse{
+			Templates: []runtime.Template{{TemplateID: "t-1", RuntimeClass: "android-studio-emulator"}},
+		})
+	})
+	mux.HandleFunc("POST /v1/instances/start", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{PID: 42}})
+	})
+	mux.HandleFunc("POST /v1/instances/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(workerapi.StopInstanceResponse{State: "stopped"})
+	})
+	mux.HandleFunc("POST /v1/transport/session", func(w http.ResponseWriter, r *http.Request) {
+		var req workerapi.CreateTransportSessionRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		f.mu.Lock()
+		f.createCalls = append(f.createCalls, req)
+		f.mu.Unlock()
+		if f.createErr != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(f.createResult)
+	})
+	mux.HandleFunc("PATCH /v1/transport/session/role", func(w http.ResponseWriter, r *http.Request) {
+		var req workerapi.UpdateTransportSessionRoleRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		f.mu.Lock()
+		f.updateCalls = append(f.updateCalls, req)
+		f.mu.Unlock()
+		if f.updateErr != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("DELETE /v1/transport/session", func(w http.ResponseWriter, r *http.Request) {
+		instanceID, attachmentID := r.URL.Query().Get("instanceId"), r.URL.Query().Get("attachmentId")
+		f.mu.Lock()
+		f.destroyIDs = append(f.destroyIDs, instanceID+":"+attachmentID)
+		f.mu.Unlock()
+		if f.destroyErr != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("POST /v1/transport/offer", func(w http.ResponseWriter, r *http.Request) {
+		var req workerapi.TransportOfferRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		json.NewEncoder(w).Encode(workerapi.TransportOfferResponse{SdpAnswer: "answer-for-" + req.SdpOffer})
+	})
+	mux.HandleFunc("POST /v1/transport/ice-candidate", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	f.server = httptest.NewServer(mux)
+	return f.server
 }
 
-func (f *fakeWorkerClient) UpdateTransportRole(ctx context.Context, req workerapi.UpdateTransportSessionRoleRequest) error {
-	f.updateCalls = append(f.updateCalls, req)
-	return f.updateErr
+// fakePlacementSelector is an instance.PlacementSelector stand-in whose
+// AcquireWorker returns worker's httptest.Server address instead of
+// spawning a real process.
+type fakePlacementSelector struct {
+	worker  *fakeWorkerClient
+	nextPID int
 }
 
-func (f *fakeWorkerClient) DestroyTransportSession(ctx context.Context, instanceID, attachmentID string) error {
-	f.destroyIDs = append(f.destroyIDs, instanceID+":"+attachmentID)
-	return f.destroyErr
+func (s *fakePlacementSelector) Validate(policy placement.Policy) error {
+	return (&placement.Selector{}).Validate(policy)
 }
 
-func (f *fakeWorkerClient) ForwardOffer(ctx context.Context, req workerapi.TransportOfferRequest) (workerapi.TransportOfferResponse, error) {
-	return workerapi.TransportOfferResponse{SdpAnswer: "answer-for-" + req.SdpOffer}, nil
+func (s *fakePlacementSelector) AcquireWorker(ctx context.Context, instanceID string) (string, int, error) {
+	s.nextPID++
+	return s.worker.httpServer().URL, s.nextPID, nil
 }
 
-func (f *fakeWorkerClient) ForwardICECandidate(ctx context.Context, req workerapi.ICECandidateRequest) error {
-	return nil
-}
+func (s *fakePlacementSelector) ReleaseWorker(ctx context.Context, pid int) error { return nil }
 
 func newTestServices(t *testing.T, worker *fakeWorkerClient) (*Service, *session.Service, *instance.Service, *auth.Service, *sql.DB) {
 	t.Helper()
@@ -92,15 +146,20 @@ func newTestServices(t *testing.T, worker *fakeWorkerClient) (*Service, *session
 	if worker == nil {
 		worker = &fakeWorkerClient{}
 	}
+	t.Cleanup(func() {
+		if worker.server != nil {
+			worker.server.Close()
+		}
+	})
 
 	authSvc, err := auth.NewService(db, "")
 	if err != nil {
 		t.Fatalf("auth.NewService: %v", err)
 	}
-	instanceSvc := instance.NewService(db, worker, placement.NewSelector())
+	instanceSvc := instance.NewService(db, &fakePlacementSelector{worker: worker})
 	keyedMutex := &session.KeyedMutex{}
 	sessionSvc := session.NewService(db, authSvc, keyedMutex, time.Minute)
-	transportSvc := NewService(db, sessionSvc, instanceSvc, worker, keyedMutex)
+	transportSvc := NewService(db, sessionSvc, instanceSvc, keyedMutex)
 	return transportSvc, sessionSvc, instanceSvc, authSvc, db
 }
 
@@ -366,16 +425,17 @@ func TestTransitionAttachmentRoleLeavesPendingSetOnWorkerFailure(t *testing.T) {
 
 func TestRelayOfferAndICECandidate(t *testing.T) {
 	worker := &fakeWorkerClient{}
-	transportSvc, _, _, _, _ := newTestServices(t, worker)
+	transportSvc, sessionSvc, instanceSvc, authSvc, db := newTestServices(t, worker)
+	record, ownerAttachmentID, _, _ := bootstrapRunningSession(t, db, sessionSvc, instanceSvc, authSvc)
 
-	answer, err := transportSvc.RelayOffer(context.Background(), "inst-1", "att-1", "offer-sdp")
+	answer, err := transportSvc.RelayOffer(context.Background(), record.InstanceID, ownerAttachmentID, "offer-sdp")
 	if err != nil {
 		t.Fatalf("RelayOffer: %v", err)
 	}
 	if answer != "answer-for-offer-sdp" {
 		t.Errorf("RelayOffer() = %q, want answer-for-offer-sdp", answer)
 	}
-	if err := transportSvc.RelayICECandidate(context.Background(), "inst-1", "att-1", "candidate-1"); err != nil {
+	if err := transportSvc.RelayICECandidate(context.Background(), record.InstanceID, ownerAttachmentID, "candidate-1"); err != nil {
 		t.Fatalf("RelayICECandidate: %v", err)
 	}
 }

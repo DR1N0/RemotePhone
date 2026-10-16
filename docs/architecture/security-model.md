@@ -14,13 +14,12 @@
 
 **Registration invites**: admin-issued, single-use, TTL-bounded tokens (`registration_invites` table) required to self-register a new account via `POST /api/v1/auth/register`. The old TS-era "pairing invite" endpoints (`POST /api/v1/auth/pairing-invites`, `.../redeem`) are kept as tombstones on `clientapi` that return `410 Gone` — not removed outright, so any stale TS-era client gets an explicit "this is retired" response instead of a silent 404.
 
+**TLS identity** (`internal/controlplane/tlsidentity`): the client surface generates a self-signed ECDSA P-256 certificate/key pair on first run and reuses it on every run after (`tls.LoadX509KeyPair`, regenerating only if either file is missing) — private key `0600`, matching every other on-disk secret's file-mode convention in this codebase (see `auth.BootstrapSecret`). 10-year validity, deliberately long: there's no rotation story yet, and a same-key assumption matters once pairing (below) pins this key's SPKI hash. This is HTTPS trust bootstrap only — it does not include PIN-pairing or any client-side verification, see below.
+
 ## Current network reality
 
-Both HTTP surfaces run **plain HTTP, loopback-bound**:
-- Client API: `127.0.0.1:3000`
-- Admin API: `127.0.0.1:3001`
-
-No TLS, no PIN pairing, no LAN exposure exists in the Go port yet. This is adequate for same-host development only.
+- **Client API** (`127.0.0.1:3000`) serves **HTTPS** with the self-signed certificate above. No client-side trust verification exists yet (no PIN-pairing, no TOFU/SPKI pinning) — a real client would have to blindly trust-on-first-use today, which is why this surface still must stay loopback-only or behind a manually-configured reverse proxy; see below.
+- **Admin API** (`127.0.0.1:3001`) is unchanged: **plain HTTP, loopback-bound**. Its loopback binding is its own independent security barrier (a stolen bearer token or missed authorization check still can't be exploited without actual host access) — TLS doesn't change that, and the roadmap's "HTTPS for the client surface" was always scoped to the client surface only.
 
 ## Designed, not yet built: PIN-pairing trust bootstrap
 
@@ -31,12 +30,12 @@ The long-term target (from the Go-backend-consolidation design work) replaces bl
 3. Client persists the server's SPKI fingerprint (not the whole certificate — a same-key cert renewal doesn't break trust).
 4. Any later connection presenting a different key is rejected.
 
-Authorization after pairing stays bearer-token based (unchanged from what's implemented today) — PIN-pairing only replaces how the TLS channel is first trusted, not how requests are authorized afterward. The `registration_invites`/`pairing/` package naming already anticipates this but `internal/controlplane/pairing/` and `internal/controlplane/tlsidentity/` are currently empty stub packages. Until this is built, the client API must stay loopback-only or behind a manually-configured reverse proxy — there is no safe way to expose `127.0.0.1:3000` directly to a LAN today.
+Authorization after pairing stays bearer-token based (unchanged from what's implemented today) — PIN-pairing only replaces how the TLS channel is first trusted, not how requests are authorized afterward. **Deliberately deferred** (decided with the user, 2026-10-16): there's no native client yet to pair with or verify a handshake against, and this sketch isn't a concrete protocol (no KDF, challenge format, or rotation story specified) — building it now would be unverifiable except against a simulated-client test harness, unlike every other phase of this port, each checked against a real counterpart. `internal/controlplane/pairing/` stays an empty stub package until a real client exists. Until this is built, the client API must stay loopback-only or behind a manually-configured reverse proxy — there is no safe way to expose `127.0.0.1:3000` directly to a LAN today.
 
 ## Networking target (designed, not yet built)
 
-Three distinct traffic paths are planned, only the first of which exists today:
+Three distinct traffic paths are planned:
 
-1. **Control-plane client API** — today plain HTTP/loopback; target is HTTPS + PIN-paired, LAN-reachable.
-2. **Worker media/data ports** — not yet relevant; no worker-lifecycle code runs workers under control-plane supervision yet.
-3. **Worker internal control API** — not yet relevant for the same reason; target is strictly `127.0.0.1`-bound, never LAN-reachable.
+1. **Control-plane client API** — HTTPS as of this phase (self-signed, no client trust verification yet); target is PIN-paired + LAN-reachable, see above.
+2. **Worker media/data ports** — not yet relevant; the worker's pion WebRTC stack still binds loopback-only, unrelated to worker *process* lifecycle (which is built — see `docs/plans/worker-lifecycle.md`).
+3. **Worker internal control API** — strictly `127.0.0.1`-bound, never LAN-reachable; unaffected by this phase.

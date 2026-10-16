@@ -112,6 +112,43 @@ func (q *Queries) ListSessionsForInstance(ctx context.Context, instanceID string
 	return items, nil
 }
 
+const listSessionsWithExpiredOwnerAbsence = `-- name: ListSessionsWithExpiredOwnerAbsence :many
+SELECT id, instance_id, status, owner_absence_deadline, reconnect_token, created_at, updated_at, owner_absence_timeout_ms FROM sessions
+WHERE status = 'active' AND owner_absence_deadline IS NOT NULL AND owner_absence_deadline <= ?
+`
+
+func (q *Queries) ListSessionsWithExpiredOwnerAbsence(ctx context.Context, ownerAbsenceDeadline sql.NullString) ([]Session, error) {
+	rows, err := q.db.QueryContext(ctx, listSessionsWithExpiredOwnerAbsence, ownerAbsenceDeadline)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Session
+	for rows.Next() {
+		var i Session
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.Status,
+			&i.OwnerAbsenceDeadline,
+			&i.ReconnectToken,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerAbsenceTimeoutMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setOwnerAbsenceDeadline = `-- name: SetOwnerAbsenceDeadline :exec
 UPDATE sessions SET owner_absence_deadline = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
 `

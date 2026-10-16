@@ -19,14 +19,21 @@ Admin-only routes:
 | GET | `/api/v1/auth/status` | setup-claimed status, loopback-checked |
 | POST | `/api/v1/auth/setup` | first-admin bootstrap, requires bootstrap secret |
 | POST | `/api/v1/auth/registration-invites` | requires active admin; issues a token for `clientapi`'s `/auth/register` |
+| GET | `/api/v1/admin/instances` | cross-owner list, requires active admin |
 | POST | `/api/v1/admin/instances/{id}/start` | cross-owner, requires active admin |
 | POST | `/api/v1/admin/instances/{id}/stop` | cross-owner, requires active admin |
 | DELETE | `/api/v1/admin/instances/{id}` | cross-owner, requires active admin |
+| GET | `/api/v1/admin/users` | cursor-paginated (`limit`, `cursor`), excludes guests, requires active admin |
+| GET | `/api/v1/admin/users/{id}/credentials` | account-scoped credentials only, requires active admin |
+| POST | `/api/v1/admin/users/{id}/credentials/{credentialId}/revoke` | requires active admin |
+| POST | `/api/v1/admin/users/{id}/type` | promote/demote; refuses to demote the final active admin |
+| POST | `/api/v1/admin/users/{id}/ban` | closes every session the user owns, revokes its other attachments; refuses to ban the final active admin |
+| POST | `/api/v1/admin/users/{id}/unban` | |
+| POST | `/api/v1/admin/sessions/{id}/attachments/{attachmentId}/revoke` | revokes one guest's attachment without closing the session |
+| GET | `/api/v1/admin/audit` | cursor-paginated (`limit`, `cursor`), newest first, requires active admin |
 | GET | `/healthz` | |
 
-No `GET /api/v1/admin/instances` (list every instance across all owners) yet — that belongs to the `admin` package's own port, not yet built.
-
-## Client API — `127.0.0.1:3000`
+## Client API — `127.0.0.1:3000` (HTTPS, self-signed — see `security-model.md`)
 
 Shared routes (via `commonauth.RegisterRoutes`, address-based throttling **disabled** — a proxied public-facing surface would otherwise see every client as one address and let a few failures block everyone):
 
@@ -47,11 +54,24 @@ Client-only routes:
 | POST | `/api/v1/instances` | requires account-scoped credential; owner becomes the caller |
 | GET | `/api/v1/instances` | owner-scoped list |
 | GET | `/api/v1/instances/{id}` | owner-checked |
-| POST | `/api/v1/instances/{id}/start` | owner-checked; actually spawns/calls the configured worker |
+| POST | `/api/v1/instances/{id}/start` | owner-checked; spawns a dedicated `mako-worker` process for this instance and calls it to boot the emulator |
 | POST | `/api/v1/instances/{id}/stop` | owner-checked |
 | DELETE | `/api/v1/instances/{id}` | owner-checked |
+| POST | `/api/v1/sessions` | requires account-scoped credential; creates the owner attachment + its credential |
+| GET | `/api/v1/sessions/{id}` | account (owner-checked) or bound attachment credential; forbidden collapses to 404 |
+| POST | `/api/v1/sessions/{id}/join` | **tombstone** — returns `410 Gone` |
+| POST | `/api/v1/sessions/{id}/resume` | **tombstone** — returns `410 Gone` |
+| POST | `/api/v1/sessions/{id}/attachments/{attachmentId}/resume` | requires attachment-scoped credential; rotates it |
+| POST | `/api/v1/sessions/{id}/attachments/{attachmentId}/credentials/refresh` | requires attachment-scoped credential |
+| POST | `/api/v1/sessions/{id}/attachments/{attachmentId}/disconnect` | account (owner) or the attachment itself |
+| POST | `/api/v1/sessions/{id}/attachments/{attachmentId}/promote` | requires account-scoped owner credential; `TransitionAttachmentRole` to `participant` |
+| POST | `/api/v1/sessions/{id}/attachments/{attachmentId}/demote` | requires account-scoped owner credential; `TransitionAttachmentRole` to `observer` |
+| POST | `/api/v1/sessions/{id}/invites` | requires account-scoped owner credential; issues a 6-digit PIN, fixed 5-minute TTL |
+| POST | `/api/v1/session-invites/redeem` | unauthenticated for `mode=guest`; bearer-authenticated for `mode=registered` — see `decisions-log.md` (2026-10-14) |
+| POST | `/api/v1/signaling/session` | requires attachment-scoped credential bound to the named session/attachment; establishes transport then relays the SDP offer |
+| POST | `/api/v1/signaling/ice-candidate` | requires attachment-scoped credential bound to the named session/attachment |
 | GET | `/healthz` | |
 
 ## Not yet implemented (any surface)
 
-Session/attachment lifecycle, signaling, admin cross-owner instance listing, audit log retrieval, worker inventory, template/base-image management, pairing. These route groups exist as empty stub packages (`session/`, `admin/`, `image/`, `pairing/`) with no HTTP routes registered anywhere yet.
+Worker inventory, template/base-image management, pairing. These route groups exist as empty stub packages (`image/`, `pairing/`) with no HTTP routes registered anywhere yet.

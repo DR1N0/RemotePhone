@@ -10,6 +10,17 @@ import (
 	"database/sql"
 )
 
+const countActiveAdmins = `-- name: CountActiveAdmins :one
+SELECT count(*) FROM users WHERE user_type = 'admin' AND status = 'active'
+`
+
+func (q *Queries) CountActiveAdmins(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveAdmins)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRegisteredOrAdminUsers = `-- name: CountRegisteredOrAdminUsers :one
 SELECT count(*) FROM users WHERE user_type != 'guest'
 `
@@ -97,4 +108,77 @@ func (q *Queries) GetUserByUsername(ctx context.Context, trim string) (User, err
 		&i.PasswordHash,
 	)
 	return i, err
+}
+
+const listAccountUsers = `-- name: ListAccountUsers :many
+SELECT id, display_name, status, created_at, updated_at, user_type, username, password_hash FROM users
+WHERE user_type != 'guest'
+  AND (?1 IS NULL OR id > ?1)
+ORDER BY id ASC
+LIMIT ?2
+`
+
+type ListAccountUsersParams struct {
+	CursorID interface{} `json:"cursor_id"`
+	Limit    int64       `json:"limit"`
+}
+
+func (q *Queries) ListAccountUsers(ctx context.Context, arg ListAccountUsersParams) ([]User, error) {
+	rows, err := q.db.QueryContext(ctx, listAccountUsers, arg.CursorID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []User
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.DisplayName,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UserType,
+			&i.Username,
+			&i.PasswordHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setUserStatus = `-- name: SetUserStatus :exec
+UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+`
+
+type SetUserStatusParams struct {
+	Status string `json:"status"`
+	ID     string `json:"id"`
+}
+
+func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) error {
+	_, err := q.db.ExecContext(ctx, setUserStatus, arg.Status, arg.ID)
+	return err
+}
+
+const updateUserType = `-- name: UpdateUserType :exec
+UPDATE users SET user_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+`
+
+type UpdateUserTypeParams struct {
+	UserType string `json:"user_type"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) UpdateUserType(ctx context.Context, arg UpdateUserTypeParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserType, arg.UserType, arg.ID)
+	return err
 }

@@ -58,6 +58,35 @@ func (q *Queries) CreateCredential(ctx context.Context, arg CreateCredentialPara
 	return i, err
 }
 
+const getAccountCredentialForUser = `-- name: GetAccountCredentialForUser :one
+SELECT id, user_id, token_hash, device_label, revoked_at, created_at, updated_at, scope, session_id, attachment_id, not_before, expires_at FROM credentials WHERE id = ? AND user_id = ? AND scope = 'account'
+`
+
+type GetAccountCredentialForUserParams struct {
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
+}
+
+func (q *Queries) GetAccountCredentialForUser(ctx context.Context, arg GetAccountCredentialForUserParams) (Credential, error) {
+	row := q.db.QueryRowContext(ctx, getAccountCredentialForUser, arg.ID, arg.UserID)
+	var i Credential
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.DeviceLabel,
+		&i.RevokedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Scope,
+		&i.SessionID,
+		&i.AttachmentID,
+		&i.NotBefore,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const getCredentialByID = `-- name: GetCredentialByID :one
 SELECT id, user_id, token_hash, device_label, revoked_at, created_at, updated_at, scope, session_id, attachment_id, not_before, expires_at FROM credentials WHERE id = ?
 `
@@ -104,6 +133,46 @@ func (q *Queries) GetCredentialByTokenHash(ctx context.Context, tokenHash string
 		&i.ExpiresAt,
 	)
 	return i, err
+}
+
+const listAccountCredentialsForUser = `-- name: ListAccountCredentialsForUser :many
+SELECT id, user_id, token_hash, device_label, revoked_at, created_at, updated_at, scope, session_id, attachment_id, not_before, expires_at FROM credentials WHERE user_id = ? AND scope = 'account'
+`
+
+func (q *Queries) ListAccountCredentialsForUser(ctx context.Context, userID string) ([]Credential, error) {
+	rows, err := q.db.QueryContext(ctx, listAccountCredentialsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Credential
+	for rows.Next() {
+		var i Credential
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.TokenHash,
+			&i.DeviceLabel,
+			&i.RevokedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Scope,
+			&i.SessionID,
+			&i.AttachmentID,
+			&i.NotBefore,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const revokeAttachmentCredentials = `-- name: RevokeAttachmentCredentials :exec

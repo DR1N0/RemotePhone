@@ -185,6 +185,22 @@ func (r *Registry) Reconcile() ([]InstanceStatus, error) {
 	return items, nil
 }
 
+// Adopt inserts handle into the handle store directly, with no launch —
+// for a freshly-spawned replacement worker process to pick up an instance
+// it didn't itself start, given the still-running emulator's known ports
+// from the control plane's persisted record (see
+// docs/plans/worker-lifecycle.md). Ordinary Inspect/Stop/transport calls
+// work unmodified on an adopted handle afterward: they operate purely off
+// the handle store plus a PID-liveness check, neither of which cares
+// whether this process or a predecessor launched the emulator.
+func (r *Registry) Adopt(handle InstanceHandle) error {
+	if r.handles == nil {
+		return errors.New("runtime registry has no handle store configured")
+	}
+	r.handles.Put(handle)
+	return nil
+}
+
 func (r *Registry) CreateTransportSession(req TransportSessionRequest) (TransportSession, error) {
 	adapter, ok := r.Get(req.RuntimeClass)
 	if !ok {

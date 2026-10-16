@@ -39,3 +39,72 @@ func (q *Queries) CreateAuditEvent(ctx context.Context, arg CreateAuditEventPara
 	)
 	return err
 }
+
+const getAuditEventByID = `-- name: GetAuditEventByID :one
+SELECT id, actor_user_id, actor_credential_id, "action", target_type, target_id, request_id, outcome, created_at FROM audit_events WHERE id = ?
+`
+
+func (q *Queries) GetAuditEventByID(ctx context.Context, id string) (AuditEvent, error) {
+	row := q.db.QueryRowContext(ctx, getAuditEventByID, id)
+	var i AuditEvent
+	err := row.Scan(
+		&i.ID,
+		&i.ActorUserID,
+		&i.ActorCredentialID,
+		&i.Action,
+		&i.TargetType,
+		&i.TargetID,
+		&i.RequestID,
+		&i.Outcome,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listAuditEvents = `-- name: ListAuditEvents :many
+SELECT id, actor_user_id, actor_credential_id, "action", target_type, target_id, request_id, outcome, created_at FROM audit_events
+WHERE ?1 IS NULL
+   OR created_at < ?1
+   OR (created_at = ?1 AND id < ?2)
+ORDER BY created_at DESC, id DESC
+LIMIT ?3
+`
+
+type ListAuditEventsParams struct {
+	CursorCreatedAt interface{}    `json:"cursor_created_at"`
+	CursorID        sql.NullString `json:"cursor_id"`
+	Limit           int64          `json:"limit"`
+}
+
+func (q *Queries) ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditEvent, error) {
+	rows, err := q.db.QueryContext(ctx, listAuditEvents, arg.CursorCreatedAt, arg.CursorID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditEvent
+	for rows.Next() {
+		var i AuditEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.ActorUserID,
+			&i.ActorCredentialID,
+			&i.Action,
+			&i.TargetType,
+			&i.TargetID,
+			&i.RequestID,
+			&i.Outcome,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

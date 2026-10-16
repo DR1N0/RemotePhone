@@ -15,7 +15,6 @@ import (
 	"mako/internal/controlplane/auth"
 	"mako/internal/controlplane/instance"
 	"mako/internal/controlplane/persistence"
-	"mako/internal/controlplane/placement"
 	"mako/internal/controlplane/session"
 	"mako/internal/controlplane/transport"
 	"mako/internal/worker/runtime"
@@ -49,10 +48,15 @@ func newTestSessionSetup(t *testing.T) sessionTestSetup {
 		t.Fatalf("auth.NewService: %v", err)
 	}
 	worker := &fakeWorkerClient{templates: []runtime.Template{{TemplateID: "t-1", RuntimeClass: "android-studio-emulator", DisplayName: "T1"}}}
-	instanceSvc := instance.NewService(db, worker, placement.NewSelector())
+	t.Cleanup(func() {
+		if worker.server != nil {
+			worker.server.Close()
+		}
+	})
+	instanceSvc := instance.NewService(db, &fakePlacementSelector{worker: worker})
 	keyedMutex := &session.KeyedMutex{}
 	sessionSvc := session.NewService(db, authSvc, keyedMutex, time.Minute)
-	transportSvc := transport.NewService(db, sessionSvc, instanceSvc, worker, keyedMutex)
+	transportSvc := transport.NewService(db, sessionSvc, instanceSvc, keyedMutex)
 
 	mux := http.NewServeMux()
 	clientapi.RegisterInstanceRoutes(mux, instanceSvc, authSvc)

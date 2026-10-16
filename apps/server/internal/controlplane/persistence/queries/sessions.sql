@@ -17,3 +17,7 @@ UPDATE sessions SET owner_absence_deadline = NULL, updated_at = CURRENT_TIMESTAM
 
 -- name: CloseSession :exec
 UPDATE sessions SET status = 'closed', owner_absence_deadline = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?;
+
+-- name: ListSessionsWithExpiredOwnerAbsence :many
+SELECT * FROM sessions
+WHERE status = 'active' AND owner_absence_deadline IS NOT NULL AND owner_absence_deadline <= ?;

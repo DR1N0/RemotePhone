@@ -9,6 +9,9 @@ SELECT * FROM attachments WHERE id = ?;
 -- name: ListAttachmentsForSession :many
 SELECT * FROM attachments WHERE session_id = ? ORDER BY created_at;
 
+-- name: ListAttachmentsForUser :many
+SELECT * FROM attachments WHERE user_id = ?;
+
 -- name: UpdateAttachmentRole :exec
 UPDATE attachments SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;
 

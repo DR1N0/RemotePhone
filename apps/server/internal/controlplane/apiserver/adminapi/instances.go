@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"mako/internal/controlplane/admin"
 	"mako/internal/controlplane/apiserver/middleware"
 	"mako/internal/controlplane/audit"
 	"mako/internal/controlplane/auth"
@@ -33,14 +34,24 @@ func writeInstanceError(w http.ResponseWriter, err error) {
 	middleware.WriteJSONError(w, status, err.Error())
 }
 
-// RegisterInstanceRoutes mounts cross-owner instance start/stop/delete on
-// mux. Listing every instance across all owners (routes/admin.ts's
-// GET /api/v1/admin/instances, via admin-service.ts's listInstances) isn't
-// built here — it belongs to the admin package's own Phase 3 port, not this
-// phase's instance package.
-func RegisterInstanceRoutes(mux *http.ServeMux, svc *instance.Service, authSvc *auth.Service) {
+// RegisterInstanceRoutes mounts cross-owner instance list/start/stop/delete
+// on mux. Listing (routes/admin.ts's GET /api/v1/admin/instances) goes
+// through adminSvc.ListInstances, not svc directly — cross-owner listing is
+// the admin package's Phase 3 port (instance.Service only exposes the
+// underlying ListAllInstances it calls).
+func RegisterInstanceRoutes(mux *http.ServeMux, svc *instance.Service, adminSvc *admin.Service, authSvc *auth.Service) {
 	requireAuth := middleware.RequireAuth(authSvc)
 	requireAccount := middleware.RequireScope("account")
+
+	mux.Handle("GET /api/v1/admin/instances", requireAuth(requireAccount(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		caller := middleware.GetAuthenticatedUser(r.Context())
+		items, err := adminSvc.ListInstances(r.Context(), caller.UserID)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		middleware.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	}))))
 
 	mux.Handle("POST /api/v1/admin/instances/{id}/start", requireAuth(requireAccount(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		caller := middleware.GetAuthenticatedUser(r.Context())

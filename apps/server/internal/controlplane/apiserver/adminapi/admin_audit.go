@@ -1,0 +1,31 @@
+package adminapi
+
+import (
+	"net/http"
+
+	"mako/internal/controlplane/admin"
+	"mako/internal/controlplane/apiserver/middleware"
+	"mako/internal/controlplane/auth"
+)
+
+// RegisterAdminAuditRoutes mounts the audit-log retrieval route, mirroring
+// routes/admin.ts's GET /api/v1/admin/audit.
+func RegisterAdminAuditRoutes(mux *http.ServeMux, adminSvc *admin.Service, authSvc *auth.Service) {
+	requireAuth := middleware.RequireAuth(authSvc)
+	requireAccount := middleware.RequireScope("account")
+
+	mux.Handle("GET /api/v1/admin/audit", requireAuth(requireAccount(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limit, ok := parsePaginationLimit(r)
+		if !ok {
+			middleware.WriteJSONError(w, http.StatusBadRequest, "limit must be an integer from 1 to 100")
+			return
+		}
+		caller := middleware.GetAuthenticatedUser(r.Context())
+		items, nextCursor, err := adminSvc.ListAudit(r.Context(), caller.UserID, limit, cursorParam(r))
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		middleware.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
+	}))))
+}

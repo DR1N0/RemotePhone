@@ -25,31 +25,33 @@ const (
 // combines a session-package DB mutation with an audit record in its own
 // transaction — see docs/plans/session-transport-redesign.md.
 type Service struct {
-	db           *sql.DB
-	q            *repo.Queries
-	sessionSvc   *session.Service
-	instanceSvc  *instance.Service
-	workerClient instance.WorkerClient
-	keyedMutex   *session.KeyedMutex
+	db          *sql.DB
+	q           *repo.Queries
+	sessionSvc  *session.Service
+	instanceSvc *instance.Service
+	keyedMutex  *session.KeyedMutex
 }
 
 // NewService constructs a Service. keyedMutex MUST be the same instance
 // passed to session.NewService — cross-package request-time serialization
 // for the same attachment only works if both packages lock the same map.
+// Unlike pre-Phase-4, there is no single shared WorkerClient parameter:
+// every worker call resolves a client scoped to the specific instance's
+// currently-serving worker via instanceSvc.WorkerClientFor, since each
+// running instance has its own spawned worker process (see
+// docs/plans/worker-lifecycle.md).
 func NewService(
 	db *sql.DB,
 	sessionSvc *session.Service,
 	instanceSvc *instance.Service,
-	workerClient instance.WorkerClient,
 	keyedMutex *session.KeyedMutex,
 ) *Service {
 	return &Service{
-		db:           db,
-		q:            repo.New(db),
-		sessionSvc:   sessionSvc,
-		instanceSvc:  instanceSvc,
-		workerClient: workerClient,
-		keyedMutex:   keyedMutex,
+		db:          db,
+		q:           repo.New(db),
+		sessionSvc:  sessionSvc,
+		instanceSvc: instanceSvc,
+		keyedMutex:  keyedMutex,
 	}
 }
 
@@ -114,11 +116,23 @@ func (t *Service) destroyAttachmentTransportUnlocked(ctx context.Context, sessio
 	if err != nil {
 		return err
 	}
+	if instanceRecord.RuntimeHandle == nil {
+		// No worker was ever spawned for this instance (never started), so
+		// there is no real transport session to destroy — a no-op success,
+		// not an error. This can legitimately happen: an admin ban closes
+		// every session a user owns regardless of whether its instance was
+		// ever started.
+		return audit.Record(ctx, t.q, actor, actionTransportTeardown, targetTypeAttachment, attachment.ID, audit.OutcomeSuccess)
+	}
+	workerClient, err := t.instanceSvc.WorkerClientFor(ctx, instanceRecord.ID)
+	if err != nil {
+		return err
+	}
 
 	if err := audit.Record(ctx, t.q, actor, actionTransportTeardown, targetTypeAttachment, attachment.ID, audit.OutcomeAttempt); err != nil {
 		return fmt.Errorf("record attempt audit event: %w", err)
 	}
-	if err := t.workerClient.DestroyTransportSession(ctx, instanceRecord.ID, attachment.ID); err != nil {
+	if err := workerClient.DestroyTransportSession(ctx, instanceRecord.ID, attachment.ID); err != nil {
 		if auditErr := audit.Record(ctx, t.q, actor, actionTransportTeardown, targetTypeAttachment, attachment.ID, audit.OutcomeFailure); auditErr != nil {
 			return auditErr
 		}
@@ -161,11 +175,15 @@ func (t *Service) EnsureAttachmentTransport(ctx context.Context, sessionID, atta
 	if instanceRecord.RuntimeHandle == nil {
 		return workerapi.TransportSessionResponse{}, fmt.Errorf("%w: instance is not running: %s", session.ErrInvalidRequest, instanceRecord.ID)
 	}
+	workerClient, err := t.instanceSvc.WorkerClientFor(ctx, instanceRecord.ID)
+	if err != nil {
+		return workerapi.TransportSessionResponse{}, err
+	}
 
 	if err := audit.Record(ctx, t.q, actor, actionTransportCreate, targetTypeAttachment, attachment.ID, audit.OutcomeAttempt); err != nil {
 		return workerapi.TransportSessionResponse{}, fmt.Errorf("record attempt audit event: %w", err)
 	}
-	resp, err := t.workerClient.CreateTransportSession(ctx, workerapi.CreateTransportSessionRequest{
+	resp, err := workerClient.CreateTransportSession(ctx, workerapi.CreateTransportSessionRequest{
 		SessionID:     sessionID,
 		AttachmentID:  attachmentID,
 		InstanceID:    instanceRecord.ID,
@@ -280,15 +298,19 @@ func (t *Service) TransitionAttachmentRole(
 	if err != nil {
 		return session.AttachmentRecord{}, err
 	}
+	workerClient, err := t.instanceSvc.WorkerClientFor(ctx, instanceRecord.ID)
+	if err != nil {
+		return session.AttachmentRecord{}, err
+	}
 
 	// Step 3.
-	if err := t.workerClient.UpdateTransportRole(ctx, workerapi.UpdateTransportSessionRoleRequest{
+	if err := workerClient.UpdateTransportRole(ctx, workerapi.UpdateTransportSessionRoleRequest{
 		InstanceID:   instanceRecord.ID,
 		AttachmentID: attachmentID,
 		Role:         targetRole,
 	}); err != nil {
 		// Step 5.
-		_ = t.workerClient.UpdateTransportRole(ctx, workerapi.UpdateTransportSessionRoleRequest{
+		_ = workerClient.UpdateTransportRole(ctx, workerapi.UpdateTransportSessionRoleRequest{
 			InstanceID:   instanceRecord.ID,
 			AttachmentID: attachmentID,
 			Role:         "observer",
@@ -323,9 +345,17 @@ func (t *Service) TransitionAttachmentRole(
 // the worker — ports signaling-service.ts exactly, which has zero
 // authorization logic of its own. Authorizing the caller against
 // instanceId/attachmentId is the route layer's job (task #26), same as TS's
-// routes/signaling.ts.
+// routes/signaling.ts. The WorkerClientFor lookup below is routing, not
+// authorization — resolving which of this instance's (possibly several,
+// over its lifetime) spawned worker processes to talk to, now that there is
+// no single shared client to fall back on (see
+// docs/plans/worker-lifecycle.md).
 func (t *Service) RelayOffer(ctx context.Context, instanceID, attachmentID, sdpOffer string) (string, error) {
-	resp, err := t.workerClient.ForwardOffer(ctx, workerapi.TransportOfferRequest{
+	workerClient, err := t.instanceSvc.WorkerClientFor(ctx, instanceID)
+	if err != nil {
+		return "", err
+	}
+	resp, err := workerClient.ForwardOffer(ctx, workerapi.TransportOfferRequest{
 		InstanceID:   instanceID,
 		AttachmentID: attachmentID,
 		SdpOffer:     sdpOffer,
@@ -337,7 +367,11 @@ func (t *Service) RelayOffer(ctx context.Context, instanceID, attachmentID, sdpO
 }
 
 func (t *Service) RelayICECandidate(ctx context.Context, instanceID, attachmentID, candidate string) error {
-	if err := t.workerClient.ForwardICECandidate(ctx, workerapi.ICECandidateRequest{
+	workerClient, err := t.instanceSvc.WorkerClientFor(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	if err := workerClient.ForwardICECandidate(ctx, workerapi.ICECandidateRequest{
 		InstanceID:   instanceID,
 		AttachmentID: attachmentID,
 		Candidate:    candidate,

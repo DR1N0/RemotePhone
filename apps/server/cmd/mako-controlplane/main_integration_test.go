@@ -7,9 +7,9 @@ import (
 )
 
 func TestAdminAndClientMuxesServeRealAuthRoutes(t *testing.T) {
-	svc, instanceSvc, sessionSvc, transportSvc, _ := newTestServiceForMain(t) // same real-DB-plus-bootstrap-secret pattern as every other test file
+	svc, instanceSvc, sessionSvc, transportSvc, adminSvc, _ := newTestServiceForMain(t) // same real-DB-plus-bootstrap-secret pattern as every other test file
 
-	adminSrv := httptest.NewServer(newAdminMux(svc, instanceSvc))
+	adminSrv := httptest.NewServer(newAdminMux(svc, instanceSvc, adminSvc, transportSvc))
 	defer adminSrv.Close()
 	clientSrv := httptest.NewServer(newClientMux(svc, instanceSvc, sessionSvc, transportSvc))
 	defer clientSrv.Close()

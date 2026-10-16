@@ -3,8 +3,12 @@ package instance
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"mako/internal/controlplane/audit"
@@ -17,8 +21,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// fakeWorkerClient is an in-memory WorkerClient stand-in so Service tests
-// never shell out to a real mako-worker process.
+// fakeWorkerClient backs an httptest.Server standing in for a worker's HTTP
+// API, wired into Service via fakePlacementSelector below — Service no
+// longer takes a WorkerClient directly (Phase 4: every worker interaction
+// resolves a client from a spawned/persisted base URL), so test doubles
+// have to operate at the HTTP boundary instead. Field names match the
+// pre-Phase-4 fake exactly so every other test in this file (which reads
+// worker.startedCalls/stoppedIDs etc.) is unchanged.
 type fakeWorkerClient struct {
 	templates    []runtime.Template
 	startResult  workerapi.StartInstanceResponse
@@ -27,52 +36,71 @@ type fakeWorkerClient struct {
 	stopErr      error
 	startedCalls []workerapi.StartInstanceRequest
 	stoppedIDs   []string
+
+	mu     sync.Mutex
+	server *httptest.Server
 }
 
-func (f *fakeWorkerClient) ListTemplates(ctx context.Context) ([]runtime.Template, error) {
-	return f.templates, nil
-}
-
-func (f *fakeWorkerClient) StartInstance(ctx context.Context, req workerapi.StartInstanceRequest) (workerapi.StartInstanceResponse, error) {
-	f.startedCalls = append(f.startedCalls, req)
-	if f.startErr != nil {
-		return workerapi.StartInstanceResponse{}, f.startErr
+func (f *fakeWorkerClient) httpServer() *httptest.Server {
+	if f.server != nil {
+		return f.server
 	}
-	return f.startResult, nil
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("GET /v1/templates", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(workerapi.TemplateListResponse{Templates: f.templates})
+	})
+	mux.HandleFunc("POST /v1/instances/start", func(w http.ResponseWriter, r *http.Request) {
+		var req workerapi.StartInstanceRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		f.mu.Lock()
+		f.startedCalls = append(f.startedCalls, req)
+		f.mu.Unlock()
+		if f.startErr != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(f.startResult)
+	})
+	mux.HandleFunc("POST /v1/instances/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.stoppedIDs = append(f.stoppedIDs, r.PathValue("id"))
+		f.mu.Unlock()
+		if f.stopErr != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(f.stopResult)
+	})
+	f.server = httptest.NewServer(mux)
+	return f.server
 }
 
-func (f *fakeWorkerClient) InspectInstance(ctx context.Context, instanceID string) (workerapi.InspectInstanceResponse, error) {
-	return workerapi.InspectInstanceResponse{}, nil
+// fakePlacementSelector is a PlacementSelector stand-in whose AcquireWorker
+// returns worker's httptest.Server address instead of spawning a real
+// process — Service's own unit tests never shell out, per
+// docs/architecture/decisions-log.md's testing bar for this phase.
+type fakePlacementSelector struct {
+	worker  *fakeWorkerClient
+	nextPID int
+
+	mu           sync.Mutex
+	releasedPIDs []int
 }
 
-func (f *fakeWorkerClient) StopInstance(ctx context.Context, instanceID string) (workerapi.StopInstanceResponse, error) {
-	f.stoppedIDs = append(f.stoppedIDs, instanceID)
-	if f.stopErr != nil {
-		return workerapi.StopInstanceResponse{}, f.stopErr
-	}
-	return f.stopResult, nil
+func (s *fakePlacementSelector) Validate(policy placement.Policy) error {
+	return (&placement.Selector{}).Validate(policy)
 }
 
-// This phase's instance tests don't exercise transport-session/signaling
-// calls (that's transport.Service's job); these exist only to satisfy
-// WorkerClient.
-func (f *fakeWorkerClient) CreateTransportSession(ctx context.Context, req workerapi.CreateTransportSessionRequest) (workerapi.TransportSessionResponse, error) {
-	return workerapi.TransportSessionResponse{}, nil
+func (s *fakePlacementSelector) AcquireWorker(ctx context.Context, instanceID string) (string, int, error) {
+	s.nextPID++
+	return s.worker.httpServer().URL, s.nextPID, nil
 }
 
-func (f *fakeWorkerClient) UpdateTransportRole(ctx context.Context, req workerapi.UpdateTransportSessionRoleRequest) error {
-	return nil
-}
-
-func (f *fakeWorkerClient) DestroyTransportSession(ctx context.Context, instanceID, attachmentID string) error {
-	return nil
-}
-
-func (f *fakeWorkerClient) ForwardOffer(ctx context.Context, req workerapi.TransportOfferRequest) (workerapi.TransportOfferResponse, error) {
-	return workerapi.TransportOfferResponse{}, nil
-}
-
-func (f *fakeWorkerClient) ForwardICECandidate(ctx context.Context, req workerapi.ICECandidateRequest) error {
+func (s *fakePlacementSelector) ReleaseWorker(ctx context.Context, pid int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.releasedPIDs = append(s.releasedPIDs, pid)
 	return nil
 }
 
@@ -90,7 +118,12 @@ func newTestService(t *testing.T, worker *fakeWorkerClient) *Service {
 	if worker == nil {
 		worker = &fakeWorkerClient{}
 	}
-	return NewService(db, worker, placement.NewSelector())
+	t.Cleanup(func() {
+		if worker.server != nil {
+			worker.server.Close()
+		}
+	})
+	return NewService(db, &fakePlacementSelector{worker: worker})
 }
 
 func createTestUser(t *testing.T, svc *Service, id, userType, status string) {
@@ -248,6 +281,35 @@ func TestManageInstanceForbiddenForNonOwner(t *testing.T) {
 
 	if _, err := svc.GetManagedInstance(context.Background(), created.ID, "u-2"); !errors.Is(err, ErrForbidden) {
 		t.Errorf("GetManagedInstance() error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestListAllInstancesSpansOwners(t *testing.T) {
+	worker := &fakeWorkerClient{templates: []runtime.Template{{TemplateID: "t-1"}}}
+	svc := newTestService(t, worker)
+	createTestUser(t, svc, "u-1", "registered", "active")
+	createTestUser(t, svc, "u-2", "registered", "active")
+	first, err := svc.CreateManagedInstance(context.Background(), validCreateRequest(), "u-1")
+	if err != nil {
+		t.Fatalf("CreateManagedInstance(u-1): %v", err)
+	}
+	req := validCreateRequest()
+	req.Name = "second-instance"
+	second, err := svc.CreateManagedInstance(context.Background(), req, "u-2")
+	if err != nil {
+		t.Fatalf("CreateManagedInstance(u-2): %v", err)
+	}
+
+	all, err := svc.ListAllInstances(context.Background())
+	if err != nil {
+		t.Fatalf("ListAllInstances: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("ListAllInstances() = %d instances, want 2", len(all))
+	}
+	gotIDs := map[string]bool{all[0].ID: true, all[1].ID: true}
+	if !gotIDs[first.ID] || !gotIDs[second.ID] {
+		t.Errorf("ListAllInstances() ids = %v, want [%s %s]", gotIDs, first.ID, second.ID)
 	}
 }
 

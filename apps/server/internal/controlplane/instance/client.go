@@ -37,6 +37,10 @@ type WorkerClient interface {
 	StartInstance(ctx context.Context, req workerapi.StartInstanceRequest) (workerapi.StartInstanceResponse, error)
 	InspectInstance(ctx context.Context, instanceID string) (workerapi.InspectInstanceResponse, error)
 	StopInstance(ctx context.Context, instanceID string) (workerapi.StopInstanceResponse, error)
+	// AdoptInstance tells a freshly-spawned replacement worker process to
+	// pick up an instance it didn't itself start — Phase 4's worker-liveness
+	// respawn path. See docs/plans/worker-lifecycle.md.
+	AdoptInstance(ctx context.Context, instanceID string, handle runtime.InstanceHandle) error
 	CreateTransportSession(ctx context.Context, req workerapi.CreateTransportSessionRequest) (workerapi.TransportSessionResponse, error)
 	UpdateTransportRole(ctx context.Context, req workerapi.UpdateTransportSessionRoleRequest) error
 	DestroyTransportSession(ctx context.Context, instanceID, attachmentID string) error
@@ -123,6 +127,10 @@ func (c *HTTPWorkerClient) StopInstance(ctx context.Context, instanceID string) 
 		return workerapi.StopInstanceResponse{}, err
 	}
 	return out, nil
+}
+
+func (c *HTTPWorkerClient) AdoptInstance(ctx context.Context, instanceID string, handle runtime.InstanceHandle) error {
+	return c.doJSON(ctx, http.MethodPost, "/v1/instances/"+url.PathEscape(instanceID)+"/adopt", workerapi.AdoptInstanceRequest{Handle: handle}, nil)
 }
 
 func (c *HTTPWorkerClient) CreateTransportSession(ctx context.Context, req workerapi.CreateTransportSessionRequest) (workerapi.TransportSessionResponse, error) {

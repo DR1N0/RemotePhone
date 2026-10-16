@@ -2,33 +2,42 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"time"
 
+	"mako/internal/controlplane/admin"
 	"mako/internal/controlplane/apiserver/adminapi"
 	"mako/internal/controlplane/apiserver/clientapi"
 	"mako/internal/controlplane/auth"
+	"mako/internal/controlplane/controller"
 	"mako/internal/controlplane/instance"
 	"mako/internal/controlplane/persistence"
 	"mako/internal/controlplane/placement"
+	"mako/internal/controlplane/reconcile"
 	"mako/internal/controlplane/session"
+	"mako/internal/controlplane/tlsidentity"
 	"mako/internal/controlplane/transport"
+	"mako/internal/controlplane/workerproc"
 
 	_ "modernc.org/sqlite"
 )
 
-func newAdminMux(svc *auth.Service, instanceSvc *instance.Service) *http.ServeMux {
+func newAdminMux(svc *auth.Service, instanceSvc *instance.Service, adminSvc *admin.Service, transportSvc *transport.Service) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	adminapi.RegisterAuthRoutes(mux, svc)
-	adminapi.RegisterInstanceRoutes(mux, instanceSvc, svc)
+	adminapi.RegisterInstanceRoutes(mux, instanceSvc, adminSvc, svc)
+	adminapi.RegisterAdminManagementRoutes(mux, adminSvc, svc, transportSvc)
+	adminapi.RegisterAdminAuditRoutes(mux, adminSvc, svc)
 	return mux
 }
 
@@ -75,13 +84,16 @@ func run() error {
 		return err
 	}
 
-	// MAKO_WORKER_BASE_URL matches the worker's own default listen address
-	// (internal/worker/config.Load's MAKO_WORKER_BASE_URL default) — this
-	// phase talks to exactly one externally-started worker; spawning it is
-	// Phase 4's job (see docs/plans/roadmap.md).
-	workerBaseURL := envOrDefault("MAKO_WORKER_BASE_URL", "http://127.0.0.1:7780")
-	workerClient := instance.NewHTTPWorkerClient(workerBaseURL)
-	instanceSvc := instance.NewService(db, workerClient, placement.NewSelector())
+	// MAKO_WORKER_BINARY_PATH defaults to the sibling path of this running
+	// binary — `go build ./cmd/...` normally drops both mako-controlplane
+	// and mako-worker into the same directory. From here on, every running
+	// instance gets its own mako-worker process, spawned on demand and
+	// torn down with it — see docs/plans/worker-lifecycle.md. There is no
+	// single shared worker/base URL anymore (MAKO_WORKER_BASE_URL, used
+	// through Phase 3, is retired).
+	workerBinaryPath := envOrDefault("MAKO_WORKER_BINARY_PATH", filepath.Join(filepath.Dir(os.Args[0]), "mako-worker"))
+	placementSelector := placement.NewSelector(workerproc.OSExecer{}, workerBinaryPath)
+	instanceSvc := instance.NewService(db, placementSelector)
 
 	// Matches the TS config's MAKO_OWNER_ABSENCE_TIMEOUT_MS default (5
 	// minutes) — see apps/controlplane/src/config/env.ts.
@@ -91,14 +103,52 @@ func run() error {
 	// lock the same map (see session.KeyedMutex's doc comment).
 	keyedMutex := &session.KeyedMutex{}
 	sessionSvc := session.NewService(db, svc, keyedMutex, ownerAbsenceTimeout)
-	transportSvc := transport.NewService(db, sessionSvc, instanceSvc, workerClient, keyedMutex)
+	transportSvc := transport.NewService(db, sessionSvc, instanceSvc, keyedMutex)
+	adminSvc := admin.NewService(db, svc, sessionSvc, instanceSvc)
 
-	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc, instanceSvc)}
-	clientSrv := &http.Server{Addr: "127.0.0.1:3000", Handler: newClientMux(svc, instanceSvc, sessionSvc, transportSvc)}
+	// workerProbe (keyed by instance ID — there is no separate worker
+	// identity under the 1:1 model) health-checks each running instance's
+	// worker and respawns+adopts on failure. sessionProbe is the
+	// owner-absence reconciler. Neither triggers on its own: the resync
+	// ticker below is what discovers candidates and enqueues them each
+	// tick, since nothing else fires on a deadline merely elapsing or a
+	// worker merely going quiet (unlike e.g. a disconnect, which a handler
+	// could enqueue inline but doesn't need to).
+	workerLivenessProbe := reconcile.NewWorkerLivenessProbe(instanceSvc, placementSelector)
+	ownerAbsenceProbe := reconcile.NewOwnerAbsenceProbe(sessionSvc, transportSvc)
+	ctrl := controller.New(workerLivenessProbe, ownerAbsenceProbe)
+	go ctrl.Run(ctx)
+
+	// Matches the TS config's MAKO_RECONCILE_INTERVAL_MS default (5s).
+	reconcileInterval := envOrDefaultDuration("MAKO_RECONCILE_INTERVAL_MS", 5*time.Second)
+	go runOwnerAbsenceResync(ctx, sessionSvc, ctrl, reconcileInterval)
+	go runWorkerLivenessResync(ctx, instanceSvc, ctrl, reconcileInterval)
+
+	// The client surface serves HTTPS with a self-signed certificate the
+	// control plane generates on first run and reuses after — see
+	// docs/plans/tls-identity.md. PIN-confirmed pairing / SPKI pinning
+	// (the trust layer a real client would use to verify this certificate
+	// instead of blind TOFU) is deliberately deferred until a native
+	// client exists to pair with. The admin surface stays plain HTTP: its
+	// loopback binding is its own, independent security barrier (see
+	// docs/architecture/security-model.md), not something TLS changes.
+	certPath := envOrDefault("MAKO_TLS_CERT_PATH", dbPath+".cert.pem")
+	keyPath := envOrDefault("MAKO_TLS_KEY_PATH", dbPath+".key.pem")
+	tlsCert, err := tlsidentity.NewIdentity(certPath, keyPath).GetOrCreate()
+	if err != nil {
+		return err
+	}
+
+	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc, instanceSvc, adminSvc, transportSvc)}
+	clientSrv := &http.Server{
+		Addr:      "127.0.0.1:3000",
+		Handler:   newClientMux(svc, instanceSvc, sessionSvc, transportSvc),
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{tlsCert}},
+	}
 
 	errCh := make(chan error, 2)
 	go func() { errCh <- adminSrv.ListenAndServe() }()
-	go func() { errCh <- clientSrv.ListenAndServe() }()
+	go func() { errCh <- clientSrv.ListenAndServeTLS("", "") }() // cert/key already in TLSConfig
 
 	select {
 	case <-ctx.Done():
@@ -113,6 +163,58 @@ func run() error {
 	adminSrv.Shutdown(shutdownCtx)
 	clientSrv.Shutdown(shutdownCtx)
 	return nil
+}
+
+// runOwnerAbsenceResync periodically discovers sessions whose owner-absence
+// deadline has passed and enqueues them on ctrl for reconciliation. This is
+// candidate discovery only — ctrl.Run's dispatch to
+// reconcile.OwnerAbsenceProbe.Reconcile re-verifies each session is still
+// eligible before acting, so a session enqueued here and then resumed
+// before its turn is simply skipped as a no-op.
+func runOwnerAbsenceResync(ctx context.Context, sessionSvc *session.Service, ctrl *controller.Controller, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			ids, err := sessionSvc.ListExpiredOwnerAbsenceSessionIDs(ctx, time.Now())
+			if err != nil {
+				log.Printf("owner-absence resync: list expired sessions: %v", err)
+				continue
+			}
+			for _, id := range ids {
+				ctrl.EnqueueSession(id)
+			}
+		}
+	}
+}
+
+// runWorkerLivenessResync periodically discovers every instance whose
+// desired state is "running" and enqueues it on ctrl for reconciliation.
+// Candidate discovery only — ctrl.Run's dispatch to
+// reconcile.WorkerLivenessProbe.Reconcile re-checks desired state and
+// health before acting, so this never needs to be race-free against a
+// concurrent stop.
+func runWorkerLivenessResync(ctx context.Context, instanceSvc *instance.Service, ctrl *controller.Controller, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			ids, err := instanceSvc.ListRunningInstanceIDs(ctx)
+			if err != nil {
+				log.Printf("worker-liveness resync: list running instances: %v", err)
+				continue
+			}
+			for _, id := range ids {
+				ctrl.EnqueueWorker(id)
+			}
+		}
+	}
 }
 
 func envOrDefault(key, fallback string) string {

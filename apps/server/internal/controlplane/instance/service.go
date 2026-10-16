@@ -29,21 +29,41 @@ import (
 )
 
 const (
-	actionInstanceStart  = "instance.start"
-	actionInstanceStop   = "instance.stop"
-	actionInstanceDelete = "instance.delete"
-	targetTypeInstance   = "instance"
+	actionInstanceStart         = "instance.start"
+	actionInstanceStop          = "instance.stop"
+	actionInstanceDelete        = "instance.delete"
+	actionInstanceWorkerRespawn = "instance.worker.respawn"
+	targetTypeInstance          = "instance"
 )
+
+// PlacementSelector is the subset of placement.Selector's behavior
+// instance.Service needs: validating a requested placement policy, and
+// acquiring/releasing the one worker process a running instance (or a
+// short-lived template-discovery lookup, see resolveTemplate) gets. A
+// narrow interface — not the concrete *placement.Selector — so this
+// package's own tests can fake process spawning entirely, never shelling
+// out to a real binary (see docs/architecture/decisions-log.md's testing
+// bar for this phase).
+type PlacementSelector interface {
+	Validate(policy placement.Policy) error
+	AcquireWorker(ctx context.Context, instanceID string) (baseURL string, pid int, err error)
+	ReleaseWorker(ctx context.Context, pid int) error
+}
 
 type Service struct {
 	db                *sql.DB
 	q                 *repo.Queries
-	workerClient      WorkerClient
-	placementSelector *placement.Selector
+	placementSelector PlacementSelector
 }
 
-func NewService(db *sql.DB, workerClient WorkerClient, placementSelector *placement.Selector) *Service {
-	return &Service{db: db, q: repo.New(db), workerClient: workerClient, placementSelector: placementSelector}
+// NewService constructs a Service. Unlike pre-Phase-4, there is no single
+// shared WorkerClient: every worker interaction resolves a client scoped to
+// one specific spawned worker process, via resolveTemplate (a short-lived
+// discovery worker) or WorkerClientFor (a running instance's own worker,
+// from its persisted RuntimeHandle.WorkerBaseURL). See
+// docs/plans/worker-lifecycle.md.
+func NewService(db *sql.DB, placementSelector PlacementSelector) *Service {
+	return &Service{db: db, q: repo.New(db), placementSelector: placementSelector}
 }
 
 func (s *Service) withTx(ctx context.Context, fn func(q *repo.Queries) error) error {
@@ -166,8 +186,21 @@ func (s *Service) assertCanAdminManageInstance(ctx context.Context, callerUserID
 	return nil
 }
 
+// resolveTemplate discovers templates via a short-lived, discardable worker
+// process. Template/runtime discovery is host-level metadata — identical
+// regardless of which worker answers — not tied to any specific instance,
+// so there's no "the instance's worker" to ask yet at creation time (no
+// instance row, and no worker, exist before this call returns). Spawn, ask,
+// release: symmetric with the per-running-instance lifecycle below, no
+// persistent discovery-only worker process to special-case.
 func (s *Service) resolveTemplate(ctx context.Context, templateID string) (runtime.Template, error) {
-	templates, err := s.workerClient.ListTemplates(ctx)
+	client, release, err := s.acquireDiscoveryWorker(ctx)
+	if err != nil {
+		return runtime.Template{}, err
+	}
+	defer release()
+
+	templates, err := client.ListTemplates(ctx)
 	if err != nil {
 		return runtime.Template{}, fmt.Errorf("list templates: %w", err)
 	}
@@ -177,6 +210,50 @@ func (s *Service) resolveTemplate(ctx context.Context, templateID string) (runti
 		}
 	}
 	return runtime.Template{}, fmt.Errorf("%w: runtime template not found: %s", ErrInvalidRequest, templateID)
+}
+
+func (s *Service) acquireDiscoveryWorker(ctx context.Context) (WorkerClient, func(), error) {
+	baseURL, pid, err := s.placementSelector.AcquireWorker(ctx, "discovery-"+uuid.NewString())
+	if err != nil {
+		return nil, nil, fmt.Errorf("acquire discovery worker: %w", err)
+	}
+	release := func() {
+		// context.Background(), not ctx: cleanup must run even if the
+		// request that triggered it was itself canceled.
+		_ = s.placementSelector.ReleaseWorker(context.Background(), pid)
+	}
+	return NewHTTPWorkerClient(baseURL), release, nil
+}
+
+// WorkerClientFor resolves a WorkerClient for id's currently-serving worker
+// process, from its persisted RuntimeHandle.WorkerBaseURL. Exported so
+// transport.Service — which talks to the same per-instance worker for
+// transport-session/signaling calls — uses this instead of holding its own
+// client (see docs/plans/worker-lifecycle.md).
+func (s *Service) WorkerClientFor(ctx context.Context, id string) (WorkerClient, error) {
+	row, err := s.getRequiredInstance(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	_, client, err := s.runningWorker(row)
+	return client, err
+}
+
+// runningWorker unmarshals row's persisted handle and returns both it and a
+// WorkerClient for its WorkerBaseURL. Errors (as ErrInvalidRequest) if the
+// instance has never been started or has no worker recorded.
+func (s *Service) runningWorker(row repo.Instance) (runtime.InstanceHandle, WorkerClient, error) {
+	if !row.RuntimeHandleJson.Valid {
+		return runtime.InstanceHandle{}, nil, fmt.Errorf("%w: instance %s has no running worker", ErrInvalidRequest, row.ID)
+	}
+	var handle runtime.InstanceHandle
+	if err := json.Unmarshal([]byte(row.RuntimeHandleJson.String), &handle); err != nil {
+		return runtime.InstanceHandle{}, nil, fmt.Errorf("unmarshal runtime_handle_json: %w", err)
+	}
+	if handle.WorkerBaseURL == "" {
+		return runtime.InstanceHandle{}, nil, fmt.Errorf("%w: instance %s has no worker base url recorded", ErrInvalidRequest, row.ID)
+	}
+	return handle, NewHTTPWorkerClient(handle.WorkerBaseURL), nil
 }
 
 // CreateManagedInstance validates req, resolves its template and placement
@@ -247,6 +324,85 @@ func (s *Service) ListManagedInstances(ctx context.Context, callerUserID string)
 		instances = append(instances, mi)
 	}
 	return instances, nil
+}
+
+// ListAllInstances returns every instance across all owners — the
+// cross-owner sibling of ListManagedInstances, for admin's instance-listing
+// route. Callers must have already authorized the caller as an admin.
+func (s *Service) ListAllInstances(ctx context.Context) ([]ManagedInstance, error) {
+	rows, err := s.q.ListInstances(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list instances: %w", err)
+	}
+	instances := make([]ManagedInstance, 0, len(rows))
+	for _, row := range rows {
+		mi, err := toManagedInstance(row)
+		if err != nil {
+			return nil, err
+		}
+		instances = append(instances, mi)
+	}
+	return instances, nil
+}
+
+// ListRunningInstanceIDs returns the IDs of every instance whose desired
+// state is "running" — candidate discovery for the controller's
+// worker-liveness resync ticker, same shape as session's
+// ListExpiredOwnerAbsenceSessionIDs.
+func (s *Service) ListRunningInstanceIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.q.ListInstancesByDesiredState(ctx, "running")
+	if err != nil {
+		return nil, fmt.Errorf("list instances by desired state: %w", err)
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids, nil
+}
+
+// UpdateRuntimeHandle persists handle as id's current runtime handle,
+// leaving desired/observed state untouched — for the worker-liveness
+// Reconciler (internal/controlplane/reconcile) to record a respawned
+// worker's new PID/base URL after adopting the still-running emulator,
+// without going through the full start/stop lifecycle (no worker HTTP call
+// belongs here, the Reconciler already made it).
+func (s *Service) UpdateRuntimeHandle(ctx context.Context, id string, handle runtime.InstanceHandle, actor audit.Context) (ManagedInstance, error) {
+	handleJSON, err := json.Marshal(handle)
+	if err != nil {
+		return ManagedInstance{}, fmt.Errorf("marshal runtime handle: %w", err)
+	}
+	var result ManagedInstance
+	err = s.withTx(ctx, func(q *repo.Queries) error {
+		row, err := q.GetInstanceByID(ctx, id)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: %s", ErrNotFound, id)
+			}
+			return fmt.Errorf("get instance: %w", err)
+		}
+		if err := q.UpdateInstanceRuntime(ctx, repo.UpdateInstanceRuntimeParams{
+			ObservedState:     row.ObservedState,
+			RuntimeHandleJson: sql.NullString{String: string(handleJSON), Valid: true},
+			LastError:         row.LastError,
+			ID:                id,
+		}); err != nil {
+			return fmt.Errorf("update instance runtime: %w", err)
+		}
+		if err := audit.Record(ctx, q, actor, actionInstanceWorkerRespawn, targetTypeInstance, id, audit.OutcomeSuccess); err != nil {
+			return err
+		}
+		updated, err := q.GetInstanceByID(ctx, id)
+		if err != nil {
+			return fmt.Errorf("reload instance: %w", err)
+		}
+		result, err = toManagedInstance(updated)
+		return err
+	})
+	if err != nil {
+		return ManagedInstance{}, err
+	}
+	return result, nil
 }
 
 func (s *Service) GetManagedInstance(ctx context.Context, id, callerUserID string) (ManagedInstance, error) {
@@ -362,13 +518,23 @@ func (s *Service) startInstanceLifecycle(ctx context.Context, row repo.Instance,
 		return ManagedInstance{}, fmt.Errorf("unmarshal launch_config_json: %w", err)
 	}
 
-	response, err := s.workerClient.StartInstance(ctx, workerapi.StartInstanceRequest{
+	baseURL, pid, err := s.placementSelector.AcquireWorker(ctx, row.ID)
+	if err != nil {
+		if auditErr := audit.Record(ctx, s.q, actor, actionInstanceStart, targetTypeInstance, row.ID, audit.OutcomeFailure); auditErr != nil {
+			return ManagedInstance{}, auditErr
+		}
+		return ManagedInstance{}, fmt.Errorf("acquire worker: %w", err)
+	}
+	workerClient := NewHTTPWorkerClient(baseURL)
+
+	response, err := workerClient.StartInstance(ctx, workerapi.StartInstanceRequest{
 		InstanceID:   row.ID,
 		RuntimeClass: row.RuntimeClass,
 		TemplateID:   row.TemplateID,
 		LaunchConfig: launchConfig,
 	})
 	if err != nil {
+		_ = s.placementSelector.ReleaseWorker(context.Background(), pid)
 		if auditErr := audit.Record(ctx, s.q, actor, actionInstanceStart, targetTypeInstance, row.ID, audit.OutcomeFailure); auditErr != nil {
 			return ManagedInstance{}, auditErr
 		}
@@ -379,6 +545,12 @@ func (s *Service) startInstanceLifecycle(ctx context.Context, row repo.Instance,
 	if observedState == "" {
 		observedState = "starting"
 	}
+	// WorkerPID/WorkerBaseURL record the worker OS process the control
+	// plane just spawned for this instance — independent of
+	// response.Handle's emulator-process fields, which the worker itself
+	// filled in.
+	response.Handle.WorkerPID = pid
+	response.Handle.WorkerBaseURL = baseURL
 	handleJSON, err := json.Marshal(response.Handle)
 	if err != nil {
 		return ManagedInstance{}, fmt.Errorf("marshal runtime handle: %w", err)
@@ -437,16 +609,30 @@ func (s *Service) stopInstanceLifecycle(ctx context.Context, row repo.Instance, 
 		return result, nil
 	}
 
+	handle, workerClient, err := s.runningWorker(row)
+	if err != nil {
+		return ManagedInstance{}, err
+	}
+
 	if err := audit.Record(ctx, s.q, actor, actionInstanceStop, targetTypeInstance, row.ID, audit.OutcomeAttempt); err != nil {
 		return ManagedInstance{}, fmt.Errorf("record attempt audit event: %w", err)
 	}
 
-	response, err := s.workerClient.StopInstance(ctx, row.ID)
+	response, err := workerClient.StopInstance(ctx, row.ID)
 	if err != nil {
 		if auditErr := audit.Record(ctx, s.q, actor, actionInstanceStop, targetTypeInstance, row.ID, audit.OutcomeFailure); auditErr != nil {
 			return ManagedInstance{}, auditErr
 		}
 		return ManagedInstance{}, fmt.Errorf("stop instance on worker: %w", err)
+	}
+
+	// The worker's job for this instance is done now that the emulator has
+	// been told to stop — release its process. Best-effort: a release
+	// failure here doesn't block recording the instance stopped (the
+	// emulator already is), same "don't compound a success with a harder
+	// failure" philosophy as recordTerminalPersistenceFailure below.
+	if handle.WorkerPID != 0 {
+		_ = s.placementSelector.ReleaseWorker(ctx, handle.WorkerPID)
 	}
 
 	observedState := response.State
@@ -480,7 +666,17 @@ func (s *Service) stopInstanceLifecycle(ctx context.Context, row repo.Instance, 
 	return result, nil
 }
 
+// deleteInstanceLifecycle deletes row regardless of its desired state —
+// matching the TS behavior this ports, no new "must be stopped first"
+// requirement. Phase 4 does add one thing: a running instance's worker OS
+// process is released (best-effort) before the row disappears, so deleting
+// a running instance can no longer leak a worker process forever the way it
+// harmlessly used to when every instance shared one externally-managed
+// worker.
 func (s *Service) deleteInstanceLifecycle(ctx context.Context, row repo.Instance, actor audit.Context) error {
+	if handle, _, err := s.runningWorker(row); err == nil && handle.WorkerPID != 0 {
+		_ = s.placementSelector.ReleaseWorker(ctx, handle.WorkerPID)
+	}
 	return s.withTx(ctx, func(q *repo.Queries) error {
 		if err := q.DeleteInstanceByID(ctx, row.ID); err != nil {
 			return fmt.Errorf("delete instance: %w", err)

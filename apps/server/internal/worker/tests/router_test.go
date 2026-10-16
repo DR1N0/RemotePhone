@@ -296,4 +296,57 @@ func TestWorkerEndpoints(t *testing.T) {
 			t.Fatalf("expected stop to be called once, got %d", androidRuntime.stopCalls)
 		}
 	})
+
+	t.Run("adopt instance", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/instances/instance-2/adopt", strings.NewReader(`{
+            "handle": {
+                "instanceId": "instance-2",
+                "templateId": "macos-android-studio:Medium_Phone",
+                "runtimeClass": "android-studio-emulator",
+                "workerId": "local",
+                "pid": 9999,
+                "consolePort": 5700,
+                "adbPort": 5701,
+                "grpcPort": 8650
+            }
+        }`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d with body %s", rec.Code, rec.Body.String())
+		}
+
+		var body api.AdoptInstanceResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		if body.Handle.PID != 9999 {
+			t.Fatalf("expected pid 9999, got %d", body.Handle.PID)
+		}
+
+		adopted, ok := handles.Get("instance-2")
+		if !ok {
+			t.Fatal("expected instance-2 to be present in the handle store after adopt")
+		}
+		if adopted.ConsolePort != 5700 || adopted.AdbPort != 5701 {
+			t.Fatalf("adopted handle ports = %+v, want console=5700 adb=5701", adopted)
+		}
+	})
+
+	t.Run("adopt instance rejects mismatched path/body ids", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/instances/instance-3/adopt", strings.NewReader(`{
+            "handle": {"instanceId": "instance-other", "runtimeClass": "android-studio-emulator"}
+        }`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d with body %s", rec.Code, rec.Body.String())
+		}
+	})
 }

@@ -83,6 +83,34 @@ func NewRouter(deps Dependencies) http.Handler {
 		})
 	})
 
+	mux.HandleFunc("POST /v1/instances/{id}/adopt", func(w http.ResponseWriter, r *http.Request) {
+		if deps.RuntimeRegistry == nil {
+			writeErrorMessage(w, http.StatusBadRequest, "runtime registry is not configured")
+			return
+		}
+
+		var req AdoptInstanceRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErrorMessage(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		if strings.TrimSpace(req.Handle.InstanceID) == "" || strings.TrimSpace(req.Handle.RuntimeClass) == "" {
+			writeErrorMessage(w, http.StatusBadRequest, "handle.instanceId and handle.runtimeClass are required")
+			return
+		}
+		if req.Handle.InstanceID != r.PathValue("id") {
+			writeErrorMessage(w, http.StatusBadRequest, "handle.instanceId must match the path instance id")
+			return
+		}
+
+		if err := deps.RuntimeRegistry.Adopt(req.Handle); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, AdoptInstanceResponse{Handle: req.Handle})
+	})
+
 	mux.HandleFunc("GET /v1/instances/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if deps.RuntimeRegistry == nil {
 			writeErrorMessage(w, http.StatusBadRequest, "runtime registry is not configured")

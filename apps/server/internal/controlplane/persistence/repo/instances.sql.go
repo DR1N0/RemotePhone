@@ -99,6 +99,92 @@ func (q *Queries) GetInstanceByID(ctx context.Context, id string) (Instance, err
 	return i, err
 }
 
+const listInstances = `-- name: ListInstances :many
+SELECT id, name, runtime_class, template_id, placement_policy_json, resource_profile_json, launch_config_json, desired_state, observed_state, runtime_handle_json, state_data_ref, last_error, created_at, updated_at, owner_id FROM instances ORDER BY created_at
+`
+
+func (q *Queries) ListInstances(ctx context.Context) ([]Instance, error) {
+	rows, err := q.db.QueryContext(ctx, listInstances)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Instance
+	for rows.Next() {
+		var i Instance
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.RuntimeClass,
+			&i.TemplateID,
+			&i.PlacementPolicyJson,
+			&i.ResourceProfileJson,
+			&i.LaunchConfigJson,
+			&i.DesiredState,
+			&i.ObservedState,
+			&i.RuntimeHandleJson,
+			&i.StateDataRef,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInstancesByDesiredState = `-- name: ListInstancesByDesiredState :many
+SELECT id, name, runtime_class, template_id, placement_policy_json, resource_profile_json, launch_config_json, desired_state, observed_state, runtime_handle_json, state_data_ref, last_error, created_at, updated_at, owner_id FROM instances WHERE desired_state = ? ORDER BY created_at
+`
+
+func (q *Queries) ListInstancesByDesiredState(ctx context.Context, desiredState string) ([]Instance, error) {
+	rows, err := q.db.QueryContext(ctx, listInstancesByDesiredState, desiredState)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Instance
+	for rows.Next() {
+		var i Instance
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.RuntimeClass,
+			&i.TemplateID,
+			&i.PlacementPolicyJson,
+			&i.ResourceProfileJson,
+			&i.LaunchConfigJson,
+			&i.DesiredState,
+			&i.ObservedState,
+			&i.RuntimeHandleJson,
+			&i.StateDataRef,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listInstancesByOwner = `-- name: ListInstancesByOwner :many
 SELECT id, name, runtime_class, template_id, placement_policy_json, resource_profile_json, launch_config_json, desired_state, observed_state, runtime_handle_json, state_data_ref, last_error, created_at, updated_at, owner_id FROM instances WHERE owner_id = ? ORDER BY created_at
 `

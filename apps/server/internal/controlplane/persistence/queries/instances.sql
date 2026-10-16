@@ -13,6 +13,12 @@ SELECT * FROM instances WHERE id = ?;
 -- name: ListInstancesByOwner :many
 SELECT * FROM instances WHERE owner_id = ? ORDER BY created_at;
 
+-- name: ListInstances :many
+SELECT * FROM instances ORDER BY created_at;
+
+-- name: ListInstancesByDesiredState :many
+SELECT * FROM instances WHERE desired_state = ? ORDER BY created_at;
+
 -- name: UpdateInstanceLifecycle :exec
 UPDATE instances
 SET desired_state = ?, observed_state = ?, runtime_handle_json = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP

@@ -26,6 +26,17 @@ type StartInstanceResponse struct {
 	Handle runtime.InstanceHandle `json:"handle"`
 }
 
+// AdoptInstanceRequest's Handle carries everything InstanceHandle already
+// has — the control plane forwards its persisted runtime_handle_json
+// almost verbatim after spawning a replacement worker process.
+type AdoptInstanceRequest struct {
+	Handle runtime.InstanceHandle `json:"handle"`
+}
+
+type AdoptInstanceResponse struct {
+	Handle runtime.InstanceHandle `json:"handle"`
+}
+
 type InspectInstanceResponse struct {
 	State     string                 `json:"state"`
 	Handle    runtime.InstanceHandle `json:"handle"`

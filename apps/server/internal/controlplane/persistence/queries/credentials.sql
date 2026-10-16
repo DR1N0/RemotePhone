@@ -16,3 +16,9 @@ UPDATE credentials SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIME
 UPDATE credentials
 SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
 WHERE scope = 'attachment' AND session_id = ? AND attachment_id = ?;
+
+-- name: ListAccountCredentialsForUser :many
+SELECT * FROM credentials WHERE user_id = ? AND scope = 'account';
+
+-- name: GetAccountCredentialForUser :one
+SELECT * FROM credentials WHERE id = ? AND user_id = ? AND scope = 'account';

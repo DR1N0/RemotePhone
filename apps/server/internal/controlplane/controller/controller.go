@@ -76,3 +76,12 @@ func (c *Controller) dispatch(ctx context.Context, key string) error {
 		return nil
 	}
 }
+
+// NoopReconciler is a Reconciler that never does anything. It's the
+// workerProbe placeholder until roadmap Phase 4 (real exec.Command worker
+// spawning) gives it something to health-check — nothing EnqueueWorker's
+// key space names exists yet, so there's nothing to reconcile, but New
+// still requires a non-nil Reconciler in that slot.
+type NoopReconciler struct{}
+
+func (NoopReconciler) Reconcile(ctx context.Context, id string) error { return nil }

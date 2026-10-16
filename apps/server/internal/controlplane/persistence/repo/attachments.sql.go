@@ -113,6 +113,45 @@ func (q *Queries) ListAttachmentsForSession(ctx context.Context, sessionID strin
 	return items, nil
 }
 
+const listAttachmentsForUser = `-- name: ListAttachmentsForUser :many
+SELECT id, session_id, client_id, role, status, reconnect_token, created_at, updated_at, pending_target_role, user_id, transport_teardown_pending FROM attachments WHERE user_id = ?
+`
+
+func (q *Queries) ListAttachmentsForUser(ctx context.Context, userID sql.NullString) ([]Attachment, error) {
+	rows, err := q.db.QueryContext(ctx, listAttachmentsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Attachment
+	for rows.Next() {
+		var i Attachment
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.ClientID,
+			&i.Role,
+			&i.Status,
+			&i.ReconnectToken,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PendingTargetRole,
+			&i.UserID,
+			&i.TransportTeardownPending,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setAttachmentPendingTargetRole = `-- name: SetAttachmentPendingTargetRole :exec
 UPDATE attachments SET pending_target_role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
 `

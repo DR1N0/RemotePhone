@@ -22,40 +22,79 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// fakeWorkerClient is a local, minimal instance.WorkerClient stand-in —
-// route tests exercise the HTTP layer end to end against a real
+// fakeWorkerClient backs an httptest.Server standing in for a worker's HTTP
+// API — route tests exercise the HTTP layer end to end against a real
 // instance.Service, but never shell out to a real mako-worker process.
+// Shared by every test file in this package via fakePlacementSelector.
 type fakeWorkerClient struct {
 	templates []runtime.Template
+	server    *httptest.Server
 }
 
-func (f *fakeWorkerClient) ListTemplates(ctx context.Context) ([]runtime.Template, error) {
-	return f.templates, nil
+func (f *fakeWorkerClient) httpServer() *httptest.Server {
+	if f.server != nil {
+		return f.server
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("GET /v1/templates", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(workerapi.TemplateListResponse{Templates: f.templates})
+	})
+	mux.HandleFunc("POST /v1/instances/start", func(w http.ResponseWriter, r *http.Request) {
+		var req workerapi.StartInstanceRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		json.NewEncoder(w).Encode(workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{InstanceID: req.InstanceID, PID: 1}})
+	})
+	mux.HandleFunc("POST /v1/instances/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(workerapi.StopInstanceResponse{State: "stopped"})
+	})
+	// Transport/signaling routes — needed by sessions_test.go's
+	// promote/demote/disconnect/signaling flows, which drive a real
+	// transport.Service against this same fake worker.
+	mux.HandleFunc("POST /v1/transport/session", func(w http.ResponseWriter, r *http.Request) {
+		var req workerapi.CreateTransportSessionRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		json.NewEncoder(w).Encode(workerapi.TransportSessionResponse{
+			SessionID: req.SessionID, AttachmentID: req.AttachmentID, InstanceID: req.InstanceID,
+			Mode: "prototype-webrtc", Status: "active", WorkerBaseURL: f.server.URL,
+		})
+	})
+	mux.HandleFunc("PATCH /v1/transport/session/role", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("DELETE /v1/transport/session", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("POST /v1/transport/offer", func(w http.ResponseWriter, r *http.Request) {
+		var req workerapi.TransportOfferRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		json.NewEncoder(w).Encode(workerapi.TransportOfferResponse{SdpAnswer: "answer-for-" + req.SdpOffer})
+	})
+	mux.HandleFunc("POST /v1/transport/ice-candidate", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	f.server = httptest.NewServer(mux)
+	return f.server
 }
-func (f *fakeWorkerClient) StartInstance(ctx context.Context, req workerapi.StartInstanceRequest) (workerapi.StartInstanceResponse, error) {
-	return workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{InstanceID: req.InstanceID, PID: 1}}, nil
+
+// fakePlacementSelector is an instance.PlacementSelector stand-in whose
+// AcquireWorker returns worker's httptest.Server address instead of
+// spawning a real process.
+type fakePlacementSelector struct {
+	worker  *fakeWorkerClient
+	nextPID int
 }
-func (f *fakeWorkerClient) InspectInstance(ctx context.Context, instanceID string) (workerapi.InspectInstanceResponse, error) {
-	return workerapi.InspectInstanceResponse{}, nil
+
+func (s *fakePlacementSelector) Validate(policy placement.Policy) error {
+	return (&placement.Selector{}).Validate(policy)
 }
-func (f *fakeWorkerClient) StopInstance(ctx context.Context, instanceID string) (workerapi.StopInstanceResponse, error) {
-	return workerapi.StopInstanceResponse{State: "stopped"}, nil
+
+func (s *fakePlacementSelector) AcquireWorker(ctx context.Context, instanceID string) (string, int, error) {
+	s.nextPID++
+	return s.worker.httpServer().URL, s.nextPID, nil
 }
-func (f *fakeWorkerClient) CreateTransportSession(ctx context.Context, req workerapi.CreateTransportSessionRequest) (workerapi.TransportSessionResponse, error) {
-	return workerapi.TransportSessionResponse{}, nil
-}
-func (f *fakeWorkerClient) UpdateTransportRole(ctx context.Context, req workerapi.UpdateTransportSessionRoleRequest) error {
-	return nil
-}
-func (f *fakeWorkerClient) DestroyTransportSession(ctx context.Context, instanceID, attachmentID string) error {
-	return nil
-}
-func (f *fakeWorkerClient) ForwardOffer(ctx context.Context, req workerapi.TransportOfferRequest) (workerapi.TransportOfferResponse, error) {
-	return workerapi.TransportOfferResponse{}, nil
-}
-func (f *fakeWorkerClient) ForwardICECandidate(ctx context.Context, req workerapi.ICECandidateRequest) error {
-	return nil
-}
+
+func (s *fakePlacementSelector) ReleaseWorker(ctx context.Context, pid int) error { return nil }
 
 func newTestInstanceSetup(t *testing.T) (*auth.Service, *instance.Service, string) {
 	t.Helper()
@@ -74,7 +113,12 @@ func newTestInstanceSetup(t *testing.T) (*auth.Service, *instance.Service, strin
 		t.Fatalf("auth.NewService: %v", err)
 	}
 	worker := &fakeWorkerClient{templates: []runtime.Template{{TemplateID: "t-1", RuntimeClass: "android-studio-emulator", DisplayName: "T1"}}}
-	instanceSvc := instance.NewService(db, worker, placement.NewSelector())
+	t.Cleanup(func() {
+		if worker.server != nil {
+			worker.server.Close()
+		}
+	})
+	instanceSvc := instance.NewService(db, &fakePlacementSelector{worker: worker})
 	return authSvc, instanceSvc, secretPath
 }
 

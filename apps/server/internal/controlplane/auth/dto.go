@@ -13,11 +13,11 @@ type UserDTO struct {
 	Status      string  `json:"status"`
 }
 
-// toUserDTO is the ONE mapping function from a repo.User row to the DTO
+// ToUserDTO is the ONE mapping function from a repo.User row to the DTO
 // shape that may cross into an HTTP response. Every place a repo.User row
 // needs to become JSON-serializable must call this, never copy fields ad
 // hoc, so the password hash can never accidentally leak into a response.
-func toUserDTO(row repo.User) UserDTO {
+func ToUserDTO(row repo.User) UserDTO {
 	var username *string
 	if row.Username.Valid {
 		u := row.Username.String

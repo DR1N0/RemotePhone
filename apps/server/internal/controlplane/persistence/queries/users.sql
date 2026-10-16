@@ -11,3 +11,19 @@ SELECT * FROM users WHERE lower(trim(username)) = lower(trim(?));
 
 -- name: CountRegisteredOrAdminUsers :one
 SELECT count(*) FROM users WHERE user_type != 'guest';
+
+-- name: CountActiveAdmins :one
+SELECT count(*) FROM users WHERE user_type = 'admin' AND status = 'active';
+
+-- name: ListAccountUsers :many
+SELECT * FROM users
+WHERE user_type != 'guest'
+  AND (sqlc.narg('cursor_id') IS NULL OR id > sqlc.narg('cursor_id'))
+ORDER BY id ASC
+LIMIT sqlc.arg('limit');
+
+-- name: UpdateUserType :exec
+UPDATE users SET user_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;
+
+-- name: SetUserStatus :exec
+UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;

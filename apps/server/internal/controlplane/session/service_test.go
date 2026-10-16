@@ -366,6 +366,128 @@ func TestCloseSessionDisconnectsAllAndReturnsTeardownTargets(t *testing.T) {
 	}
 }
 
+func TestCloseSessionTxCommitsAtomicallyWithCallerWork(t *testing.T) {
+	sessionSvc, authSvc, db := newTestServices(t)
+	record, _, _ := bootstrapSession(t, sessionSvc, authSvc, db)
+
+	q := repo.New(db)
+	closed, teardownIDs, err := sessionSvc.CloseSessionTx(context.Background(), q, record.ID, testAuditContext())
+	if err != nil {
+		t.Fatalf("CloseSessionTx: %v", err)
+	}
+	if closed.Status != "closed" {
+		t.Errorf("CloseSessionTx status = %q, want closed", closed.Status)
+	}
+	if len(teardownIDs) != 1 || teardownIDs[0] != record.Attachments[0].ID {
+		t.Errorf("CloseSessionTx teardownIDs = %v, want [%s]", teardownIDs, record.Attachments[0].ID)
+	}
+}
+
+// newTestServicesWithTimeout is newTestServices with a caller-chosen
+// owner-absence timeout, for tests that need a deadline they can force into
+// the past (or future) relative to a test-supplied "now" without sleeping.
+func newTestServicesWithTimeout(t *testing.T, timeout time.Duration) (*Service, *auth.Service, *sql.DB) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := persistence.ApplyMigrations(db); err != nil {
+		t.Fatalf("ApplyMigrations: %v", err)
+	}
+	authSvc, err := auth.NewService(db, "")
+	if err != nil {
+		t.Fatalf("auth.NewService: %v", err)
+	}
+	return NewService(db, authSvc, &KeyedMutex{}, timeout), authSvc, db
+}
+
+func TestCloseExpiredOwnerAbsenceSessionClosesWhenDeadlinePassed(t *testing.T) {
+	sessionSvc, authSvc, db := newTestServicesWithTimeout(t, time.Millisecond)
+	record, _, ownerCaller := bootstrapSession(t, sessionSvc, authSvc, db)
+	attachment := record.Attachments[0]
+
+	if _, err := sessionSvc.DisconnectAttachment(context.Background(), record.ID, attachment.ID, ownerCaller, testAuditContext()); err != nil {
+		t.Fatalf("DisconnectAttachment: %v", err)
+	}
+
+	future := time.Now().Add(time.Hour)
+	closed, teardownIDs, didClose, err := sessionSvc.CloseExpiredOwnerAbsenceSession(context.Background(), record.ID, future, testAuditContext())
+	if err != nil {
+		t.Fatalf("CloseExpiredOwnerAbsenceSession: %v", err)
+	}
+	if !didClose {
+		t.Fatalf("CloseExpiredOwnerAbsenceSession closed = false, want true")
+	}
+	if closed.Status != "closed" {
+		t.Errorf("status = %q, want closed", closed.Status)
+	}
+	if len(teardownIDs) != 1 || teardownIDs[0] != attachment.ID {
+		t.Errorf("teardownIDs = %v, want [%s]", teardownIDs, attachment.ID)
+	}
+
+	// Idempotent: calling again after closure is a no-op, not an error.
+	_, _, didCloseAgain, err := sessionSvc.CloseExpiredOwnerAbsenceSession(context.Background(), record.ID, future, testAuditContext())
+	if err != nil {
+		t.Fatalf("CloseExpiredOwnerAbsenceSession (second call): %v", err)
+	}
+	if didCloseAgain {
+		t.Errorf("CloseExpiredOwnerAbsenceSession second call closed = true, want false (already closed)")
+	}
+}
+
+func TestCloseExpiredOwnerAbsenceSessionSkipsWhenDeadlineNotYetPassed(t *testing.T) {
+	sessionSvc, authSvc, db := newTestServicesWithTimeout(t, time.Hour)
+	record, _, ownerCaller := bootstrapSession(t, sessionSvc, authSvc, db)
+	attachment := record.Attachments[0]
+
+	if _, err := sessionSvc.DisconnectAttachment(context.Background(), record.ID, attachment.ID, ownerCaller, testAuditContext()); err != nil {
+		t.Fatalf("DisconnectAttachment: %v", err)
+	}
+
+	_, _, didClose, err := sessionSvc.CloseExpiredOwnerAbsenceSession(context.Background(), record.ID, time.Now(), testAuditContext())
+	if err != nil {
+		t.Fatalf("CloseExpiredOwnerAbsenceSession: %v", err)
+	}
+	if didClose {
+		t.Errorf("CloseExpiredOwnerAbsenceSession closed = true, want false (deadline an hour out)")
+	}
+
+	after, err := sessionSvc.GetSessionUnchecked(context.Background(), record.ID)
+	if err != nil {
+		t.Fatalf("GetSessionUnchecked: %v", err)
+	}
+	if after.Status != "active" {
+		t.Errorf("status after skipped close = %q, want active", after.Status)
+	}
+}
+
+func TestListExpiredOwnerAbsenceSessionIDs(t *testing.T) {
+	sessionSvc, authSvc, db := newTestServicesWithTimeout(t, time.Millisecond)
+	record, _, ownerCaller := bootstrapSession(t, sessionSvc, authSvc, db)
+	attachment := record.Attachments[0]
+
+	if ids, err := sessionSvc.ListExpiredOwnerAbsenceSessionIDs(context.Background(), time.Now()); err != nil {
+		t.Fatalf("ListExpiredOwnerAbsenceSessionIDs (before disconnect): %v", err)
+	} else if len(ids) != 0 {
+		t.Errorf("ListExpiredOwnerAbsenceSessionIDs (before disconnect) = %v, want empty", ids)
+	}
+
+	if _, err := sessionSvc.DisconnectAttachment(context.Background(), record.ID, attachment.ID, ownerCaller, testAuditContext()); err != nil {
+		t.Fatalf("DisconnectAttachment: %v", err)
+	}
+
+	ids, err := sessionSvc.ListExpiredOwnerAbsenceSessionIDs(context.Background(), time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("ListExpiredOwnerAbsenceSessionIDs: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != record.ID {
+		t.Errorf("ListExpiredOwnerAbsenceSessionIDs = %v, want [%s]", ids, record.ID)
+	}
+}
+
 func TestSetAttachmentPendingTargetRoleAndConfirmAttachmentRole(t *testing.T) {
 	sessionSvc, authSvc, db := newTestServices(t)
 	record, _, _ := bootstrapSession(t, sessionSvc, authSvc, db)
