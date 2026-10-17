@@ -111,7 +111,7 @@ func TestRegisterNormalizesUsernameLikeLogin(t *testing.T) {
 	svc, secretPath := newTestServiceForClientAPI(t)
 	adminToken := mustSetupAdminForClientAPI(t, svc, secretPath)
 
-	inviteToken, _, err := svc.CreateRegistrationInvite(context.Background(), mustUserIDFromToken(t, svc, adminToken), nil, "req-1", nil)
+	inviteToken, _, err := svc.CreateRegistrationInvite(context.Background(), mustUserIDFromToken(t, svc, adminToken), nil, "req-1")
 	if err != nil {
 		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestRegisterRejectsConflictingUsername(t *testing.T) {
 	mux := http.NewServeMux()
 	clientapi.RegisterAuthRoutes(mux, svc)
 
-	inviteToken, _, err := svc.CreateRegistrationInvite(context.Background(), adminUserID, nil, "req-2", nil)
+	inviteToken, _, err := svc.CreateRegistrationInvite(context.Background(), adminUserID, nil, "req-2")
 	if err != nil {
 		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}

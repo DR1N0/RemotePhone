@@ -23,10 +23,10 @@ import (
 var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,32}$`)
 
 // isValidPassword reports whether password's byte length falls within
-// [12, 1024], matching the HTTP-layer validation the TS route schemas
+// [8, 1024], matching the HTTP-layer validation the TS route schemas
 // perform before ever calling into AuthService.
 func isValidPassword(password string) bool {
-	return len(password) >= 12 && len(password) <= 1024
+	return len(password) >= 8 && len(password) <= 1024
 }
 
 type registerRequest struct {

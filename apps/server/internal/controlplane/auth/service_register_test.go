@@ -10,7 +10,7 @@ import (
 func TestRegisterSuccess(t *testing.T) {
 	svc := newTestService(t)
 	createTestUser(t, svc, "admin1", "admin", "active")
-	token, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req1", nil)
+	token, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req1")
 	if err != nil {
 		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestRegisterSuccess(t *testing.T) {
 func TestRegisterRejectsInvalidShapeBeforeTouchingInvite(t *testing.T) {
 	svc := newTestService(t)
 	createTestUser(t, svc, "admin1", "admin", "active")
-	token, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req1", nil)
+	token, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req1")
 	if err != nil {
 		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}
@@ -51,12 +51,12 @@ func TestRegisterRejectsInvalidShapeBeforeTouchingInvite(t *testing.T) {
 func TestRegisterRejectsUsernameConflict(t *testing.T) {
 	svc := newTestService(t)
 	createTestUser(t, svc, "admin1", "admin", "active")
-	token1, _, _ := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req1", nil)
+	token1, _, _ := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req1")
 	if _, _, err := svc.Register(context.Background(), token1, "taken_name", "correct horse battery staple", "d1", "req2"); err != nil {
 		t.Fatalf("first Register: %v", err)
 	}
 
-	token2, _, _ := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req3", nil)
+	token2, _, _ := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req3")
 	_, _, err := svc.Register(context.Background(), token2, "TAKEN_NAME", "correct horse battery staple", "d2", "req4")
 	if err == nil {
 		t.Fatal("Register succeeded with a username differing only in case from an existing user")
@@ -66,7 +66,7 @@ func TestRegisterRejectsUsernameConflict(t *testing.T) {
 func TestConcurrentRegisterSameInviteResolvesToOneWinner(t *testing.T) {
 	svc := newTestService(t)
 	createTestUser(t, svc, "admin1", "admin", "active")
-	token, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req1", nil)
+	token, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req1")
 	if err != nil {
 		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestConcurrentRegisterSameUsernameResolvesToOneWinner(t *testing.T) {
 	const n = 5
 	tokens := make([]string, n)
 	for i := 0; i < n; i++ {
-		token, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req-invite", nil)
+		token, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req-invite")
 		if err != nil {
 			t.Fatalf("CreateRegistrationInvite[%d]: %v", i, err)
 		}

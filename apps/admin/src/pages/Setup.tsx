@@ -37,7 +37,7 @@ export default function Setup({ onAuthenticated }: SetupProps) {
         <Form.Item name="username" label="Username" rules={[{ required: true, pattern: /^[a-z0-9_]{3,32}$/, message: "Use 3–32 lowercase letters, digits, or underscores" }]}>
           <Input autoComplete="username" />
         </Form.Item>
-        <Form.Item name="password" label="Password" rules={[{ required: true, min: 12, message: "Use at least 12 characters" }]}>
+        <Form.Item name="password" label="Password" rules={[{ required: true, min: 8, message: "Use at least 8 characters" }]}>
           <Input.Password autoComplete="new-password" />
         </Form.Item>
         <Form.Item name="bootstrapSecret" label="Bootstrap secret" rules={[{ required: true }]}>

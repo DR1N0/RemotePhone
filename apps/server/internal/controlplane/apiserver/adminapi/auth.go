@@ -24,10 +24,10 @@ import (
 var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,32}$`)
 
 // isValidPassword reports whether password's byte length falls within
-// [12, 1024], matching the HTTP-layer validation the TS route schemas
+// [8, 1024], matching the HTTP-layer validation the TS route schemas
 // perform before ever calling into AuthService.
 func isValidPassword(password string) bool {
-	return len(password) >= 12 && len(password) <= 1024
+	return len(password) >= 8 && len(password) <= 1024
 }
 
 // localhostHostPattern, loopbackIPv4HostPattern, and loopbackIPv6HostPattern
@@ -55,17 +55,6 @@ type setupRequest struct {
 	DeviceLabel     string `json:"deviceLabel"`
 	BootstrapSecret string `json:"bootstrapSecret"`
 }
-
-type registrationInviteRequest struct {
-	TTLMs *int64 `json:"ttlMs"`
-}
-
-// registrationInviteMinTTLMs and registrationInviteMaxTTLMs mirror the TS
-// registrationInviteRequestSchema's inclusive [5m, 7d] bound on ttlMs.
-const (
-	registrationInviteMinTTLMs = 5 * 60_000
-	registrationInviteMaxTTLMs = 7 * 24 * 60 * 60_000
-)
 
 // RegisterAuthRoutes mounts the admin-surface auth routes on mux: it first
 // delegates to commonauth.RegisterRoutes for login/me/logout (with
@@ -143,19 +132,9 @@ func RegisterAuthRoutes(mux *http.ServeMux, svc *auth.Service) {
 
 	mux.Handle("POST /api/v1/auth/registration-invites",
 		middleware.RequireAuth(svc)(middleware.RequireScope("account")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var req registrationInviteRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				middleware.WriteJSONError(w, http.StatusBadRequest, "invalid registration invitation request")
-				return
-			}
-			if req.TTLMs != nil && (*req.TTLMs < registrationInviteMinTTLMs || *req.TTLMs > registrationInviteMaxTTLMs) {
-				middleware.WriteJSONError(w, http.StatusBadRequest, "invalid registration invitation request")
-				return
-			}
-
 			caller := middleware.GetAuthenticatedUser(r.Context())
 			requestID := uuid.NewString()
-			token, expiresAt, err := svc.CreateRegistrationInvite(r.Context(), caller.UserID, &caller.CredentialID, requestID, req.TTLMs)
+			token, expiresAt, err := svc.CreateRegistrationInvite(r.Context(), caller.UserID, &caller.CredentialID, requestID)
 			if err != nil {
 				if errors.Is(err, auth.ErrNotAdmin) {
 					middleware.WriteJSONError(w, http.StatusForbidden, "only an active admin may issue registration invitations")

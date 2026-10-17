@@ -310,9 +310,18 @@ func TestRegistrationInviteSucceedsForAdmin(t *testing.T) {
 	if resp.Token == "" || resp.ExpiresAt == "" {
 		t.Errorf("response missing fields: %+v", resp)
 	}
+	if len(resp.Token) != 4 {
+		t.Errorf("token = %q, want a 4-digit code", resp.Token)
+	}
 }
 
-func TestRegistrationInviteRejectsOutOfRangeTTL(t *testing.T) {
+// TestRegistrationInviteIgnoresRequestBody covers the route's current
+// shape: ttlMs used to be a caller-configurable field here, but
+// auth.CreateRegistrationInvite now issues a fixed-TTL 4-digit code (see
+// auth.registrationInviteTTL) and the route no longer parses a request
+// body at all — any body, including a stale ttlMs client still sends, is
+// simply ignored rather than rejected.
+func TestRegistrationInviteIgnoresRequestBody(t *testing.T) {
 	svc, secretPath := newTestServiceForAdminAPI(t)
 	token := setupTestAdminForAdminAPI(t, svc, secretPath, "admin", "correct horse battery staple")
 
@@ -325,8 +334,8 @@ func TestRegistrationInviteRejectsOutOfRangeTTL(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 for a ttlMs below the 5-minute minimum", rec.Code)
+	if rec.Code != http.StatusCreated {
+		t.Errorf("status = %d, want 201 (request body is no longer parsed)", rec.Code)
 	}
 }
 

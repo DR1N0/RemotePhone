@@ -6,9 +6,11 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
+	"math/big"
 	"regexp"
 	"strings"
 	"time"
@@ -25,15 +27,11 @@ const (
 	attachmentCredentialMaxTTL = 24 * time.Hour
 )
 
-// registrationInviteDefaultTTL, registrationInviteMinTTL, and
-// registrationInviteMaxTTL mirror the TS constants governing
-// CreateRegistrationInvite's ttlMs parameter: it defaults to 24h and must
-// fall within the inclusive range [5m, 7d].
-const (
-	registrationInviteDefaultTTL = 24 * time.Hour
-	registrationInviteMinTTL     = 5 * time.Minute
-	registrationInviteMaxTTL     = 7 * 24 * time.Hour
-)
+// registrationInviteTTL is fixed, not caller-configurable — same reasoning
+// as session.sessionInviteTTL: a 4-digit code has far less entropy (10,000
+// possible values) than this package's other bearer tokens, so the validity
+// window is part of what keeps redemption safe, not just a UX knob.
+const registrationInviteTTL = 5 * time.Minute
 
 // usernamePattern is the normalized-username validity pattern: lowercase
 // letters, digits, and underscores, 3-32 characters.
@@ -49,11 +47,11 @@ func isValidUsername(username string) (string, bool) {
 }
 
 // isValidPassword reports whether password's byte length falls within
-// [12, 1024]. This matches the common case of the TS code's UTF-16
+// [8, 1024]. This matches the common case of the TS code's UTF-16
 // code-unit length check; Unicode passwords with multi-byte characters are
 // an accepted, minor fidelity gap versus the TS source.
 func isValidPassword(password string) bool {
-	return len(password) >= 12 && len(password) <= 1024
+	return len(password) >= 8 && len(password) <= 1024
 }
 
 // Service is the Go port of the TS AuthService. NewService constructs it;
@@ -663,31 +661,34 @@ func (s *Service) RevokeCredential(ctx context.Context, requesterUserID, credent
 	return nil
 }
 
+// GenerateRegistrationInviteCode returns a 4-digit numeric code, zero-padded
+// ("0042"), drawn from crypto/rand — short and easy to read aloud or type,
+// matching session.generateSessionInvitePIN's convention. Exported so admin
+// tooling/tests can predict the format without reaching into this package's
+// internals.
+func GenerateRegistrationInviteCode() (string, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(10_000))
+	if err != nil {
+		return "", fmt.Errorf("generate registration invite code: %w", err)
+	}
+	return fmt.Sprintf("%04d", n.Int64()), nil
+}
+
 // CreateRegistrationInvite issues a new registration invite on behalf of
-// actorUserID, who must be an active admin. ttlMs, if nil, defaults to 24h;
-// otherwise it must fall within the inclusive range [5m, 7d] or a
-// *ServiceError is returned. The invite row and its audit event are written
-// in the same transaction: both commit, or neither does. Returns the raw
-// (unhashed) invite token and its expiry.
-func (s *Service) CreateRegistrationInvite(ctx context.Context, actorUserID string, actorCredentialID *string, requestID string, ttlMs *int64) (string, time.Time, error) {
+// actorUserID, who must be an active admin. The invite row and its audit
+// event are written in the same transaction: both commit, or neither does.
+// Returns the raw (unhashed) invite code and its expiry.
+func (s *Service) CreateRegistrationInvite(ctx context.Context, actorUserID string, actorCredentialID *string, requestID string) (string, time.Time, error) {
 	if _, err := s.RequireActiveAdmin(ctx, s.q, actorUserID); err != nil {
 		return "", time.Time{}, err
 	}
 
-	ttl := registrationInviteDefaultTTL
-	if ttlMs != nil {
-		ttl = time.Duration(*ttlMs) * time.Millisecond
-		if ttl < registrationInviteMinTTL || ttl > registrationInviteMaxTTL {
-			return "", time.Time{}, NewServiceError("registration invite ttl must be between 5 minutes and 7 days")
-		}
-	}
-
 	issuedAt := s.now()
-	expiresAt := issuedAt.Add(ttl)
+	expiresAt := issuedAt.Add(registrationInviteTTL)
 
-	token, err := GenerateToken()
+	token, err := GenerateRegistrationInviteCode()
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("generate token: %w", err)
+		return "", time.Time{}, err
 	}
 
 	err = s.withTx(ctx, func(q *repo.Queries) error {

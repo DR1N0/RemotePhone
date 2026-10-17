@@ -32,11 +32,11 @@ func TestIsValidUsername(t *testing.T) {
 }
 
 func TestIsValidPassword(t *testing.T) {
-	if isValidPassword("short") {
-		t.Error("isValidPassword accepted an 11-char password (below the 12-char minimum)")
+	if isValidPassword("7chars!") {
+		t.Error("isValidPassword accepted a 7-char password (below the 8-char minimum)")
 	}
-	if !isValidPassword("exactly12chr") {
-		t.Error("isValidPassword rejected a 12-char password (the minimum, should be accepted)")
+	if !isValidPassword("8charsss") {
+		t.Error("isValidPassword rejected an 8-char password (the minimum, should be accepted)")
 	}
 }
 
@@ -44,43 +44,32 @@ func TestCreateRegistrationInviteRequiresActiveAdmin(t *testing.T) {
 	svc := newTestService(t)
 	createTestUser(t, svc, "regular1", "registered", "active")
 
-	_, _, err := svc.CreateRegistrationInvite(context.Background(), "regular1", nil, "req1", nil)
+	_, _, err := svc.CreateRegistrationInvite(context.Background(), "regular1", nil, "req1")
 	if err == nil {
 		t.Fatal("CreateRegistrationInvite succeeded for a non-admin user")
 	}
 }
 
-func TestCreateRegistrationInviteDefaultsAndValidatesTTL(t *testing.T) {
+func TestCreateRegistrationInviteIsAFourDigitCodeValidFiveMinutes(t *testing.T) {
 	svc := newTestService(t)
 	createTestUser(t, svc, "admin1", "admin", "active")
 
-	_, expiresAt, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req1", nil)
+	code, expiresAt, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req1")
 	if err != nil {
-		t.Fatalf("CreateRegistrationInvite (default ttl): %v", err)
+		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}
-	wantAround := svc.now().Add(24 * time.Hour)
+	if len(code) != 4 {
+		t.Errorf("invite code = %q, want exactly 4 digits", code)
+	}
+	for _, r := range code {
+		if r < '0' || r > '9' {
+			t.Errorf("invite code = %q, want all-numeric", code)
+			break
+		}
+	}
+	wantAround := svc.now().Add(5 * time.Minute)
 	if diff := expiresAt.Sub(wantAround); diff < -time.Second || diff > time.Second {
-		t.Errorf("default ttl expiresAt = %v, want approximately now+24h (%v)", expiresAt, wantAround)
-	}
-
-	tooShort := int64(4 * time.Minute / time.Millisecond)
-	if _, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req2", &tooShort); err == nil {
-		t.Error("CreateRegistrationInvite accepted a ttl under 5 minutes")
-	}
-
-	exactlyFiveMin := int64(5 * time.Minute / time.Millisecond)
-	if _, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req3", &exactlyFiveMin); err != nil {
-		t.Errorf("CreateRegistrationInvite rejected exactly 5 minutes (the inclusive minimum): %v", err)
-	}
-
-	exactlySevenDays := int64(7 * 24 * time.Hour / time.Millisecond)
-	if _, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req4", &exactlySevenDays); err != nil {
-		t.Errorf("CreateRegistrationInvite rejected exactly 7 days (the inclusive maximum): %v", err)
-	}
-
-	tooLong := int64(7*24*time.Hour/time.Millisecond) + 1
-	if _, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req5", &tooLong); err == nil {
-		t.Error("CreateRegistrationInvite accepted a ttl over 7 days")
+		t.Errorf("expiresAt = %v, want approximately now+5m (%v)", expiresAt, wantAround)
 	}
 }
 
@@ -88,7 +77,7 @@ func TestCreateRegistrationInviteWritesAuditEventAtomically(t *testing.T) {
 	svc := newTestService(t)
 	createTestUser(t, svc, "admin1", "admin", "active")
 
-	_, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req-audit-1", nil)
+	_, _, err := svc.CreateRegistrationInvite(context.Background(), "admin1", nil, "req-audit-1")
 	if err != nil {
 		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}
