@@ -20,12 +20,16 @@ func (a *Adapter) CreateTransportSession(req runtime.TransportSessionRequest) (r
 	}
 
 	adbSerial := fmt.Sprintf("emulator-%d", req.RuntimeHandle.ConsolePort)
-	// Default screen dimensions for standard AVD profiles.
-	const screenW, screenH = 1080, 1920
+	// AVD profiles vary their actual resolution (e.g. Medium_Phone_API_36.1
+	// is 1080x2400) — ask the device rather than assuming a fixed default.
+	screenW, screenH := webrtctransport.QueryScreenSize(adbSerial, 1080, 1920)
+	// The emulator is already launched with -grpc <port> (see launch.go) —
+	// this is its own gRPC server, used as the video capture frame source.
+	grpcAddr := fmt.Sprintf("127.0.0.1:%d", req.RuntimeHandle.GRPCPort)
 
 	candidate := webrtctransport.NewAdapter(
 		req.InstanceID, req.AttachmentID, req.Role,
-		adbSerial, screenW, screenH, a.stunURL,
+		adbSerial, screenW, screenH, a.stunURL, grpcAddr, a.ffmpegPath,
 	)
 	if a.transportStore != nil {
 		key := req.InstanceID + ":" + req.AttachmentID

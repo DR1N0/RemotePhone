@@ -1,6 +1,7 @@
 package webrtc
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -9,10 +10,22 @@ import (
 
 	"github.com/pion/webrtc/v3"
 	"mako/internal/worker/transport"
+	"mako/internal/worker/transport/emugrpc"
 )
 
+// fakeEncoderProcess satisfies encoderProcess without spawning a real
+// ffmpeg subprocess — used by tests that exercise HandleOffer's full
+// negotiation path but don't care about actual encoded video content.
+type fakeEncoderProcess struct {
+	stdout io.ReadCloser
+}
+
+func (f *fakeEncoderProcess) Stdout() io.ReadCloser           { return f.stdout }
+func (f *fakeEncoderProcess) Write(frame []byte) (int, error) { return len(frame), nil }
+func (f *fakeEncoderProcess) Stop()                           {}
+
 func TestAdapterUsesItsCurrentRoleForInput(t *testing.T) {
-	adapter := NewAdapter("instance-1", "attachment-1", "observer", "adb", 1080, 1920, "")
+	adapter := NewAdapter("instance-1", "attachment-1", "observer", "adb", 1080, 1920, "", "", "")
 	var receivedRole string
 	adapter.forwardInput = func(_ string, _ transport.InputEvent, role string, _, _ int) error {
 		receivedRole = role
@@ -36,7 +49,7 @@ func TestAdapterUsesItsCurrentRoleForInput(t *testing.T) {
 }
 
 func TestObserverAdapterRejectsInput(t *testing.T) {
-	adapter := NewAdapter("instance-1", "attachment-1", "observer", "adb", 1080, 1920, "")
+	adapter := NewAdapter("instance-1", "attachment-1", "observer", "adb", 1080, 1920, "", "", "")
 
 	err := adapter.HandleInput(transport.InputEvent{Type: "touch"})
 
@@ -46,7 +59,7 @@ func TestObserverAdapterRejectsInput(t *testing.T) {
 }
 
 func TestHandleDataChannelOnlyBindsInputLabel(t *testing.T) {
-	adapter := NewAdapter("instance-1", "attachment-1", "participant", "adb", 1080, 1920, "")
+	adapter := NewAdapter("instance-1", "attachment-1", "participant", "adb", 1080, 1920, "", "", "")
 	received := make(chan transport.InputEvent, 2)
 	adapter.forwardInput = func(_ string, event transport.InputEvent, _ string, _, _ int) error {
 		received <- event
@@ -124,9 +137,15 @@ func TestHandleOfferNegotiatesH264VideoForRecvonlyOffer(t *testing.T) {
 	}
 	waitForTestGathering(t, offerGathering)
 
-	adapter := NewAdapter("instance-1", "attachment-1", "participant", "adb", 1080, 1920, "")
-	adapter.startCapture = func(string) (*ScreenCapture, io.ReadCloser, error) {
-		return &ScreenCapture{}, io.NopCloser(strings.NewReader("")), nil
+	adapter := NewAdapter("instance-1", "attachment-1", "participant", "adb", 1080, 1920, "", "", "")
+	adapter.newFrameSource = func(string, int, int) emugrpc.FrameSource {
+		return emugrpc.NewFakeFrameSource()
+	}
+	adapter.selectEncoder = func(context.Context, string) (string, string, error) {
+		return "ffmpeg", "libx264", nil
+	}
+	adapter.startEncoder = func(string, string, EncodeOptions) (encoderProcess, error) {
+		return &fakeEncoderProcess{stdout: io.NopCloser(strings.NewReader(""))}, nil
 	}
 	defer func() { _ = adapter.Stop() }()
 

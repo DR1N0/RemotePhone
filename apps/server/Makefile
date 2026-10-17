@@ -1,7 +1,8 @@
 MIGRATIONS_DIR := internal/controlplane/persistence/migrations
 SQLC_SCHEMA_DIR := internal/controlplane/persistence/sqlc_schema
+EMUGRPC_PROTO_DIR := internal/worker/transport/emugrpc/proto
 
-.PHONY: sqlc-schema sqlc-generate
+.PHONY: sqlc-schema sqlc-generate proto-generate
 
 # sqlc-schema regenerates sqlc_schema/ (gitignored) from migrations/.
 #
@@ -23,3 +24,14 @@ sqlc-schema:
 # stale relative to migrations/, then runs sqlc generate.
 sqlc-generate: sqlc-schema
 	sqlc generate
+
+# proto-generate regenerates the checked-in Go/gRPC bindings for the
+# hand-trimmed, vendored emulator_controller.proto (see that file's header
+# for provenance/scope notes). Requires protoc, protoc-gen-go, and
+# protoc-gen-go-grpc on PATH (e.g. `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`
+# and `go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest`).
+proto-generate:
+	protoc --go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		--proto_path=. \
+		$(EMUGRPC_PROTO_DIR)/emulator_controller.proto

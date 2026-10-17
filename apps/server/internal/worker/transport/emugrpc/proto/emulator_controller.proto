@@ -1,0 +1,72 @@
+// Hand-trimmed subset of the Android Emulator's EmulatorController gRPC
+// service, vendored for mako's video-capture pipeline (see
+// docs/plans — gRPC + hardware-encoded video capture).
+//
+// Source: https://github.com/google/android-emulator-webrtc/blob/master/proto/emulator_controller.proto
+// (mirrors https://android.googlesource.com/platform/prebuilts/android-emulator/+/master/linux-x86_64/lib/emulator_controller.proto)
+// Fetched: 2026-10-17. Upstream license: Apache 2.0, (C) The Android Open
+// Source Project.
+//
+// The upstream file defines dozens of unrelated RPCs (phone/SMS, XR/AR
+// glasses, sensors, battery, GPS, clipboard, ...). This file keeps ONLY the
+// `streamScreenshot` RPC and its direct message dependencies, since that's
+// the only RPC mako's capture pipeline calls. Field numbers are preserved
+// exactly as upstream for wire compatibility — proto3 safely ignores any
+// fields the real emulator sends that aren't declared here. To add another
+// RPC later (e.g. input injection via sendTouch/sendKey), copy the relevant
+// service method and message(s) from the upstream file, preserving field
+// numbers.
+syntax = "proto3";
+
+option go_package = "mako/internal/worker/transport/emugrpc/proto";
+
+package android.emulation.control;
+
+service EmulatorController {
+    // Streams a series of screenshots in the desired format. A new frame is
+    // delivered whenever the device produces a new frame (event-driven, not
+    // polled) — see ImageFormat/Image below for the full semantics as
+    // documented upstream.
+    rpc streamScreenshot(ImageFormat) returns (stream Image) {}
+}
+
+message ImageFormat {
+    enum ImgFormat {
+        PNG = 0;
+        // Each pixel consists of 4 bytes: R, G, B, A.
+        RGBA8888 = 1;
+        RGB888 = 2;
+    }
+
+    // The desired format of the resulting bytes.
+    ImgFormat format = 1;
+
+    // The (desired) width of the image. Omitting this value (or passing in
+    // 0) will result in no scaling, and the width of the actual device will
+    // be used.
+    uint32 width = 3;
+
+    // The (desired) height of the image. Same no-scaling behavior as width
+    // when omitted/0.
+    uint32 height = 4;
+
+    // The (desired) display id of the device. 0 (or omitted) indicates the
+    // main display.
+    uint32 display = 5;
+}
+
+message Image {
+    ImageFormat format = 1;
+
+    // The organization of the pixels in the image buffer is from left to
+    // right and bottom up.
+    bytes image = 4;
+
+    // Monotonically increasing sequence number in the stream. Not
+    // necessarily contiguous — can be used to detect dropped frames.
+    uint32 seq = 5;
+
+    // Unix timestamp in microseconds when the emulator estimates the frame
+    // was generated.
+    uint64 timestampUs = 6;
+}

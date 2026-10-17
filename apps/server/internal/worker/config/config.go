@@ -9,6 +9,7 @@ type Config struct {
 	HomeDir             string
 	AndroidSDKRoot      string
 	AndroidEmulatorPath string
+	FFmpegPath          string
 	StunURL             string
 }
 
@@ -27,6 +28,7 @@ func Load() Config {
 		HomeDir:             homeDir,
 		AndroidSDKRoot:      firstNonEmpty(os.Getenv("MAKO_ANDROID_SDK_ROOT"), os.Getenv("ANDROID_SDK_ROOT"), os.Getenv("ANDROID_HOME")),
 		AndroidEmulatorPath: os.Getenv("MAKO_ANDROID_EMULATOR_PATH"),
+		FFmpegPath:          os.Getenv("MAKO_FFMPEG_PATH"),
 		StunURL:             getenv("STUN_URL", "stun:stun.l.google.com:19302"),
 	}
 }

@@ -16,6 +16,7 @@ type Adapter struct {
 	store          runtime.HandleStore
 	transportStore *transport.Store
 	stunURL        string
+	ffmpegPath     string
 	launchFn       func(string, LaunchRequest) (ProcessHandle, error)
 	stopFn         func(int) error
 }
@@ -45,6 +46,7 @@ func NewAdapter(cfg config.Config, store runtime.HandleStore, transportStore *tr
 		store:          store,
 		transportStore: transportStore,
 		stunURL:        cfg.StunURL,
+		ffmpegPath:     cfg.FFmpegPath,
 		stopFn:         StopProcess,
 	}
 	adapter.launchFn = func(emulatorPath string, req LaunchRequest) (ProcessHandle, error) {
