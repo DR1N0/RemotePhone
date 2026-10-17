@@ -260,7 +260,7 @@ func TestGetInstanceForbiddenForNonOwner(t *testing.T) {
 	}
 	json.Unmarshal(rec.Body.Bytes(), &created)
 
-	inviteToken, _, err := authSvc.CreateRegistrationInvite(context.Background(), mustUserID(t, authSvc, ownerToken), nil, "req-1", nil)
+	inviteToken, _, err := authSvc.CreateRegistrationInvite(context.Background(), mustUserID(t, authSvc, ownerToken), nil, "req-1")
 	if err != nil {
 		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}

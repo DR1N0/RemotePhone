@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"mako/internal/controlplane/audit"
@@ -38,6 +39,13 @@ func NewWorkerLivenessProbe(instanceSvc *instance.Service, placementSelector ins
 // the old process (best-effort — it may just be hung, not dead), spawns a
 // replacement, has the replacement adopt the still-running emulator (no
 // reboot) via AdoptInstance, and persists the new worker PID/base URL.
+//
+// If the worker IS healthy and the instance's observed_state is still
+// "starting", this also syncs it from the worker's own Inspect response:
+// StartManagedInstance only ever writes "starting" (the runtime hasn't
+// finished launching yet at that point in the request), and nothing else
+// updates it afterward — observed_state would otherwise stay "starting"
+// forever even once the runtime is fully up.
 func (p *WorkerLivenessProbe) Reconcile(ctx context.Context, instanceID string) error {
 	inst, err := p.instanceSvc.GetManagedInstanceUnchecked(ctx, instanceID)
 	if err != nil {
@@ -54,6 +62,9 @@ func (p *WorkerLivenessProbe) Reconcile(ctx context.Context, instanceID string) 
 	}
 
 	if err := workerHealthCheck(ctx, inst.RuntimeHandle.WorkerBaseURL); err == nil {
+		if inst.ObservedState == "starting" {
+			p.syncObservedState(ctx, instanceID, inst.RuntimeHandle.WorkerBaseURL, inst.ObservedState)
+		}
 		return nil
 	}
 
@@ -86,4 +97,24 @@ func workerHealthCheck(ctx context.Context, baseURL string) error {
 	// cadence, "still unhealthy this tick" just means try again next tick,
 	// not block the whole reconcile loop waiting.
 	return workerproc.WaitHealthy(ctx, baseURL, workerHealthCheckTimeout)
+}
+
+// syncObservedState asks the worker what it currently thinks instanceID's
+// runtime state is and persists it if different from currentObserved.
+// Best-effort: a failure here just means "try again next tick," same as an
+// unhealthy worker — it must never fail the whole Reconcile call over a
+// housekeeping sync.
+func (p *WorkerLivenessProbe) syncObservedState(ctx context.Context, instanceID, workerBaseURL, currentObserved string) {
+	workerClient := instance.NewHTTPWorkerClient(workerBaseURL)
+	status, err := workerClient.InspectInstance(ctx, instanceID)
+	if err != nil || status.State == "" || status.State == currentObserved {
+		return
+	}
+	var lastError *string
+	if status.LastError != "" {
+		lastError = &status.LastError
+	}
+	if _, err := p.instanceSvc.UpdateObservedState(ctx, instanceID, status.State, lastError); err != nil {
+		log.Printf("reconcile: sync observed state for instance %s failed: %v", instanceID, err)
+	}
 }

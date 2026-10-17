@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -91,7 +92,21 @@ func run() error {
 	// torn down with it — see docs/plans/worker-lifecycle.md. There is no
 	// single shared worker/base URL anymore (MAKO_WORKER_BASE_URL, used
 	// through Phase 3, is retired).
-	workerBinaryPath := envOrDefault("MAKO_WORKER_BINARY_PATH", filepath.Join(filepath.Dir(os.Args[0]), "mako-worker"))
+	//
+	// os.Executable() (not os.Args[0]) because exec.Command requires a path
+	// containing a separator to treat it as relative/absolute rather than a
+	// $PATH lookup: launching this binary as "./mako-controlplane" makes
+	// filepath.Dir(os.Args[0]) == ".", and Join(".", "mako-worker") collapses
+	// to the bare string "mako-worker" — no separator — which exec.Command
+	// then searches $PATH for instead of finding the sibling file.
+	workerBinaryPath := envOrDefault("MAKO_WORKER_BINARY_PATH", "")
+	if workerBinaryPath == "" {
+		selfPath, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("resolve own executable path: %w", err)
+		}
+		workerBinaryPath = filepath.Join(filepath.Dir(selfPath), "mako-worker")
+	}
 	placementSelector := placement.NewSelector(workerproc.OSExecer{}, workerBinaryPath)
 	instanceSvc := instance.NewService(db, placementSelector)
 

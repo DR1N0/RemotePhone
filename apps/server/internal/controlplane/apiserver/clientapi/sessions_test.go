@@ -170,7 +170,7 @@ func TestGetSessionForbiddenForUnrelatedAccountIs404(t *testing.T) {
 	instanceID := createRunningInstance(t, setup.mux, ownerToken)
 	record, _ := createSessionViaHTTP(t, setup.mux, ownerToken, instanceID)
 
-	inviteToken, _, err := setup.authSvc.CreateRegistrationInvite(context.Background(), mustUserID(t, setup.authSvc, ownerToken), nil, "req-1", nil)
+	inviteToken, _, err := setup.authSvc.CreateRegistrationInvite(context.Background(), mustUserID(t, setup.authSvc, ownerToken), nil, "req-1")
 	if err != nil {
 		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}

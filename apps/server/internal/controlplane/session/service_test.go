@@ -94,7 +94,7 @@ func TestCreateSessionIssuesOwnerAttachmentAndCredential(t *testing.T) {
 	}
 	caller := mustAuthenticate(t, authSvc, ownerAccountToken)
 
-	record, attachmentToken, err := sessionSvc.CreateSession(context.Background(), "i1", "owner-client", nil, caller)
+	record, _, attachmentToken, err := sessionSvc.CreateSession(context.Background(), "i1", "owner-client", nil, caller)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestCreateSessionRejectsNonAccountCaller(t *testing.T) {
 	createTestUser(t, db, "owner")
 	createTestInstance(t, db, "i1", "owner")
 
-	_, _, err := sessionSvc.CreateSession(context.Background(), "i1", "client", nil, attachmentCaller("owner", "c1", "s0", "a0"))
+	_, _, _, err := sessionSvc.CreateSession(context.Background(), "i1", "client", nil, attachmentCaller("owner", "c1", "s0", "a0"))
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("CreateSession with attachment-scoped caller = %v, want ErrForbidden", err)
 	}
@@ -128,7 +128,7 @@ func TestCreateSessionRejectsNonOwner(t *testing.T) {
 	createTestUser(t, db, "intruder")
 	createTestInstance(t, db, "i1", "owner")
 
-	_, _, err := sessionSvc.CreateSession(context.Background(), "i1", "client", nil, accountCaller("intruder", "c1"))
+	_, _, _, err := sessionSvc.CreateSession(context.Background(), "i1", "client", nil, accountCaller("intruder", "c1"))
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("CreateSession by non-owner = %v, want ErrForbidden", err)
 	}
@@ -138,25 +138,106 @@ func TestCreateSessionInstanceNotFound(t *testing.T) {
 	sessionSvc, _, db := newTestServices(t)
 	createTestUser(t, db, "owner")
 
-	_, _, err := sessionSvc.CreateSession(context.Background(), "missing", "client", nil, accountCaller("owner", "c1"))
+	_, _, _, err := sessionSvc.CreateSession(context.Background(), "missing", "client", nil, accountCaller("owner", "c1"))
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("CreateSession with missing instance = %v, want ErrSessionNotFound", err)
 	}
 }
 
-func TestCreateSessionConflictsWithActiveSession(t *testing.T) {
+// TestCreateSessionReclaimsDisconnectedOwnerAttachment covers the common
+// case this existing-session path exists for: a crashed/restarted client
+// calling CreateSession again finds its own owner attachment still
+// "active" server-side (disconnect only starts the owner-absence grace
+// period, it doesn't close the session) but disconnected, and should be
+// let back in on that SAME attachment rather than rejected.
+func TestCreateSessionReclaimsDisconnectedOwnerAttachment(t *testing.T) {
 	sessionSvc, authSvc, db := newTestServices(t)
 	createTestUser(t, db, "owner")
 	createTestInstance(t, db, "i1", "owner")
 	token, _ := authSvc.IssueAccountCredential(context.Background(), "owner", "device")
 	caller := mustAuthenticate(t, authSvc, token)
 
-	if _, _, err := sessionSvc.CreateSession(context.Background(), "i1", "client", nil, caller); err != nil {
+	first, firstAttachmentID, firstToken, err := sessionSvc.CreateSession(context.Background(), "i1", "client", nil, caller)
+	if err != nil {
 		t.Fatalf("first CreateSession: %v", err)
 	}
-	_, _, err := sessionSvc.CreateSession(context.Background(), "i1", "client", nil, caller)
-	if !errors.Is(err, ErrSessionConflict) {
-		t.Fatalf("second CreateSession = %v, want ErrSessionConflict", err)
+	ownerCaller := mustAuthenticate(t, authSvc, firstToken)
+	if _, err := sessionSvc.DisconnectAttachment(context.Background(), first.ID, firstAttachmentID, ownerCaller, testAuditContext()); err != nil {
+		t.Fatalf("DisconnectAttachment: %v", err)
+	}
+
+	second, secondAttachmentID, secondToken, err := sessionSvc.CreateSession(context.Background(), "i1", "client", nil, caller)
+	if err != nil {
+		t.Fatalf("second CreateSession (reclaim): %v", err)
+	}
+	if second.ID != first.ID {
+		t.Errorf("reclaim created a new session %s, want the same session %s", second.ID, first.ID)
+	}
+	if secondAttachmentID != firstAttachmentID {
+		t.Errorf("reclaim used attachment %s, want the same owner attachment %s", secondAttachmentID, firstAttachmentID)
+	}
+	if len(second.Attachments) != 1 {
+		t.Fatalf("reclaim attachments = %+v, want still exactly one (the reclaimed owner)", second.Attachments)
+	}
+	if second.Attachments[0].Status != "connected" {
+		t.Errorf("reclaimed owner attachment status = %q, want connected", second.Attachments[0].Status)
+	}
+	if second.OwnerAbsenceDeadline != nil {
+		t.Errorf("reclaim left OwnerAbsenceDeadline = %v, want cleared", second.OwnerAbsenceDeadline)
+	}
+
+	authed := mustAuthenticate(t, authSvc, secondToken)
+	if authed.Scope != "attachment" || authed.AttachmentID == nil || *authed.AttachmentID != firstAttachmentID {
+		t.Errorf("Authenticate(reclaim token) = %+v, want attachment scope bound to %s", authed, firstAttachmentID)
+	}
+}
+
+// TestCreateSessionJoinsAsParticipantWhenOwnerStillConnected covers genuine
+// simultaneous multi-device access: if the owner attachment is still
+// actively connected (not a stale leftover), a second CreateSession call
+// from the same owner must not displace it — it should get its own new
+// participant attachment on the same session instead.
+func TestCreateSessionJoinsAsParticipantWhenOwnerStillConnected(t *testing.T) {
+	sessionSvc, authSvc, db := newTestServices(t)
+	createTestUser(t, db, "owner")
+	createTestInstance(t, db, "i1", "owner")
+	token, _ := authSvc.IssueAccountCredential(context.Background(), "owner", "device")
+	caller := mustAuthenticate(t, authSvc, token)
+
+	first, firstAttachmentID, _, err := sessionSvc.CreateSession(context.Background(), "i1", "client-1", nil, caller)
+	if err != nil {
+		t.Fatalf("first CreateSession: %v", err)
+	}
+
+	second, secondAttachmentID, secondToken, err := sessionSvc.CreateSession(context.Background(), "i1", "client-2", nil, caller)
+	if err != nil {
+		t.Fatalf("second CreateSession (join as participant): %v", err)
+	}
+	if second.ID != first.ID {
+		t.Errorf("join created a new session %s, want the same session %s", second.ID, first.ID)
+	}
+	if secondAttachmentID == firstAttachmentID {
+		t.Error("join reused the owner's attachment instead of creating a new one")
+	}
+	if len(second.Attachments) != 2 {
+		t.Fatalf("attachments after join = %+v, want owner + new participant", second.Attachments)
+	}
+	var joined *AttachmentRecord
+	for i := range second.Attachments {
+		if second.Attachments[i].ID == secondAttachmentID {
+			joined = &second.Attachments[i]
+		}
+	}
+	if joined == nil {
+		t.Fatalf("joined attachment %s not found in %+v", secondAttachmentID, second.Attachments)
+	}
+	if joined.Role != "participant" || joined.Status != "connected" || joined.ClientID != "client-2" {
+		t.Errorf("joined attachment = %+v, want connected participant for client-2", joined)
+	}
+
+	authed := mustAuthenticate(t, authSvc, secondToken)
+	if authed.Scope != "attachment" || authed.AttachmentID == nil || *authed.AttachmentID != secondAttachmentID {
+		t.Errorf("Authenticate(join token) = %+v, want attachment scope bound to %s", authed, secondAttachmentID)
 	}
 }
 
@@ -171,7 +252,7 @@ func bootstrapSession(t *testing.T, sessionSvc *Service, authSvc *auth.Service, 
 		t.Fatalf("IssueAccountCredential: %v", err)
 	}
 	ownerCaller := mustAuthenticate(t, authSvc, ownerToken)
-	record, attachmentToken, err := sessionSvc.CreateSession(context.Background(), "i1", "owner-client", nil, ownerCaller)
+	record, _, attachmentToken, err := sessionSvc.CreateSession(context.Background(), "i1", "owner-client", nil, ownerCaller)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

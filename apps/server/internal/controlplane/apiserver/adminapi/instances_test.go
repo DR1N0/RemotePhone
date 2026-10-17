@@ -131,7 +131,7 @@ func TestAdminInstanceLifecycleCrossOwner(t *testing.T) {
 	authSvc, instanceSvc, adminSvc, secretPath := newTestAdminInstanceSetup(t)
 	adminToken := setupTestAdminForAdminAPI(t, authSvc, secretPath, "admin1", "correct horse battery staple")
 
-	inviteToken, _, err := authSvc.CreateRegistrationInvite(context.Background(), mustAdminUserID(t, authSvc, adminToken), nil, "req-1", nil)
+	inviteToken, _, err := authSvc.CreateRegistrationInvite(context.Background(), mustAdminUserID(t, authSvc, adminToken), nil, "req-1")
 	if err != nil {
 		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestAdminListInstancesSpansOwners(t *testing.T) {
 	authSvc, instanceSvc, adminSvc, secretPath := newTestAdminInstanceSetup(t)
 	adminToken := setupTestAdminForAdminAPI(t, authSvc, secretPath, "admin1", "correct horse battery staple")
 
-	inviteToken, _, err := authSvc.CreateRegistrationInvite(context.Background(), mustAdminUserID(t, authSvc, adminToken), nil, "req-1", nil)
+	inviteToken, _, err := authSvc.CreateRegistrationInvite(context.Background(), mustAdminUserID(t, authSvc, adminToken), nil, "req-1")
 	if err != nil {
 		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestAdminInstanceRoutesRejectNonAdmin(t *testing.T) {
 	authSvc, instanceSvc, adminSvc, secretPath := newTestAdminInstanceSetup(t)
 	adminToken := setupTestAdminForAdminAPI(t, authSvc, secretPath, "admin1", "correct horse battery staple")
 
-	inviteToken, _, err := authSvc.CreateRegistrationInvite(context.Background(), mustAdminUserID(t, authSvc, adminToken), nil, "req-1", nil)
+	inviteToken, _, err := authSvc.CreateRegistrationInvite(context.Background(), mustAdminUserID(t, authSvc, adminToken), nil, "req-1")
 	if err != nil {
 		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}

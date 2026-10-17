@@ -192,14 +192,24 @@ func (s *Service) GetSessionUnchecked(ctx context.Context, sessionID string) (Se
 // credential — all in one transaction, so a half-created session can never
 // be observed. ownerAbsenceTimeoutMs, if given, is clamped to
 // [ownerAbsenceTimeoutMin, ownerAbsenceTimeoutMax].
+//
+// If a non-closed session already exists for instanceID, the caller (who
+// must already own the instance, checked below — so this is always the
+// same owner reconnecting, never a different account) is let back in
+// instead of being hard-rejected: see joinExistingSessionTx. Returns the
+// attachmentID the returned token actually belongs to alongside the
+// session record and token, since that attachment might be the existing
+// owner (reclaimed) or a brand new participant, not always a freshly
+// created owner attachment as it was before this existing-session path
+// existed.
 func (s *Service) CreateSession(
 	ctx context.Context,
 	instanceID, ownerClientID string,
 	ownerAbsenceTimeoutMs *int64,
 	caller auth.AuthenticatedUser,
-) (SessionRecord, string, error) {
+) (SessionRecord, string, string, error) {
 	if caller.Scope != "account" {
-		return SessionRecord{}, "", fmt.Errorf("%w: session creation requires an account credential", ErrForbidden)
+		return SessionRecord{}, "", "", fmt.Errorf("%w: session creation requires an account credential", ErrForbidden)
 	}
 
 	var clampedTimeout sql.NullInt64
@@ -208,9 +218,9 @@ func (s *Service) CreateSession(
 	}
 
 	sessionID := uuid.NewString()
-	attachmentID := uuid.NewString()
+	ownerAttachmentID := uuid.NewString()
 	var result SessionRecord
-	var token string
+	var resultAttachmentID, token string
 
 	err := s.withTx(ctx, func(q *repo.Queries) error {
 		instance, err := q.GetInstanceByID(ctx, instanceID)
@@ -229,9 +239,15 @@ func (s *Service) CreateSession(
 			return fmt.Errorf("list sessions for instance: %w", err)
 		}
 		for _, sess := range existing {
-			if sess.Status != "closed" {
-				return fmt.Errorf("%w: active session already exists for instance %s", ErrSessionConflict, instanceID)
+			if sess.Status == "closed" {
+				continue
 			}
+			record, joinedAttachmentID, tok, err := s.joinExistingSessionTx(ctx, q, sess, ownerClientID, caller)
+			if err != nil {
+				return err
+			}
+			result, resultAttachmentID, token = record, joinedAttachmentID, tok
+			return nil
 		}
 
 		if _, err := q.CreateSession(ctx, repo.CreateSessionParams{
@@ -242,7 +258,7 @@ func (s *Service) CreateSession(
 			return fmt.Errorf("create session: %w", err)
 		}
 		if _, err := q.CreateAttachment(ctx, repo.CreateAttachmentParams{
-			ID:        attachmentID,
+			ID:        ownerAttachmentID,
 			SessionID: sessionID,
 			ClientID:  ownerClientID,
 			UserID:    sql.NullString{String: caller.UserID, Valid: true},
@@ -253,11 +269,12 @@ func (s *Service) CreateSession(
 		}
 
 		expiresAt := s.now().Add(attachmentCredentialTTL)
-		tok, err := s.authSvc.IssueAttachmentCredentialTx(ctx, q, caller.UserID, sessionID, attachmentID, expiresAt)
+		tok, err := s.authSvc.IssueAttachmentCredentialTx(ctx, q, caller.UserID, sessionID, ownerAttachmentID, expiresAt)
 		if err != nil {
 			return fmt.Errorf("issue attachment credential: %w", err)
 		}
 		token = tok
+		resultAttachmentID = ownerAttachmentID
 
 		record, err := s.getSessionRecordTx(ctx, q, sessionID)
 		if err != nil {
@@ -267,9 +284,91 @@ func (s *Service) CreateSession(
 		return nil
 	})
 	if err != nil {
-		return SessionRecord{}, "", err
+		return SessionRecord{}, "", "", err
 	}
-	return result, token, nil
+	return result, resultAttachmentID, token, nil
+}
+
+// joinExistingSessionTx lets the instance owner back into their own
+// still-active session instead of hard-failing with ErrSessionConflict.
+// The common case is a stale session left behind by a crashed/restarted
+// client (disconnecting only starts the owner-absence grace period, it
+// doesn't close the session — see DisconnectAttachment), handled by
+// reclaiming the owner attachment: a fresh credential, marked connected
+// again, owner-absence deadline cleared — the same end state
+// ResumeAttachment produces, but reachable without that now-lost
+// attachment credential.
+//
+// If the owner attachment is genuinely still connected elsewhere (real
+// simultaneous access, not a stale leftover), a new participant attachment
+// is created on the same session instead of displacing it, supporting
+// multi-device viewing.
+func (s *Service) joinExistingSessionTx(
+	ctx context.Context,
+	q *repo.Queries,
+	sess repo.Session,
+	clientID string,
+	caller auth.AuthenticatedUser,
+) (SessionRecord, string, string, error) {
+	attachments, err := q.ListAttachmentsForSession(ctx, sess.ID)
+	if err != nil {
+		return SessionRecord{}, "", "", fmt.Errorf("list attachments for session: %w", err)
+	}
+	var owner *repo.Attachment
+	for i := range attachments {
+		if attachments[i].Role == "owner" {
+			owner = &attachments[i]
+			break
+		}
+	}
+	if owner == nil {
+		// Every session gets an owner attachment at creation — this
+		// shouldn't happen. Fall back to the original conflict error
+		// rather than joining a session with no owner to reclaim or
+		// compare against.
+		return SessionRecord{}, "", "", fmt.Errorf("%w: active session already exists for instance %s", ErrSessionConflict, sess.InstanceID)
+	}
+
+	expiresAt := s.now().Add(attachmentCredentialTTL)
+
+	if owner.Status != "connected" {
+		tok, err := s.authSvc.IssueAttachmentCredentialTx(ctx, q, caller.UserID, sess.ID, owner.ID, expiresAt)
+		if err != nil {
+			return SessionRecord{}, "", "", fmt.Errorf("issue attachment credential: %w", err)
+		}
+		if err := q.UpdateAttachmentStatus(ctx, repo.UpdateAttachmentStatusParams{Status: "connected", ID: owner.ID}); err != nil {
+			return SessionRecord{}, "", "", fmt.Errorf("update attachment status: %w", err)
+		}
+		if err := q.ClearOwnerAbsenceDeadline(ctx, sess.ID); err != nil {
+			return SessionRecord{}, "", "", fmt.Errorf("clear owner absence deadline: %w", err)
+		}
+		record, err := s.getSessionRecordTx(ctx, q, sess.ID)
+		if err != nil {
+			return SessionRecord{}, "", "", err
+		}
+		return record, owner.ID, tok, nil
+	}
+
+	participantID := uuid.NewString()
+	if _, err := q.CreateAttachment(ctx, repo.CreateAttachmentParams{
+		ID:        participantID,
+		SessionID: sess.ID,
+		ClientID:  clientID,
+		UserID:    sql.NullString{String: caller.UserID, Valid: true},
+		Role:      "participant",
+		Status:    "connected",
+	}); err != nil {
+		return SessionRecord{}, "", "", fmt.Errorf("create participant attachment: %w", err)
+	}
+	tok, err := s.authSvc.IssueAttachmentCredentialTx(ctx, q, caller.UserID, sess.ID, participantID, expiresAt)
+	if err != nil {
+		return SessionRecord{}, "", "", fmt.Errorf("issue attachment credential: %w", err)
+	}
+	record, err := s.getSessionRecordTx(ctx, q, sess.ID)
+	if err != nil {
+		return SessionRecord{}, "", "", err
+	}
+	return record, participantID, tok, nil
 }
 
 // ConnectAttachment marks attachmentID "connected". No caller-authorization

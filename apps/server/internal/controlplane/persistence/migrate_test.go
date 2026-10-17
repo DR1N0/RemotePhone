@@ -39,3 +39,23 @@ func TestApplyMigrationsDropsWorkersAndSettings(t *testing.T) {
 		t.Error("instances table missing after migrations")
 	}
 }
+
+// TestApplyMigrationsIsIdempotent covers restarting the server against its
+// existing database (not just a fresh one) — the common case that broke
+// before schema_migrations existed, since every CREATE TABLE/INDEX
+// statement would fail the second time it ran.
+func TestApplyMigrationsIsIdempotent(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+
+	if err := ApplyMigrations(db); err != nil {
+		t.Fatalf("ApplyMigrations (first call): %v", err)
+	}
+	if err := ApplyMigrations(db); err != nil {
+		t.Fatalf("ApplyMigrations (second call, simulating a restart): %v", err)
+	}
+}

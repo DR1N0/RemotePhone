@@ -405,6 +405,54 @@ func (s *Service) UpdateRuntimeHandle(ctx context.Context, id string, handle run
 	return result, nil
 }
 
+func nullStringFromPtr(v *string) sql.NullString {
+	if v == nil {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: *v, Valid: true}
+}
+
+// UpdateObservedState persists a freshly-observed state for id, leaving
+// desired_state and the runtime handle untouched — the counterpart to
+// UpdateRuntimeHandle (which does the reverse: touches the handle, leaves
+// observed_state as-is). Used by WorkerLivenessProbe to sync observed_state
+// once a worker reports the runtime has actually come up, since
+// StartManagedInstance itself only ever writes "starting" (the worker
+// hasn't finished launching yet at that point) and nothing updates it
+// afterward otherwise — not routed through audit.Record: this is routine
+// reconciliation sync, not an administrative action, same reasoning as
+// WorkerLivenessProbe's own healthy-no-op path going unaudited.
+func (s *Service) UpdateObservedState(ctx context.Context, id, observedState string, lastError *string) (ManagedInstance, error) {
+	var result ManagedInstance
+	err := s.withTx(ctx, func(q *repo.Queries) error {
+		row, err := q.GetInstanceByID(ctx, id)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: %s", ErrNotFound, id)
+			}
+			return fmt.Errorf("get instance: %w", err)
+		}
+		if err := q.UpdateInstanceRuntime(ctx, repo.UpdateInstanceRuntimeParams{
+			ObservedState:     observedState,
+			RuntimeHandleJson: row.RuntimeHandleJson,
+			LastError:         nullStringFromPtr(lastError),
+			ID:                id,
+		}); err != nil {
+			return fmt.Errorf("update instance runtime: %w", err)
+		}
+		updated, err := q.GetInstanceByID(ctx, id)
+		if err != nil {
+			return fmt.Errorf("reload instance: %w", err)
+		}
+		result, err = toManagedInstance(updated)
+		return err
+	})
+	if err != nil {
+		return ManagedInstance{}, err
+	}
+	return result, nil
+}
+
 func (s *Service) GetManagedInstance(ctx context.Context, id, callerUserID string) (ManagedInstance, error) {
 	row, err := s.getRequiredInstance(ctx, id)
 	if err != nil {

@@ -121,7 +121,7 @@ func TestReconcileClosesSessionPastDeadlineAndTearsDownTransport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
-	record, _, err := sessionSvc.CreateSession(context.Background(), "i1", "owner-client", nil, *ownerCaller)
+	record, _, _, err := sessionSvc.CreateSession(context.Background(), "i1", "owner-client", nil, *ownerCaller)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestReconcileSkipsSessionNotYetPastDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
-	record, _, err := sessionSvc.CreateSession(context.Background(), "i1", "owner-client", nil, *ownerCaller)
+	record, _, _, err := sessionSvc.CreateSession(context.Background(), "i1", "owner-client", nil, *ownerCaller)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

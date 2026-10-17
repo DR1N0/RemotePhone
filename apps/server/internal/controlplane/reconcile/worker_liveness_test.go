@@ -26,6 +26,9 @@ import (
 type fakeWorker struct {
 	templates   []runtime.Template
 	startHandle runtime.InstanceHandle
+	// inspectState, if non-empty, is returned by GET /v1/instances/{id} —
+	// defaults to empty (interpreted by syncObservedState as "no update").
+	inspectState string
 }
 
 func (w *fakeWorker) handler() http.Handler {
@@ -36,6 +39,9 @@ func (w *fakeWorker) handler() http.Handler {
 	})
 	mux.HandleFunc("POST /v1/instances/start", func(wr http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(wr).Encode(workerapi.StartInstanceResponse{State: "running", Handle: w.startHandle})
+	})
+	mux.HandleFunc("GET /v1/instances/{id}", func(wr http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(wr).Encode(workerapi.InspectInstanceResponse{State: w.inspectState, Handle: w.startHandle})
 	})
 	mux.HandleFunc("POST /v1/instances/{id}/adopt", func(wr http.ResponseWriter, r *http.Request) {
 		var req workerapi.AdoptInstanceRequest
@@ -201,6 +207,68 @@ func TestWorkerLivenessReconcileNoopsOnNonRunningInstance(t *testing.T) {
 	}
 	if len(execer.Processes) != spawnCountAfterCreate {
 		t.Errorf("Processes = %d, want %d (reconcile on a never-started instance must not spawn)", len(execer.Processes), spawnCountAfterCreate)
+	}
+}
+
+// TestWorkerLivenessReconcileSyncsStuckObservedState covers the bug this
+// sync exists to fix: StartManagedInstance only ever writes observed_state
+// "starting" (the runtime hasn't finished launching yet at that point),
+// and prior to this, nothing else ever updated it — it stayed "starting"
+// forever even once the emulator was fully up and usable.
+func TestWorkerLivenessReconcileSyncsStuckObservedState(t *testing.T) {
+	probe, instanceSvc, worker, _, db := newTestWorkerLivenessSetup(t)
+	createTestUserForWorkerLiveness(t, db, "owner")
+	started := createAndStartTestInstance(t, instanceSvc, worker)
+
+	// Force the stuck-at-"starting" scenario regardless of what this fake
+	// worker's own /start response happens to say, so this test exercises
+	// the sync path specifically rather than depending on that detail.
+	if _, err := instanceSvc.UpdateObservedState(context.Background(), started.ID, "starting", nil); err != nil {
+		t.Fatalf("UpdateObservedState (test setup): %v", err)
+	}
+
+	worker.inspectState = "running"
+	if err := probe.Reconcile(context.Background(), started.ID); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	synced, err := instanceSvc.GetManagedInstanceUnchecked(context.Background(), started.ID)
+	if err != nil {
+		t.Fatalf("GetManagedInstanceUnchecked: %v", err)
+	}
+	if synced.ObservedState != "running" {
+		t.Errorf("ObservedState = %q after sync, want running", synced.ObservedState)
+	}
+	// The runtime handle itself must be untouched by this sync — only
+	// UpdateRuntimeHandle (a different code path) should ever change it.
+	if synced.RuntimeHandle.WorkerPID != started.RuntimeHandle.WorkerPID {
+		t.Errorf("WorkerPID changed by an observed-state-only sync: %d -> %d", started.RuntimeHandle.WorkerPID, synced.RuntimeHandle.WorkerPID)
+	}
+}
+
+// TestWorkerLivenessReconcileLeavesObservedStateAloneWhenWorkerReportsNothingNew
+// covers the "worker is healthy but hasn't finished booting yet" tick: the
+// sync must not thrash the DB or clobber state based on an empty/unchanged
+// Inspect response.
+func TestWorkerLivenessReconcileLeavesObservedStateAloneWhenWorkerReportsNothingNew(t *testing.T) {
+	probe, instanceSvc, worker, _, db := newTestWorkerLivenessSetup(t)
+	createTestUserForWorkerLiveness(t, db, "owner")
+	started := createAndStartTestInstance(t, instanceSvc, worker)
+	if _, err := instanceSvc.UpdateObservedState(context.Background(), started.ID, "starting", nil); err != nil {
+		t.Fatalf("UpdateObservedState (test setup): %v", err)
+	}
+
+	worker.inspectState = "" // worker has nothing new to report
+	if err := probe.Reconcile(context.Background(), started.ID); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	unchanged, err := instanceSvc.GetManagedInstanceUnchecked(context.Background(), started.ID)
+	if err != nil {
+		t.Fatalf("GetManagedInstanceUnchecked: %v", err)
+	}
+	if unchanged.ObservedState != "starting" {
+		t.Errorf("ObservedState = %q, want unchanged starting", unchanged.ObservedState)
 	}
 }
 

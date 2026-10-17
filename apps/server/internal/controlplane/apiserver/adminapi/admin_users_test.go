@@ -77,7 +77,7 @@ func (s fullAdminTestSetup) mux() *http.ServeMux {
 
 func (s fullAdminTestSetup) registerUser(t *testing.T, adminToken, username string) (userID, token string) {
 	t.Helper()
-	inviteToken, _, err := s.authSvc.CreateRegistrationInvite(context.Background(), mustAdminUserID(t, s.authSvc, adminToken), nil, "req-"+username, nil)
+	inviteToken, _, err := s.authSvc.CreateRegistrationInvite(context.Background(), mustAdminUserID(t, s.authSvc, adminToken), nil, "req-"+username)
 	if err != nil {
 		t.Fatalf("CreateRegistrationInvite: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestAdminBanClosesOwnedSessionAndUnbanRestoresLogin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
-	record, _, err := s.sessionSvc.CreateSession(context.Background(), created.ID, "owner-client", nil, *ownerCaller)
+	record, _, _, err := s.sessionSvc.CreateSession(context.Background(), created.ID, "owner-client", nil, *ownerCaller)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestAdminRevokeGuestAttachmentRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
-	record, _, err := s.sessionSvc.CreateSession(context.Background(), created.ID, "owner-client", nil, *ownerCaller)
+	record, _, _, err := s.sessionSvc.CreateSession(context.Background(), created.ID, "owner-client", nil, *ownerCaller)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

@@ -86,7 +86,7 @@ func bootstrapOwnedSession(t *testing.T, authSvc *auth.Service, sessionSvc *sess
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
-	record, _, err := sessionSvc.CreateSession(context.Background(), instanceID, ownerID+"-client", nil, *ownerCaller)
+	record, _, _, err := sessionSvc.CreateSession(context.Background(), instanceID, ownerID+"-client", nil, *ownerCaller)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

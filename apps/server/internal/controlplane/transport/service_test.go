@@ -213,7 +213,7 @@ func bootstrapRunningSession(t *testing.T, db *sql.DB, sessionSvc *session.Servi
 		t.Fatalf("StartManagedInstance: %v", err)
 	}
 
-	sessionRecord, _, err := sessionSvc.CreateSession(ctx, created.ID, "owner-client", nil, ownerCaller)
+	sessionRecord, _, _, err := sessionSvc.CreateSession(ctx, created.ID, "owner-client", nil, ownerCaller)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

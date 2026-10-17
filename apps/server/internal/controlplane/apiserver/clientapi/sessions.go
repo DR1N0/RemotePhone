@@ -70,12 +70,17 @@ func RegisterSessionRoutes(mux *http.ServeMux, sessionSvc *session.Service, tran
 			middleware.WriteJSONError(w, http.StatusBadRequest, "instanceId and ownerClientId are required")
 			return
 		}
-		record, token, err := sessionSvc.CreateSession(r.Context(), body.InstanceID, body.OwnerClientID, body.OwnerAbsenceTimeoutMs, *caller)
+		record, attachmentID, token, err := sessionSvc.CreateSession(r.Context(), body.InstanceID, body.OwnerClientID, body.OwnerAbsenceTimeoutMs, *caller)
 		if err != nil {
 			writeSessionError(w, err)
 			return
 		}
-		middleware.WriteJSON(w, http.StatusCreated, map[string]any{"session": record, "attachmentToken": token})
+		// attachmentId is explicit, not left for the caller to infer from
+		// session.attachments: CreateSession can now return either the
+		// owner attachment (fresh or reclaimed) or a new participant
+		// attachment when the owner is already connected elsewhere — see
+		// session.Service.CreateSession's doc comment.
+		middleware.WriteJSON(w, http.StatusCreated, map[string]any{"session": record, "attachmentId": attachmentID, "attachmentToken": token})
 	}))))
 
 	mux.HandleFunc("POST /api/v1/sessions/{id}/join", func(w http.ResponseWriter, r *http.Request) {
