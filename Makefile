@@ -60,6 +60,11 @@ run: ## Run both frontend and worker applications
 	trap 'echo "Stopping..."; kill $$WORKER $$FRONTEND 2>/dev/null' INT TERM; \
 	wait $$WORKER $$FRONTEND
 
+.PHONY: run-client
+run-client: ## Run the Flutter client app on macOS
+	@echo "Running client..."
+	@cd apps/client && flutter run -d macos
+
 .PHONY: build-admin
 build-admin: ## Build admin frontend to apps/admin/dist
 	cd apps/admin && npm run build
