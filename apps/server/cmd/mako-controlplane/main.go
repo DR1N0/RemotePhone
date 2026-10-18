@@ -156,7 +156,7 @@ func run() error {
 
 	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc, instanceSvc, adminSvc, transportSvc)}
 	clientSrv := &http.Server{
-		Addr:      "127.0.0.1:3000",
+		Addr:      envOrDefault("MAKO_CLIENT_ADDR", "127.0.0.1:3000"),
 		Handler:   newClientMux(svc, instanceSvc, sessionSvc, transportSvc),
 		TLSConfig: &tls.Config{Certificates: []tls.Certificate{tlsCert}},
 	}
