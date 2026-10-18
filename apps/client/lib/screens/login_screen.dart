@@ -1,9 +1,18 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import 'register_screen.dart';
+
+// On Android, "127.0.0.1" from inside the emulator/device is itself, not
+// the host machine — 10.0.2.2 is the emulator's standard host-loopback
+// alias. A real phone instead needs the host's real LAN IP (not handled
+// here yet — see the mDNS discovery work planned for that step).
+String _defaultBaseUrl() =>
+    Platform.isAndroid ? 'https://10.0.2.2:3000' : 'https://127.0.0.1:3000';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -14,8 +23,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _baseUrlController =
-      TextEditingController(text: 'https://127.0.0.1:3000');
+  final _baseUrlController = TextEditingController(text: _defaultBaseUrl());
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _submitting = false;
