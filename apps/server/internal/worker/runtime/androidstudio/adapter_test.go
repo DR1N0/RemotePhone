@@ -1,0 +1,206 @@
+package androidstudio
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"mako/internal/worker/config"
+	"mako/internal/worker/runtime"
+)
+
+// setupFakeAVD creates a minimal AVD directory structure under a temp home
+// so DiscoverTemplates (the real function, not a fake) can find it — more
+// realistic than mocking template discovery, and exercises the same code
+// path Start actually uses. Returns the temp home and the AVD's content
+// directory.
+func setupFakeAVD(t *testing.T, avdName string, withPristineUserdata bool) (homeDir, avdPath string) {
+	t.Helper()
+	homeDir = t.TempDir()
+	avdDir := filepath.Join(homeDir, ".android", "avd")
+	if err := os.MkdirAll(avdDir, 0755); err != nil {
+		t.Fatalf("mkdir avd dir: %v", err)
+	}
+	avdPath = filepath.Join(homeDir, avdName+".avd")
+	if err := os.MkdirAll(avdPath, 0755); err != nil {
+		t.Fatalf("mkdir avd content dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(avdDir, avdName+".ini"), []byte("path="+avdPath+"\n"), 0644); err != nil {
+		t.Fatalf("write avd ini: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(avdPath, "config.ini"), []byte("tag.id=google_apis_playstore\n"), 0644); err != nil {
+		t.Fatalf("write config.ini: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(avdPath, "userdata-qemu.img"), []byte("live-state"), 0644); err != nil {
+		t.Fatalf("write userdata-qemu.img: %v", err)
+	}
+	if withPristineUserdata {
+		if err := os.WriteFile(filepath.Join(avdPath, "userdata.img"), []byte("pristine"), 0644); err != nil {
+			t.Fatalf("write userdata.img: %v", err)
+		}
+	}
+	// ResolveEmulatorBinary just needs a stat-able file at the configured
+	// explicit path — Start's fake launchFn below never actually execs it.
+	emulatorPath := filepath.Join(homeDir, "fake-emulator")
+	if err := os.WriteFile(emulatorPath, []byte(""), 0755); err != nil {
+		t.Fatalf("write fake emulator: %v", err)
+	}
+	return homeDir, avdPath
+}
+
+func newTestAdapter(homeDir, dataRoot string) *Adapter {
+	adapter := NewAdapter(config.Config{
+		HomeDir:             homeDir,
+		AndroidEmulatorPath: filepath.Join(homeDir, "fake-emulator"),
+		InstanceDataRoot:    dataRoot,
+	}, runtime.NewMemoryHandleStore(), nil)
+	adapter.launchFn = func(_ string, _ LaunchRequest) (ProcessHandle, error) {
+		return execProcess{pid: 4242}, nil
+	}
+	return adapter
+}
+
+func TestStartClonesTemplateIntoANewIndependentlyRegisteredInstanceAVD(t *testing.T) {
+	avdName := "test-avd"
+	homeDir, avdPath := setupFakeAVD(t, avdName, true)
+	dataRoot := t.TempDir()
+	adapter := newTestAdapter(homeDir, dataRoot)
+
+	var capturedReq LaunchRequest
+	adapter.launchFn = func(_ string, req LaunchRequest) (ProcessHandle, error) {
+		capturedReq = req
+		return execProcess{pid: 4242}, nil
+	}
+
+	handle, err := adapter.Start(runtime.StartRequest{
+		InstanceID:   "instance-1",
+		RuntimeClass: RuntimeClass,
+		TemplateID:   "macos-android-studio:" + avdName,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	wantAVDName := "mako_instance_instance_1"
+	if capturedReq.AVDName != wantAVDName {
+		t.Errorf("LaunchRequest.AVDName = %q, want %q (per-instance AVD, not the shared template's)", capturedReq.AVDName, wantAVDName)
+	}
+
+	// The new AVD must actually be registered (a .ini pointing at its
+	// content dir) — this is what makes `-avd <name>` resolvable at all.
+	iniPath := filepath.Join(homeDir, ".android", "avd", wantAVDName+".ini")
+	registered, err := readIniFile(iniPath)
+	if err != nil {
+		t.Fatalf("instance AVD was not registered: %v", err)
+	}
+	wantContentDir := filepath.Join(dataRoot, wantAVDName+".avd")
+	if registered["path"] != wantContentDir {
+		t.Errorf("registered path = %q, want %q", registered["path"], wantContentDir)
+	}
+	if handle.DataDir != wantContentDir {
+		t.Errorf("InstanceHandle.DataDir = %q, want %q", handle.DataDir, wantContentDir)
+	}
+
+	// The clone must actually carry the template's config + seed userdata,
+	// not an empty directory the emulator would fail to boot from.
+	if got, err := os.ReadFile(filepath.Join(wantContentDir, "config.ini")); err != nil || string(got) != "tag.id=google_apis_playstore\n" {
+		t.Errorf("cloned config.ini = %q, err %v, want copied from template", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(wantContentDir, "userdata-qemu.img")); err != nil || string(got) != "pristine" {
+		t.Errorf("seeded userdata-qemu.img = %q, err %v, want pristine userdata.img contents", got, err)
+	}
+
+	// The template's own AVD must never be touched.
+	if got, err := os.ReadFile(filepath.Join(avdPath, "userdata-qemu.img")); err != nil || string(got) != "live-state" {
+		t.Errorf("template AVD's own userdata-qemu.img changed: %q, err %v", got, err)
+	}
+}
+
+func TestStartUsesDistinctAVDsForDifferentInstancesOfSameTemplate(t *testing.T) {
+	avdName := "shared-template"
+	homeDir, _ := setupFakeAVD(t, avdName, true)
+	dataRoot := t.TempDir()
+	adapter := newTestAdapter(homeDir, dataRoot)
+
+	templateID := "macos-android-studio:" + avdName
+	handleA, err := adapter.Start(runtime.StartRequest{InstanceID: "instance-a", RuntimeClass: RuntimeClass, TemplateID: templateID})
+	if err != nil {
+		t.Fatalf("Start instance-a: %v", err)
+	}
+	handleB, err := adapter.Start(runtime.StartRequest{InstanceID: "instance-b", RuntimeClass: RuntimeClass, TemplateID: templateID})
+	if err != nil {
+		t.Fatalf("Start instance-b: %v", err)
+	}
+
+	if handleA.DataDir == handleB.DataDir {
+		t.Fatalf("two instances of the same template got the same AVD content dir: %q", handleA.DataDir)
+	}
+
+	// Diverge instance-a's data and confirm instance-b (and the template)
+	// are unaffected — the real-world proof this whole feature exists for.
+	if err := os.WriteFile(filepath.Join(handleA.DataDir, "userdata-qemu.img"), []byte("diverged-a"), 0644); err != nil {
+		t.Fatalf("simulate divergence: %v", err)
+	}
+	bData, err := os.ReadFile(filepath.Join(handleB.DataDir, "userdata-qemu.img"))
+	if err != nil || string(bData) != "pristine" {
+		t.Errorf("instance-b userdata-qemu.img = %q, err %v, want untouched seed contents", bData, err)
+	}
+}
+
+func TestStartReusesExistingInstanceAVDWithoutReseedingOnRespawn(t *testing.T) {
+	avdName := "test-avd"
+	homeDir, _ := setupFakeAVD(t, avdName, true)
+	dataRoot := t.TempDir()
+	adapter := newTestAdapter(homeDir, dataRoot)
+
+	req := runtime.StartRequest{InstanceID: "instance-1", RuntimeClass: RuntimeClass, TemplateID: "macos-android-studio:" + avdName}
+	first, err := adapter.Start(req)
+	if err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+
+	// Simulate the instance having diverged from its seed while running.
+	userdataPath := filepath.Join(first.DataDir, "userdata-qemu.img")
+	if err := os.WriteFile(userdataPath, []byte("diverged-after-boot"), 0644); err != nil {
+		t.Fatalf("simulate divergence: %v", err)
+	}
+
+	// A worker respawn/adopt cycle calls Start again for the same instance.
+	second, err := adapter.Start(req)
+	if err != nil {
+		t.Fatalf("second Start (respawn): %v", err)
+	}
+	if second.DataDir != first.DataDir {
+		t.Fatalf("respawn got a different AVD dir: %q vs %q", second.DataDir, first.DataDir)
+	}
+	got, err := os.ReadFile(userdataPath)
+	if err != nil || string(got) != "diverged-after-boot" {
+		t.Errorf("respawn re-seeded/clobbered diverged data: %q, err %v", got, err)
+	}
+}
+
+func TestResolveSeedUserdataPathPrefersPristineUserdataImg(t *testing.T) {
+	_, avdPath := setupFakeAVD(t, "with-pristine", true)
+	got := resolveSeedUserdataPath(avdPath)
+	want := filepath.Join(avdPath, "userdata.img")
+	if got != want {
+		t.Errorf("resolveSeedUserdataPath = %q, want %q", got, want)
+	}
+}
+
+func TestResolveSeedUserdataPathFallsBackToLiveUserdataQemuImg(t *testing.T) {
+	_, avdPath := setupFakeAVD(t, "no-pristine", false)
+	got := resolveSeedUserdataPath(avdPath)
+	want := filepath.Join(avdPath, "userdata-qemu.img")
+	if got != want {
+		t.Errorf("resolveSeedUserdataPath = %q, want %q", got, want)
+	}
+}
+
+func TestInstanceAVDNameSanitizesHyphens(t *testing.T) {
+	got := instanceAVDName("557ea68b-323e-4157-bc7d-502e0a24b6bb")
+	want := "mako_instance_557ea68b_323e_4157_bc7d_502e0a24b6bb"
+	if got != want {
+		t.Errorf("instanceAVDName = %q, want %q", got, want)
+	}
+}

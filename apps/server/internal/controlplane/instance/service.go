@@ -610,6 +610,7 @@ func (s *Service) startInstanceLifecycle(ctx context.Context, row repo.Instance,
 			DesiredState:      "running",
 			ObservedState:     observedState,
 			RuntimeHandleJson: sql.NullString{String: string(handleJSON), Valid: true},
+			StateDataRef:      optionalNullString(response.Handle.DataDir),
 			ID:                row.ID,
 		}); err != nil {
 			return fmt.Errorf("update instance lifecycle: %w", err)
@@ -637,6 +638,7 @@ func (s *Service) stopInstanceLifecycle(ctx context.Context, row repo.Instance, 
 			if err := q.UpdateInstanceLifecycle(ctx, repo.UpdateInstanceLifecycleParams{
 				DesiredState:  "stopped",
 				ObservedState: "stopped",
+				StateDataRef:  row.StateDataRef,
 				ID:            row.ID,
 			}); err != nil {
 				return fmt.Errorf("update instance lifecycle: %w", err)
@@ -693,6 +695,7 @@ func (s *Service) stopInstanceLifecycle(ctx context.Context, row repo.Instance, 
 		if err := q.UpdateInstanceLifecycle(ctx, repo.UpdateInstanceLifecycleParams{
 			DesiredState:  "stopped",
 			ObservedState: observedState,
+			StateDataRef:  row.StateDataRef,
 			LastError:     optionalNullString(response.LastError),
 			ID:            row.ID,
 		}); err != nil {

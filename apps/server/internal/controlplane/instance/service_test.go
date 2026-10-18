@@ -247,6 +247,39 @@ func TestStartAndStopManagedInstanceLifecycle(t *testing.T) {
 	}
 }
 
+func TestStartManagedInstancePersistsStateDataRefFromRuntimeHandle(t *testing.T) {
+	worker := &fakeWorkerClient{
+		templates:   []runtime.Template{{TemplateID: "t-1", RuntimeClass: "android-studio-emulator"}},
+		startResult: workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{PID: 42, DataDir: "/tmp/mako/instance-data/abc"}},
+	}
+	svc := newTestService(t, worker)
+	createTestUser(t, svc, "u-1", "registered", "active")
+	created, err := svc.CreateManagedInstance(context.Background(), validCreateRequest(), "u-1")
+	if err != nil {
+		t.Fatalf("CreateManagedInstance: %v", err)
+	}
+	if created.StateDataRef != nil {
+		t.Fatalf("newly created instance StateDataRef = %v, want nil before start", created.StateDataRef)
+	}
+
+	actor := audit.NewContext(strPtr("u-1"), nil, "req-1")
+	started, err := svc.StartManagedInstance(context.Background(), created.ID, "u-1", actor)
+	if err != nil {
+		t.Fatalf("StartManagedInstance: %v", err)
+	}
+	if started.StateDataRef == nil || *started.StateDataRef != "/tmp/mako/instance-data/abc" {
+		t.Errorf("StartManagedInstance() StateDataRef = %v, want /tmp/mako/instance-data/abc", started.StateDataRef)
+	}
+
+	stopped, err := svc.StopManagedInstance(context.Background(), created.ID, "u-1", actor)
+	if err != nil {
+		t.Fatalf("StopManagedInstance: %v", err)
+	}
+	if stopped.StateDataRef == nil || *stopped.StateDataRef != "/tmp/mako/instance-data/abc" {
+		t.Errorf("StopManagedInstance() StateDataRef = %v, want it preserved across stop", stopped.StateDataRef)
+	}
+}
+
 func TestStopManagedInstanceNeverStartedSkipsWorkerCall(t *testing.T) {
 	worker := &fakeWorkerClient{templates: []runtime.Template{{TemplateID: "t-1"}}}
 	svc := newTestService(t, worker)

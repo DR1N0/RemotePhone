@@ -46,6 +46,12 @@ type InstanceHandle struct {
 	GRPCPort      int    `json:"grpcPort,omitempty"`
 	WorkerPID     int    `json:"workerPid,omitempty"`
 	WorkerBaseURL string `json:"workerBaseUrl,omitempty"`
+	// DataDir is the per-instance writable directory the runtime adapter
+	// pointed the emulator's -datadir at (isolating this instance's
+	// userdata-qemu.img/cache.img/sdcard.img from every other instance of
+	// the same template) — informational only, reported up to
+	// instances.state_data_ref for operator visibility.
+	DataDir string `json:"dataDir,omitempty"`
 }
 
 type InstanceStatus struct {

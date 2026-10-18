@@ -230,7 +230,7 @@ func (q *Queries) ListInstancesByOwner(ctx context.Context, ownerID string) ([]I
 
 const updateInstanceLifecycle = `-- name: UpdateInstanceLifecycle :exec
 UPDATE instances
-SET desired_state = ?, observed_state = ?, runtime_handle_json = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP
+SET desired_state = ?, observed_state = ?, runtime_handle_json = ?, state_data_ref = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP
 WHERE id = ?
 `
 
@@ -238,6 +238,7 @@ type UpdateInstanceLifecycleParams struct {
 	DesiredState      string         `json:"desired_state"`
 	ObservedState     string         `json:"observed_state"`
 	RuntimeHandleJson sql.NullString `json:"runtime_handle_json"`
+	StateDataRef      sql.NullString `json:"state_data_ref"`
 	LastError         sql.NullString `json:"last_error"`
 	ID                string         `json:"id"`
 }
@@ -247,6 +248,7 @@ func (q *Queries) UpdateInstanceLifecycle(ctx context.Context, arg UpdateInstanc
 		arg.DesiredState,
 		arg.ObservedState,
 		arg.RuntimeHandleJson,
+		arg.StateDataRef,
 		arg.LastError,
 		arg.ID,
 	)

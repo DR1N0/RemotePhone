@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+)
 
 type Config struct {
 	ListenAddr          string
@@ -11,6 +14,7 @@ type Config struct {
 	AndroidEmulatorPath string
 	FFmpegPath          string
 	StunURL             string
+	InstanceDataRoot    string
 }
 
 func Load() Config {
@@ -30,6 +34,7 @@ func Load() Config {
 		AndroidEmulatorPath: os.Getenv("MAKO_ANDROID_EMULATOR_PATH"),
 		FFmpegPath:          os.Getenv("MAKO_FFMPEG_PATH"),
 		StunURL:             getenv("STUN_URL", "stun:stun.l.google.com:19302"),
+		InstanceDataRoot:    getenv("MAKO_INSTANCE_DATA_ROOT", filepath.Join(homeDir, ".mako", "instance-data")),
 	}
 }
 

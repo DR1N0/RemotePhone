@@ -21,7 +21,7 @@ SELECT * FROM instances WHERE desired_state = ? ORDER BY created_at;
 
 -- name: UpdateInstanceLifecycle :exec
 UPDATE instances
-SET desired_state = ?, observed_state = ?, runtime_handle_json = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP
+SET desired_state = ?, observed_state = ?, runtime_handle_json = ?, state_data_ref = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP
 WHERE id = ?;
 
 -- name: UpdateInstanceRuntime :exec

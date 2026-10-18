@@ -23,6 +23,16 @@ type LaunchRequest struct {
 	ExtraArgs   []string
 }
 
+// BuildLaunchArgs deliberately does NOT support redirecting an AVD's
+// writable state via -datadir/-init-data: confirmed by direct testing
+// against a real emulator build (36.4.9.0) that both are silently ignored
+// (-datadir) or rejected outright (-init-data: "unknown option") once
+// -avd <name> is given — those flags only apply to the emulator's legacy
+// non-AVD raw-image invocation mode, not the -avd mode this codebase uses.
+// Per-instance isolation is instead achieved one level up, by giving each
+// instance its own independently-registered AVD (see
+// Adapter.ensureInstanceAVD) — AVDName here is already that per-instance
+// name, not the shared template's.
 func BuildLaunchArgs(req LaunchRequest) []string {
 	args := []string{
 		"-avd", req.AVDName,

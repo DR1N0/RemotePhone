@@ -2,6 +2,9 @@ package androidstudio
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"mako/internal/worker/config"
@@ -17,6 +20,7 @@ type Adapter struct {
 	transportStore *transport.Store
 	stunURL        string
 	ffmpegPath     string
+	dataRoot       string
 	launchFn       func(string, LaunchRequest) (ProcessHandle, error)
 	stopFn         func(int) error
 }
@@ -47,6 +51,7 @@ func NewAdapter(cfg config.Config, store runtime.HandleStore, transportStore *tr
 		transportStore: transportStore,
 		stunURL:        cfg.StunURL,
 		ffmpegPath:     cfg.FFmpegPath,
+		dataRoot:       cfg.InstanceDataRoot,
 		stopFn:         StopProcess,
 	}
 	adapter.launchFn = func(emulatorPath string, req LaunchRequest) (ProcessHandle, error) {
@@ -92,7 +97,12 @@ func (a *Adapter) Start(req runtime.StartRequest) (runtime.InstanceHandle, error
 		return runtime.InstanceHandle{}, err
 	}
 
-	launchReq := BuildLaunchRequestFromStart(req, ports, template.Metadata["avdName"])
+	instanceAVDName, instanceAVDDir, err := a.ensureInstanceAVD(req.InstanceID, template)
+	if err != nil {
+		return runtime.InstanceHandle{}, fmt.Errorf("prepare instance AVD: %w", err)
+	}
+
+	launchReq := BuildLaunchRequestFromStart(req, ports, instanceAVDName)
 	process, err := a.launchFn(template.Metadata["emulatorPath"], launchReq)
 	if err != nil {
 		return runtime.InstanceHandle{}, err
@@ -107,6 +117,7 @@ func (a *Adapter) Start(req runtime.StartRequest) (runtime.InstanceHandle, error
 		ConsolePort:  ports.Console,
 		AdbPort:      ports.Adb,
 		GRPCPort:     ports.GRPC,
+		DataDir:      instanceAVDDir,
 	}
 	if a.store != nil {
 		a.store.Put(handle)
@@ -149,6 +160,92 @@ func (a *Adapter) Stop(instanceID string) (runtime.InstanceStatus, error) {
 
 func (a *Adapter) Reconcile() ([]runtime.InstanceStatus, error) {
 	return ReconcileHandles(a.store)
+}
+
+// ensureInstanceAVD gives instanceID its own independently-registered AVD,
+// isolated from every other instance of the same template (and from the
+// template AVD itself) — confirmed by direct testing that the emulator's
+// -datadir/-init-data flags do NOT achieve this when -avd is used (see
+// BuildLaunchArgs); two separately-registered AVDs is the mechanism that
+// actually works, including when their userdata-qemu.img files start out
+// byte-identical copies (the emulator's own per-AVD-directory qcow2
+// overlay/snapshot handling keeps them from ever cross-contaminating once
+// booted).
+//
+// Idempotent across respawns: if this instance's AVD .ini is already
+// registered, it's reused as-is (not re-cloned/overwritten) so an
+// already-diverged instance's data is never clobbered by a worker
+// crash-and-respawn cycle.
+func (a *Adapter) ensureInstanceAVD(instanceID string, template runtime.Template) (avdName, avdContentDir string, err error) {
+	avdName = instanceAVDName(instanceID)
+	avdHomeDir := filepath.Join(a.discovery.HomeDir, ".android", "avd")
+	iniPath := filepath.Join(avdHomeDir, avdName+".ini")
+
+	if existing, statErr := readIniFile(iniPath); statErr == nil {
+		if path := existing["path"]; path != "" {
+			return avdName, path, nil
+		}
+	}
+
+	avdContentDir = filepath.Join(a.dataRoot, avdName+".avd")
+	if err := os.MkdirAll(avdContentDir, 0700); err != nil {
+		return "", "", fmt.Errorf("create instance avd dir: %w", err)
+	}
+
+	templateAVDPath := template.Metadata["avdPath"]
+	if err := copyFile(filepath.Join(templateAVDPath, "config.ini"), filepath.Join(avdContentDir, "config.ini")); err != nil {
+		return "", "", fmt.Errorf("copy config.ini: %w", err)
+	}
+	if err := copyFile(resolveSeedUserdataPath(templateAVDPath), filepath.Join(avdContentDir, "userdata-qemu.img")); err != nil {
+		return "", "", fmt.Errorf("seed userdata-qemu.img: %w", err)
+	}
+
+	if err := os.MkdirAll(avdHomeDir, 0700); err != nil {
+		return "", "", fmt.Errorf("create avd home dir: %w", err)
+	}
+	iniContents := "avd.ini.encoding=UTF-8\npath=" + avdContentDir + "\n"
+	if err := os.WriteFile(iniPath, []byte(iniContents), 0600); err != nil {
+		return "", "", fmt.Errorf("register instance avd: %w", err)
+	}
+
+	return avdName, avdContentDir, nil
+}
+
+// instanceAVDName derives a valid, collision-free AVD identifier from an
+// instance ID (a UUID) — AVD names/.ini filenames don't accept hyphens.
+func instanceAVDName(instanceID string) string {
+	return "mako_instance_" + strings.ReplaceAll(instanceID, "-", "_")
+}
+
+// resolveSeedUserdataPath picks the seed userdata image a new instance's
+// own userdata-qemu.img is copied from: the AVD's pristine initial copy if
+// it still has one (userdata.img — present on AVDs that haven't diverged
+// far from creation), else its current live state (userdata-qemu.img) as
+// the best available base. A template's whole point is that it already
+// carries baked-in app/data state, so falling back to whatever it
+// currently has (rather than a vendor-blank image) is deliberate, not a
+// compromise.
+func resolveSeedUserdataPath(avdPath string) string {
+	pristine := filepath.Join(avdPath, "userdata.img")
+	if info, err := os.Stat(pristine); err == nil && !info.IsDir() {
+		return pristine
+	}
+	return filepath.Join(avdPath, "userdata-qemu.img")
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }
 
 func findTemplate(templates []runtime.Template, templateID string) (runtime.Template, error) {
