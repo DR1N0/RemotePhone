@@ -52,6 +52,12 @@ func defaultEncoderCandidates(goos string) []string {
 		return []string{"h264_videotoolbox", "libx264"}
 	case "linux":
 		return []string{"h264_nvenc", "h264_vaapi", "libx264"}
+	case "windows":
+		// h264_amf wraps AMD's Advanced Media Framework — the Windows
+		// equivalent of nvenc for AMD GPUs (vaapi doesn't exist on
+		// Windows at all). nvenc stays first since it also works on
+		// Windows for NVIDIA GPUs.
+		return []string{"h264_nvenc", "h264_amf", "libx264"}
 	default:
 		return []string{"libx264"}
 	}
@@ -174,9 +180,9 @@ const h264Level = "3.1"
 // is the safe, universally-decodable choice; revisit only if negotiating
 // a higher profile end-to-end is deliberately desired later.
 //
-// nvenc/vaapi flag specifics are necessarily best-effort here — this
-// development environment has no Linux GPU to verify them against; expect
-// to tune on first real Linux deployment.
+// nvenc/vaapi/amf flag specifics are necessarily best-effort here — this
+// development environment has no Linux or AMD GPU to verify them against;
+// expect to tune on first real Linux/Windows deployment.
 func buildFFmpegArgs(ffmpegPath, codec string, opts EncodeOptions) []string {
 	size := fmt.Sprintf("%dx%d", opts.Width, opts.Height)
 	args := []string{
@@ -206,6 +212,12 @@ func buildFFmpegArgs(ffmpegPath, codec string, opts EncodeOptions) []string {
 			"-vaapi_device", "/dev/dri/renderD128",
 			"-vf", "format=nv12,hwupload",
 			"-c:v", "h264_vaapi",
+			"-profile:v", "constrained_baseline", "-level:v", h264Level,
+			"-b:v", strconv.Itoa(opts.BitRate), "-g", strconv.Itoa(opts.FPS), "-bf", "0",
+		)
+	case "h264_amf":
+		args = append(args,
+			"-c:v", "h264_amf", "-pix_fmt", "yuv420p", "-usage", "lowlatency", "-quality", "speed", "-rc", "cbr",
 			"-profile:v", "constrained_baseline", "-level:v", h264Level,
 			"-b:v", strconv.Itoa(opts.BitRate), "-g", strconv.Itoa(opts.FPS), "-bf", "0",
 		)

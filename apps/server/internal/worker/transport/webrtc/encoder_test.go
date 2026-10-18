@@ -81,6 +81,7 @@ func TestBuildFFmpegArgsOmitsBFramesAndSetsShortGOP(t *testing.T) {
 		"h264_videotoolbox": "h264_videotoolbox",
 		"h264_nvenc":        "h264_nvenc",
 		"h264_vaapi":        "h264_vaapi",
+		"h264_amf":          "h264_amf",
 		"libx264":           "libx264",
 		"some_future_codec": "libx264",
 	}
