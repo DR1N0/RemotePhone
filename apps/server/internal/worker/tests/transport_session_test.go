@@ -46,6 +46,10 @@ func (r *transportRuntime) Reconcile() ([]runtime.InstanceStatus, error) {
 	return nil, nil
 }
 
+func (r *transportRuntime) CleanupInstanceData(instanceID string) error {
+	return nil
+}
+
 func (r *transportRuntime) CreateTransportSession(req runtime.TransportSessionRequest) (runtime.TransportSession, error) {
 	r.transportCalls++
 	r.lastTransport = req

@@ -728,6 +728,19 @@ func (s *Service) deleteInstanceLifecycle(ctx context.Context, row repo.Instance
 	if handle, _, err := s.runningWorker(row); err == nil && handle.WorkerPID != 0 {
 		_ = s.placementSelector.ReleaseWorker(ctx, handle.WorkerPID)
 	}
+	if row.StateDataRef.Valid {
+		// Best-effort, same philosophy as ReleaseWorker above: a cleanup
+		// failure here must never block the instance row itself from being
+		// deleted — worst case is an orphaned AVD directory taking up disk,
+		// not a correctness problem. By the time an instance is usually
+		// deleted its own worker process is long gone (stopped earlier), so
+		// this spins up a short-lived worker just for this call, mirroring
+		// resolveTemplate's discovery-worker pattern.
+		if client, release, err := s.acquireDiscoveryWorker(ctx); err == nil {
+			_ = client.CleanupInstanceData(ctx, row.ID, row.RuntimeClass)
+			release()
+		}
+	}
 	return s.withTx(ctx, func(q *repo.Queries) error {
 		if err := q.DeleteInstanceByID(ctx, row.ID); err != nil {
 			return fmt.Errorf("delete instance: %w", err)

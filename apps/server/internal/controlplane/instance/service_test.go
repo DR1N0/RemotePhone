@@ -36,6 +36,8 @@ type fakeWorkerClient struct {
 	stopErr      error
 	startedCalls []workerapi.StartInstanceRequest
 	stoppedIDs   []string
+	cleanupCalls []workerapi.CleanupInstanceDataRequest
+	cleanupIDs   []string
 
 	mu     sync.Mutex
 	server *httptest.Server
@@ -71,6 +73,15 @@ func (f *fakeWorkerClient) httpServer() *httptest.Server {
 			return
 		}
 		json.NewEncoder(w).Encode(f.stopResult)
+	})
+	mux.HandleFunc("POST /v1/instances/{id}/cleanup-data", func(w http.ResponseWriter, r *http.Request) {
+		var req workerapi.CleanupInstanceDataRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		f.mu.Lock()
+		f.cleanupCalls = append(f.cleanupCalls, req)
+		f.cleanupIDs = append(f.cleanupIDs, r.PathValue("id"))
+		f.mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 	f.server = httptest.NewServer(mux)
 	return f.server
@@ -277,6 +288,57 @@ func TestStartManagedInstancePersistsStateDataRefFromRuntimeHandle(t *testing.T)
 	}
 	if stopped.StateDataRef == nil || *stopped.StateDataRef != "/tmp/mako/instance-data/abc" {
 		t.Errorf("StopManagedInstance() StateDataRef = %v, want it preserved across stop", stopped.StateDataRef)
+	}
+}
+
+func TestDeleteManagedInstanceCleansUpInstanceDataWhenStateDataRefIsSet(t *testing.T) {
+	worker := &fakeWorkerClient{
+		templates:   []runtime.Template{{TemplateID: "t-1", RuntimeClass: "android-studio-emulator"}},
+		startResult: workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{PID: 42, DataDir: "/tmp/mako/instance-data/abc"}},
+	}
+	svc := newTestService(t, worker)
+	createTestUser(t, svc, "u-1", "registered", "active")
+	created, err := svc.CreateManagedInstance(context.Background(), validCreateRequest(), "u-1")
+	if err != nil {
+		t.Fatalf("CreateManagedInstance: %v", err)
+	}
+
+	actor := audit.NewContext(strPtr("u-1"), nil, "req-1")
+	if _, err := svc.StartManagedInstance(context.Background(), created.ID, "u-1", actor); err != nil {
+		t.Fatalf("StartManagedInstance: %v", err)
+	}
+	if _, err := svc.StopManagedInstance(context.Background(), created.ID, "u-1", actor); err != nil {
+		t.Fatalf("StopManagedInstance: %v", err)
+	}
+
+	if err := svc.DeleteManagedInstance(context.Background(), created.ID, "u-1", actor); err != nil {
+		t.Fatalf("DeleteManagedInstance: %v", err)
+	}
+
+	if len(worker.cleanupIDs) != 1 || worker.cleanupIDs[0] != created.ID {
+		t.Errorf("worker.cleanupIDs = %v, want one call for %s", worker.cleanupIDs, created.ID)
+	}
+	if len(worker.cleanupCalls) != 1 || worker.cleanupCalls[0].RuntimeClass != "android-studio-emulator" {
+		t.Errorf("worker.cleanupCalls = %+v, want runtimeClass=android-studio-emulator", worker.cleanupCalls)
+	}
+}
+
+func TestDeleteManagedInstanceSkipsCleanupWhenNeverStarted(t *testing.T) {
+	worker := &fakeWorkerClient{templates: []runtime.Template{{TemplateID: "t-1"}}}
+	svc := newTestService(t, worker)
+	createTestUser(t, svc, "u-1", "registered", "active")
+	created, err := svc.CreateManagedInstance(context.Background(), validCreateRequest(), "u-1")
+	if err != nil {
+		t.Fatalf("CreateManagedInstance: %v", err)
+	}
+
+	actor := audit.NewContext(strPtr("u-1"), nil, "req-1")
+	if err := svc.DeleteManagedInstance(context.Background(), created.ID, "u-1", actor); err != nil {
+		t.Fatalf("DeleteManagedInstance: %v", err)
+	}
+
+	if len(worker.cleanupIDs) != 0 {
+		t.Errorf("worker.cleanupIDs = %v, want none (never started, nothing to clean up)", worker.cleanupIDs)
 	}
 }
 

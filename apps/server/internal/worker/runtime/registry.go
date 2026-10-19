@@ -201,6 +201,19 @@ func (r *Registry) Adopt(handle InstanceHandle) error {
 	return nil
 }
 
+// CleanupInstanceData takes runtimeClass explicitly rather than looking it
+// up via the handle store (unlike Stop/Inspect): the worker process making
+// this call is typically a short-lived one spawned just for this purpose
+// (mirroring resolveTemplate's discovery-worker pattern), with no prior
+// knowledge of instanceID in its own in-memory store.
+func (r *Registry) CleanupInstanceData(instanceID, runtimeClass string) error {
+	adapter, ok := r.Get(runtimeClass)
+	if !ok {
+		return ErrAdapterNotFound
+	}
+	return adapter.CleanupInstanceData(instanceID)
+}
+
 func (r *Registry) CreateTransportSession(req TransportSessionRequest) (TransportSession, error) {
 	adapter, ok := r.Get(req.RuntimeClass)
 	if !ok {

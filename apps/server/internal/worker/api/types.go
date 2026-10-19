@@ -49,6 +49,14 @@ type StopInstanceResponse struct {
 	LastError string                 `json:"lastError,omitempty"`
 }
 
+// CleanupInstanceDataRequest's RuntimeClass is required explicitly: the
+// worker process handling this call is typically short-lived and spawned
+// just for this purpose (see Registry.CleanupInstanceData), with no prior
+// in-memory knowledge of which adapter owns this instance ID.
+type CleanupInstanceDataRequest struct {
+	RuntimeClass string `json:"runtimeClass"`
+}
+
 type CreateTransportSessionRequest struct {
 	SessionID     string                 `json:"sessionId"`
 	AttachmentID  string                 `json:"attachmentId"`

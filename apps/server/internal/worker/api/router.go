@@ -173,6 +173,40 @@ func NewRouter(deps Dependencies) http.Handler {
 		})
 	})
 
+	mux.HandleFunc("POST /v1/instances/{id}/cleanup-data", func(w http.ResponseWriter, r *http.Request) {
+		if deps.RuntimeRegistry == nil {
+			writeErrorMessage(w, http.StatusBadRequest, "runtime registry is not configured")
+			return
+		}
+
+		instanceID := strings.TrimSpace(r.PathValue("id"))
+		if instanceID == "" {
+			writeErrorMessage(w, http.StatusBadRequest, "instance id is required")
+			return
+		}
+
+		var req CleanupInstanceDataRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErrorMessage(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		if strings.TrimSpace(req.RuntimeClass) == "" {
+			writeErrorMessage(w, http.StatusBadRequest, "runtimeClass is required")
+			return
+		}
+
+		if err := deps.RuntimeRegistry.CleanupInstanceData(instanceID, req.RuntimeClass); err != nil {
+			httpStatus := http.StatusInternalServerError
+			if errors.Is(err, runtimepkg.ErrAdapterNotFound) {
+				httpStatus = http.StatusBadRequest
+			}
+			writeError(w, httpStatus, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+
 	mux.HandleFunc("POST /v1/transport/session", func(w http.ResponseWriter, r *http.Request) {
 		if deps.RuntimeRegistry == nil {
 			writeErrorMessage(w, http.StatusBadRequest, "runtime registry is not configured")

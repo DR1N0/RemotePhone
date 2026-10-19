@@ -41,6 +41,10 @@ type WorkerClient interface {
 	// pick up an instance it didn't itself start — Phase 4's worker-liveness
 	// respawn path. See docs/plans/worker-lifecycle.md.
 	AdoptInstance(ctx context.Context, instanceID string, handle runtime.InstanceHandle) error
+	// CleanupInstanceData removes an already-deleted instance's on-disk
+	// private state (e.g. androidstudio's cloned AVD) — called once at
+	// instance deletion, not on every stop.
+	CleanupInstanceData(ctx context.Context, instanceID, runtimeClass string) error
 	CreateTransportSession(ctx context.Context, req workerapi.CreateTransportSessionRequest) (workerapi.TransportSessionResponse, error)
 	UpdateTransportRole(ctx context.Context, req workerapi.UpdateTransportSessionRoleRequest) error
 	DestroyTransportSession(ctx context.Context, instanceID, attachmentID string) error
@@ -131,6 +135,10 @@ func (c *HTTPWorkerClient) StopInstance(ctx context.Context, instanceID string) 
 
 func (c *HTTPWorkerClient) AdoptInstance(ctx context.Context, instanceID string, handle runtime.InstanceHandle) error {
 	return c.doJSON(ctx, http.MethodPost, "/v1/instances/"+url.PathEscape(instanceID)+"/adopt", workerapi.AdoptInstanceRequest{Handle: handle}, nil)
+}
+
+func (c *HTTPWorkerClient) CleanupInstanceData(ctx context.Context, instanceID, runtimeClass string) error {
+	return c.doJSON(ctx, http.MethodPost, "/v1/instances/"+url.PathEscape(instanceID)+"/cleanup-data", workerapi.CleanupInstanceDataRequest{RuntimeClass: runtimeClass}, nil)
 }
 
 func (c *HTTPWorkerClient) CreateTransportSession(ctx context.Context, req workerapi.CreateTransportSessionRequest) (workerapi.TransportSessionResponse, error) {

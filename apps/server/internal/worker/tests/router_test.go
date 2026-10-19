@@ -81,6 +81,10 @@ func (r *routerRuntime) Reconcile() ([]runtime.InstanceStatus, error) {
 	return []runtime.InstanceStatus{r.inspect}, nil
 }
 
+func (r *routerRuntime) CleanupInstanceData(instanceID string) error {
+	return nil
+}
+
 func (r *routerRuntime) CreateTransportSession(req runtime.TransportSessionRequest) (runtime.TransportSession, error) {
 	return runtime.TransportSession{
 		SessionID:     req.SessionID,

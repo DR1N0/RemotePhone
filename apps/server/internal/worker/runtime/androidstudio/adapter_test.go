@@ -197,6 +197,65 @@ func TestResolveSeedUserdataPathFallsBackToLiveUserdataQemuImg(t *testing.T) {
 	}
 }
 
+func TestCleanupInstanceDataRemovesClonedAVDAndRegistration(t *testing.T) {
+	avdName := "test-avd"
+	homeDir, _ := setupFakeAVD(t, avdName, true)
+	dataRoot := t.TempDir()
+	adapter := newTestAdapter(homeDir, dataRoot)
+
+	handle, err := adapter.Start(runtime.StartRequest{
+		InstanceID:   "instance-1",
+		RuntimeClass: RuntimeClass,
+		TemplateID:   "macos-android-studio:" + avdName,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	iniPath := filepath.Join(homeDir, ".android", "avd", instanceAVDName("instance-1")+".ini")
+	if _, err := os.Stat(iniPath); err != nil {
+		t.Fatalf("expected instance AVD registered before cleanup: %v", err)
+	}
+
+	if err := adapter.CleanupInstanceData("instance-1"); err != nil {
+		t.Fatalf("CleanupInstanceData: %v", err)
+	}
+
+	if _, err := os.Stat(iniPath); !os.IsNotExist(err) {
+		t.Errorf("expected .ini removed, stat err: %v", err)
+	}
+	if _, err := os.Stat(handle.DataDir); !os.IsNotExist(err) {
+		t.Errorf("expected content dir removed, stat err: %v", err)
+	}
+}
+
+func TestCleanupInstanceDataIsNoOpWhenInstanceWasNeverStarted(t *testing.T) {
+	homeDir, _ := setupFakeAVD(t, "test-avd", true)
+	adapter := newTestAdapter(homeDir, t.TempDir())
+
+	if err := adapter.CleanupInstanceData("never-started-instance"); err != nil {
+		t.Errorf("CleanupInstanceData on never-started instance = %v, want nil (nothing to clean up)", err)
+	}
+}
+
+func TestCleanupInstanceDataIsIdempotent(t *testing.T) {
+	avdName := "test-avd"
+	homeDir, _ := setupFakeAVD(t, avdName, true)
+	adapter := newTestAdapter(homeDir, t.TempDir())
+
+	req := runtime.StartRequest{InstanceID: "instance-1", RuntimeClass: RuntimeClass, TemplateID: "macos-android-studio:" + avdName}
+	if _, err := adapter.Start(req); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := adapter.CleanupInstanceData("instance-1"); err != nil {
+		t.Fatalf("first CleanupInstanceData: %v", err)
+	}
+	if err := adapter.CleanupInstanceData("instance-1"); err != nil {
+		t.Errorf("second CleanupInstanceData (already cleaned up) = %v, want nil", err)
+	}
+}
+
 func TestInstanceAVDNameSanitizesHyphens(t *testing.T) {
 	got := instanceAVDName("557ea68b-323e-4157-bc7d-502e0a24b6bb")
 	want := "mako_instance_557ea68b_323e_4157_bc7d_502e0a24b6bb"

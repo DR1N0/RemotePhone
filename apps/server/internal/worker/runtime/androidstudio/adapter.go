@@ -162,6 +162,32 @@ func (a *Adapter) Reconcile() ([]runtime.InstanceStatus, error) {
 	return ReconcileHandles(a.store)
 }
 
+// CleanupInstanceData removes instanceID's cloned AVD (both its
+// registration .ini and content directory created by ensureInstanceAVD) —
+// called once the instance itself is deleted, not on every stop. Idempotent
+// and best-effort: os.Remove/os.RemoveAll on a path that's already gone is
+// not an error here, since "nothing to clean up" is success, not failure.
+func (a *Adapter) CleanupInstanceData(instanceID string) error {
+	avdName := instanceAVDName(instanceID)
+	iniPath := filepath.Join(a.discovery.HomeDir, ".android", "avd", avdName+".ini")
+
+	registered, err := readIniFile(iniPath)
+	avdContentDir := registered["path"]
+	if err != nil || avdContentDir == "" {
+		// Never actually created (instance was never started) — nothing to
+		// do, not an error.
+		return nil
+	}
+
+	if err := os.RemoveAll(avdContentDir); err != nil {
+		return fmt.Errorf("remove instance avd content dir: %w", err)
+	}
+	if err := os.Remove(iniPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove instance avd registration: %w", err)
+	}
+	return nil
+}
+
 // ensureInstanceAVD gives instanceID its own independently-registered AVD,
 // isolated from every other instance of the same template (and from the
 // template AVD itself) — confirmed by direct testing that the emulator's

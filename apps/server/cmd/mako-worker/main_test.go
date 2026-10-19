@@ -65,6 +65,10 @@ func (s *stubRuntimeAdapter) Reconcile() ([]workerruntime.InstanceStatus, error)
 	return nil, nil
 }
 
+func (s *stubRuntimeAdapter) CleanupInstanceData(instanceID string) error {
+	return nil
+}
+
 func (s *stubRuntimeAdapter) CreateTransportSession(req workerruntime.TransportSessionRequest) (workerruntime.TransportSession, error) {
 	return workerruntime.TransportSession{
 		SessionID:     req.SessionID,

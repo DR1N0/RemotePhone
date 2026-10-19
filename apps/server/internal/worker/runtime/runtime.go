@@ -90,4 +90,12 @@ type Adapter interface {
 	Stop(instanceID string) (InstanceStatus, error)
 	Reconcile() ([]InstanceStatus, error)
 	CreateTransportSession(TransportSessionRequest) (TransportSession, error)
+	// CleanupInstanceData removes any on-disk state private to instanceID
+	// that outlives Stop (e.g. androidstudio's per-instance cloned AVD) —
+	// called once, when the instance itself is deleted, not on every stop
+	// (stopped instances keep their data so a later restart resumes it).
+	// Best-effort/idempotent: a no-op (nil error) if there's nothing to
+	// clean up, whether because this adapter has no such concept or
+	// because it was already removed.
+	CleanupInstanceData(instanceID string) error
 }
