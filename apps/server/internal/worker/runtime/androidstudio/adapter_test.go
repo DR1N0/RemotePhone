@@ -45,6 +45,12 @@ func setupFakeAVD(t *testing.T, avdName string, withPristineUserdata bool) (home
 	if err := os.WriteFile(emulatorPath, []byte(""), 0755); err != nil {
 		t.Fatalf("write fake emulator: %v", err)
 	}
+	// resolveQemuImgBinary looks for a "qemu-img" sibling of the emulator
+	// binary — never actually executed (commitOverlayFn is swapped out in
+	// tests that need it), just needs to exist for the stat check to pass.
+	if err := os.WriteFile(filepath.Join(homeDir, "qemu-img"), []byte(""), 0755); err != nil {
+		t.Fatalf("write fake qemu-img: %v", err)
+	}
 	return homeDir, avdPath
 }
 
@@ -253,6 +259,125 @@ func TestCleanupInstanceDataIsIdempotent(t *testing.T) {
 	}
 	if err := adapter.CleanupInstanceData("instance-1"); err != nil {
 		t.Errorf("second CleanupInstanceData (already cleaned up) = %v, want nil", err)
+	}
+}
+
+func TestCaptureBaseImageCopiesConfigAndUserdata(t *testing.T) {
+	homeDir, avdPath := setupFakeAVD(t, "test-avd", true)
+	baseImageRoot := t.TempDir()
+	adapter := newTestAdapter(homeDir, t.TempDir())
+	adapter.baseImageRoot = baseImageRoot
+
+	artifactPath, err := adapter.CaptureBaseImage("image-1", avdPath)
+	if err != nil {
+		t.Fatalf("CaptureBaseImage: %v", err)
+	}
+	wantArtifactDir := filepath.Join(baseImageRoot, "image-1")
+	if artifactPath != wantArtifactDir {
+		t.Errorf("artifactPath = %q, want %q", artifactPath, wantArtifactDir)
+	}
+	if got, err := os.ReadFile(filepath.Join(artifactPath, "config.ini")); err != nil || string(got) != "tag.id=google_apis_playstore\n" {
+		t.Errorf("captured config.ini = %q, err %v", got, err)
+	}
+	// CaptureBaseImage always captures the live userdata-qemu.img (the
+	// instance's CURRENT state), not the pristine userdata.img — even
+	// though this source AVD happens to have both.
+	if got, err := os.ReadFile(filepath.Join(artifactPath, "userdata-qemu.img")); err != nil || string(got) != "live-state" {
+		t.Errorf("captured userdata-qemu.img = %q, err %v, want live-state", got, err)
+	}
+}
+
+// TestCaptureBaseImageMergesQuickbootOverlayBeforeCapturing covers the bug
+// this merge step exists to fix: once an instance has booted, the emulator
+// stops writing new guest state directly into userdata-qemu.img and instead
+// writes it into a sibling userdata-qemu.img.qcow2 overlay — confirmed by
+// direct testing (see CaptureBaseImage's doc comment). Capturing without
+// merging that overlay first silently captures stale, pre-boot state.
+func TestCaptureBaseImageMergesQuickbootOverlayBeforeCapturing(t *testing.T) {
+	homeDir, avdPath := setupFakeAVD(t, "test-avd", true)
+	if err := os.WriteFile(filepath.Join(avdPath, "userdata-qemu.img.qcow2"), []byte("overlay-marker"), 0644); err != nil {
+		t.Fatalf("write fake overlay: %v", err)
+	}
+	adapter := newTestAdapter(homeDir, t.TempDir())
+	adapter.baseImageRoot = t.TempDir()
+
+	var committedQemuImgPath, committedOverlayPath string
+	adapter.commitOverlayFn = func(qemuImgPath, overlayPath string) error {
+		committedQemuImgPath = qemuImgPath
+		committedOverlayPath = overlayPath
+		// Simulate what a real `qemu-img commit` does: merge the overlay's
+		// content into its backing file.
+		return os.WriteFile(filepath.Join(avdPath, "userdata-qemu.img"), []byte("merged-from-overlay"), 0644)
+	}
+
+	artifactPath, err := adapter.CaptureBaseImage("image-1", avdPath)
+	if err != nil {
+		t.Fatalf("CaptureBaseImage: %v", err)
+	}
+
+	wantOverlayPath := filepath.Join(avdPath, "userdata-qemu.img.qcow2")
+	if committedOverlayPath != wantOverlayPath {
+		t.Errorf("commitOverlayFn overlayPath = %q, want %q", committedOverlayPath, wantOverlayPath)
+	}
+	wantQemuImgPath := filepath.Join(homeDir, "qemu-img")
+	if committedQemuImgPath != wantQemuImgPath {
+		t.Errorf("commitOverlayFn qemuImgPath = %q, want %q", committedQemuImgPath, wantQemuImgPath)
+	}
+	if got, err := os.ReadFile(filepath.Join(artifactPath, "userdata-qemu.img")); err != nil || string(got) != "merged-from-overlay" {
+		t.Errorf("captured userdata-qemu.img = %q, err %v, want merged-from-overlay (the post-merge content, not the stale pre-merge one)", got, err)
+	}
+}
+
+func TestCaptureBaseImageSkipsMergeWhenNoOverlayExists(t *testing.T) {
+	homeDir, avdPath := setupFakeAVD(t, "test-avd", true)
+	adapter := newTestAdapter(homeDir, t.TempDir())
+	adapter.baseImageRoot = t.TempDir()
+
+	mergeCalled := false
+	adapter.commitOverlayFn = func(qemuImgPath, overlayPath string) error {
+		mergeCalled = true
+		return nil
+	}
+
+	if _, err := adapter.CaptureBaseImage("image-1", avdPath); err != nil {
+		t.Fatalf("CaptureBaseImage: %v", err)
+	}
+	if mergeCalled {
+		t.Error("commitOverlayFn was called even though no userdata-qemu.img.qcow2 overlay exists")
+	}
+}
+
+func TestStartSeedsFromBaseImageArtifactWhenProvided(t *testing.T) {
+	avdName := "test-avd"
+	homeDir, _ := setupFakeAVD(t, avdName, true)
+	adapter := newTestAdapter(homeDir, t.TempDir())
+
+	// A captured base image artifact with DIFFERENT contents than the
+	// template's own live AVD — proves Start actually prefers this over
+	// the live AVD when BaseImageArtifactPath is set.
+	artifactDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(artifactDir, "config.ini"), []byte("from-base-image\n"), 0644); err != nil {
+		t.Fatalf("write artifact config.ini: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "userdata-qemu.img"), []byte("from-base-image-userdata"), 0644); err != nil {
+		t.Fatalf("write artifact userdata-qemu.img: %v", err)
+	}
+
+	handle, err := adapter.Start(runtime.StartRequest{
+		InstanceID:            "instance-1",
+		RuntimeClass:          RuntimeClass,
+		TemplateID:            "macos-android-studio:" + avdName,
+		BaseImageArtifactPath: artifactDir,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if got, err := os.ReadFile(filepath.Join(handle.DataDir, "config.ini")); err != nil || string(got) != "from-base-image\n" {
+		t.Errorf("instance config.ini = %q, err %v, want seeded from the base image artifact, not the live AVD", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(handle.DataDir, "userdata-qemu.img")); err != nil || string(got) != "from-base-image-userdata" {
+		t.Errorf("instance userdata-qemu.img = %q, err %v, want seeded from the base image artifact", got, err)
 	}
 }
 

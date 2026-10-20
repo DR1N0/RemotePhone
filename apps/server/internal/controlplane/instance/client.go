@@ -45,6 +45,10 @@ type WorkerClient interface {
 	// private state (e.g. androidstudio's cloned AVD) — called once at
 	// instance deletion, not on every stop.
 	CleanupInstanceData(ctx context.Context, instanceID, runtimeClass string) error
+	// CaptureBaseImage snapshots sourceDataDir (a stopped instance's own
+	// state_data_ref) into a new artifact directory keyed by baseImageID,
+	// returning its path.
+	CaptureBaseImage(ctx context.Context, baseImageID, sourceDataDir, runtimeClass string) (artifactPath string, err error)
 	CreateTransportSession(ctx context.Context, req workerapi.CreateTransportSessionRequest) (workerapi.TransportSessionResponse, error)
 	UpdateTransportRole(ctx context.Context, req workerapi.UpdateTransportSessionRoleRequest) error
 	DestroyTransportSession(ctx context.Context, instanceID, attachmentID string) error
@@ -139,6 +143,18 @@ func (c *HTTPWorkerClient) AdoptInstance(ctx context.Context, instanceID string,
 
 func (c *HTTPWorkerClient) CleanupInstanceData(ctx context.Context, instanceID, runtimeClass string) error {
 	return c.doJSON(ctx, http.MethodPost, "/v1/instances/"+url.PathEscape(instanceID)+"/cleanup-data", workerapi.CleanupInstanceDataRequest{RuntimeClass: runtimeClass}, nil)
+}
+
+func (c *HTTPWorkerClient) CaptureBaseImage(ctx context.Context, baseImageID, sourceDataDir, runtimeClass string) (string, error) {
+	var out workerapi.CaptureBaseImageResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/base-images/capture", workerapi.CaptureBaseImageRequest{
+		RuntimeClass:  runtimeClass,
+		BaseImageID:   baseImageID,
+		SourceDataDir: sourceDataDir,
+	}, &out); err != nil {
+		return "", err
+	}
+	return out.ArtifactPath, nil
 }
 
 func (c *HTTPWorkerClient) CreateTransportSession(ctx context.Context, req workerapi.CreateTransportSessionRequest) (workerapi.TransportSessionResponse, error) {

@@ -44,19 +44,6 @@ No public-internet or NAT-traversal goal exists — this is a trusted-LAN deploy
 
 The admin/client HTTP-surface split (loopback-by-default `adminapi` vs. LAN-reachable `clientapi`) should be kept distinct even once both terminate HTTPS and require login — they differ in *network exposure*, not just authentication. `adminapi`'s loopback binding is an independent barrier that a stolen bearer token or a missed authorization check can't bypass, since the attacker would also need actual host access. Where remote admin convenience is wanted, the fix is making `adminapi`'s bind address configurable (default loopback, opt-in LAN) — not merging the two surfaces onto one port.
 
-## Base image and user data model
-
-Each instance is a template's shared **base image** plus that instance's own **user data** overlay. Maps onto QEMU's qcow2 backing-file support: a base image is a golden, read-only qcow2 disk; each instance's writable state (`instances.state_data_ref`, already a column, currently unused) is a thin qcow2 overlay with that base image as its backing file, storing only that instance's deltas (app logins, save data, etc.).
-
-Base images are versioned and immutable once published. A template tracks a "current" pointer; every instance resolves to whichever version is current for its template **at boot time** — no per-instance version pinning (many apps/games stop working if not kept updated). Because versions are immutable and "current" is just a movable pointer, rollback is the same primitive as promotion (move the pointer to a different existing version).
-
-Authoring a new base image needs no special machinery for most of the workflow — an admin's staging instance is owned by the admin account like any other instance (create it, connect to it, install an APK, play until a data pack finishes downloading — all ordinary owner-scoped `clientapi` operations, including from the admin's phone). Only the fleet-wide-blast-radius action is special, and it's split into two steps rather than gated by network position alone:
-
-- **`POST /instances/:id/capture-candidate-image`** on `clientapi` — snapshots the admin's own instance into a new immutable, versioned, *inert* `base_images` row. Doesn't affect anyone until promoted, so it doesn't strictly need admin-type authorization to stay safe (could be restricted to admin accounts purely to avoid clutter, but that's tidiness, not a security boundary).
-- **`POST /admin/images/:candidateId/promote`** on `adminapi` — moves a template's current pointer to that candidate version. This silently changes what every connected client runs next, so it stays behind `adminapi`'s loopback/login barrier like any other cross-owner, fleet-wide action.
-
-A stolen/leaked phone bearer token can therefore create inert candidate images at worst; it can never make anything live. All worker processes on a host share one local filesystem regardless of how many are running at once, so base-image storage is just a shared local directory every freshly-spawned worker process reads directly — real cross-host distribution is deferred until a remote worker actually exists.
-
 ## Error handling and testing conventions (for not-yet-built packages)
 
 Follow the pattern already established in `internal/worker/api/router.go`: sentinel errors checked with `errors.Is`, mapped to HTTP status at the route-handler boundary. `apiserver` route tests should use `httptest`; `controller` tests should use a fake clock and a fake process-execer so unit tests never shell out to a real `mako-worker` binary, with one integration test spawning a real worker process to exercise start/stop/transport end to end.
@@ -66,4 +53,3 @@ Follow the pattern already established in `internal/worker/api/router.go`: senti
 - `clientapi` never exposes `/admin/*`, base-image promote, or any cross-owner instance operation — a stolen admin bearer token used against `clientapi` gets only the admin's own owner-scoped data.
 - Pairing: a changed server key, wrong PIN, or malformed trust state is rejected before any password/Authorization leaves the client; a same-key certificate renewal (via SPKI pinning) doesn't break an already-paired client.
 - Controller: killing an instance's worker process triggers detection, respawn, and reconciliation of its still-running emulator within one resync interval, without affecting any other instance's worker; killing and restarting the control-plane process itself does not interrupt an already-negotiated WebRTC session.
-- Base images: `capture-candidate-image` never changes what any other instance resolves to; `promote` does, immediately, for every instance of that template; promoting an older version (rollback) behaves identically to promoting a new one.

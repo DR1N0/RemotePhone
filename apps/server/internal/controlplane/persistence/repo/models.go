@@ -34,6 +34,15 @@ type AuditEvent struct {
 	CreatedAt         string         `json:"created_at"`
 }
 
+type BaseImage struct {
+	ID               string `json:"id"`
+	TemplateID       string `json:"template_id"`
+	SourceInstanceID string `json:"source_instance_id"`
+	ArtifactPath     string `json:"artifact_path"`
+	CreatedByUserID  string `json:"created_by_user_id"`
+	CreatedAt        string `json:"created_at"`
+}
+
 type Credential struct {
 	ID           string         `json:"id"`
 	UserID       string         `json:"user_id"`
@@ -97,6 +106,15 @@ type SessionInvite struct {
 	ExpiresAt       string         `json:"expires_at"`
 	ConsumedAt      sql.NullString `json:"consumed_at"`
 	CreatedAt       string         `json:"created_at"`
+}
+
+type Template struct {
+	ID                 string         `json:"id"`
+	RuntimeClass       string         `json:"runtime_class"`
+	DisplayName        string         `json:"display_name"`
+	CurrentBaseImageID sql.NullString `json:"current_base_image_id"`
+	CreatedAt          string         `json:"created_at"`
+	UpdatedAt          string         `json:"updated_at"`
 }
 
 type User struct {

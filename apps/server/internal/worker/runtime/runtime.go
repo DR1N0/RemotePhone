@@ -26,6 +26,13 @@ type StartRequest struct {
 	RuntimeClass string       `json:"runtimeClass"`
 	TemplateID   string       `json:"templateId"`
 	LaunchConfig LaunchConfig `json:"launchConfig"`
+	// BaseImageArtifactPath, if set, is where a promoted base image for
+	// this template was captured to (config.ini + a seed userdata image —
+	// see androidstudio.ensureInstanceAVD) — the control plane resolves
+	// this once per start by looking up the template's current base image,
+	// empty if none has ever been promoted. When set, a new instance's AVD
+	// is seeded from here instead of the template's live, on-disk AVD.
+	BaseImageArtifactPath string `json:"baseImageArtifactPath,omitempty"`
 }
 
 // InstanceHandle is what's persisted in instances.runtime_handle_json.
@@ -98,4 +105,10 @@ type Adapter interface {
 	// clean up, whether because this adapter has no such concept or
 	// because it was already removed.
 	CleanupInstanceData(instanceID string) error
+	// CaptureBaseImage snapshots sourceDataDir (an instance's own
+	// state_data_ref content directory — the caller is responsible for
+	// confirming that instance is stopped first) into a new immutable
+	// artifact directory keyed by baseImageID, returning its path for the
+	// control plane to persist as base_images.artifact_path.
+	CaptureBaseImage(baseImageID, sourceDataDir string) (artifactPath string, err error)
 }

@@ -15,10 +15,11 @@ type TemplateListResponse struct {
 }
 
 type StartInstanceRequest struct {
-	InstanceID   string               `json:"instanceId"`
-	RuntimeClass string               `json:"runtimeClass"`
-	TemplateID   string               `json:"templateId"`
-	LaunchConfig runtime.LaunchConfig `json:"launchConfig"`
+	InstanceID            string               `json:"instanceId"`
+	RuntimeClass          string               `json:"runtimeClass"`
+	TemplateID            string               `json:"templateId"`
+	LaunchConfig          runtime.LaunchConfig `json:"launchConfig"`
+	BaseImageArtifactPath string               `json:"baseImageArtifactPath,omitempty"`
 }
 
 type StartInstanceResponse struct {
@@ -55,6 +56,19 @@ type StopInstanceResponse struct {
 // in-memory knowledge of which adapter owns this instance ID.
 type CleanupInstanceDataRequest struct {
 	RuntimeClass string `json:"runtimeClass"`
+}
+
+// CaptureBaseImageRequest's SourceDataDir is the source instance's own
+// state_data_ref — the caller (control plane) is responsible for confirming
+// that instance is stopped before calling this.
+type CaptureBaseImageRequest struct {
+	RuntimeClass  string `json:"runtimeClass"`
+	BaseImageID   string `json:"baseImageId"`
+	SourceDataDir string `json:"sourceDataDir"`
+}
+
+type CaptureBaseImageResponse struct {
+	ArtifactPath string `json:"artifactPath"`
 }
 
 type CreateTransportSessionRequest struct {

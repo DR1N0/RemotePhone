@@ -214,6 +214,17 @@ func (r *Registry) CleanupInstanceData(instanceID, runtimeClass string) error {
 	return adapter.CleanupInstanceData(instanceID)
 }
 
+// CaptureBaseImage takes runtimeClass explicitly, same reasoning as
+// CleanupInstanceData — the worker process making this call is typically
+// short-lived, spawned just for this purpose.
+func (r *Registry) CaptureBaseImage(runtimeClass, baseImageID, sourceDataDir string) (string, error) {
+	adapter, ok := r.Get(runtimeClass)
+	if !ok {
+		return "", ErrAdapterNotFound
+	}
+	return adapter.CaptureBaseImage(baseImageID, sourceDataDir)
+}
+
 func (r *Registry) CreateTransportSession(req TransportSessionRequest) (TransportSession, error) {
 	adapter, ok := r.Get(req.RuntimeClass)
 	if !ok {

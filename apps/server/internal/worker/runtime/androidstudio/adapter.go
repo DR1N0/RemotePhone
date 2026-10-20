@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -21,8 +22,14 @@ type Adapter struct {
 	stunURL        string
 	ffmpegPath     string
 	dataRoot       string
+	baseImageRoot  string
 	launchFn       func(string, LaunchRequest) (ProcessHandle, error)
 	stopFn         func(int) error
+	// commitOverlayFn merges a running (or just-stopped) instance's
+	// quickboot qcow2 overlay into its backing userdata-qemu.img — see
+	// CaptureBaseImage's doc comment for why this is necessary. Swappable
+	// in tests so they never shell out to a real qemu-img binary.
+	commitOverlayFn func(qemuImgPath, overlayPath string) error
 }
 
 type ProcessHandle interface {
@@ -52,6 +59,7 @@ func NewAdapter(cfg config.Config, store runtime.HandleStore, transportStore *tr
 		stunURL:        cfg.StunURL,
 		ffmpegPath:     cfg.FFmpegPath,
 		dataRoot:       cfg.InstanceDataRoot,
+		baseImageRoot:  cfg.BaseImageRoot,
 		stopFn:         StopProcess,
 	}
 	adapter.launchFn = func(emulatorPath string, req LaunchRequest) (ProcessHandle, error) {
@@ -60,6 +68,13 @@ func NewAdapter(cfg config.Config, store runtime.HandleStore, transportStore *tr
 			return nil, err
 		}
 		return execProcess{pid: cmd.Process.Pid}, nil
+	}
+	adapter.commitOverlayFn = func(qemuImgPath, overlayPath string) error {
+		output, err := exec.Command(qemuImgPath, "commit", overlayPath).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("qemu-img commit: %w (%s)", err, strings.TrimSpace(string(output)))
+		}
+		return nil
 	}
 	return adapter
 }
@@ -97,7 +112,7 @@ func (a *Adapter) Start(req runtime.StartRequest) (runtime.InstanceHandle, error
 		return runtime.InstanceHandle{}, err
 	}
 
-	instanceAVDName, instanceAVDDir, err := a.ensureInstanceAVD(req.InstanceID, template)
+	instanceAVDName, instanceAVDDir, err := a.ensureInstanceAVD(req.InstanceID, template, req.BaseImageArtifactPath)
 	if err != nil {
 		return runtime.InstanceHandle{}, fmt.Errorf("prepare instance AVD: %w", err)
 	}
@@ -188,6 +203,79 @@ func (a *Adapter) CleanupInstanceData(instanceID string) error {
 	return nil
 }
 
+// CaptureBaseImageArtifact snapshots a (stopped) instance's current AVD
+// state — sourceAvdDir, its state_data_ref content directory — into a new,
+// immutable artifact directory under baseImageRoot, keyed by baseImageID
+// (the control plane's freshly-generated base_images.id). Only config.ini
+// and userdata-qemu.img are copied: the same two files ensureInstanceAVD
+// seeds a new instance from, nothing else (cache/sdcard/snapshots are
+// ephemeral, regenerated fresh by the emulator either way). Returns the
+// artifact directory path for the control plane to persist as
+// base_images.artifact_path.
+// CaptureBaseImage's trickiest step is mergeQuickbootOverlay: the emulator
+// never writes new guest data directly into userdata-qemu.img once it's
+// booted at least once. Instead it creates a sibling userdata-qemu.img.qcow2
+// — a qcow2 overlay backed by userdata-qemu.img — and all live writes go
+// there (confirmed by direct testing: userdata-qemu.img's own mtime/hash
+// never change across a boot, while the .qcow2 sibling grows). Copying only
+// userdata-qemu.img therefore silently captures stale, pre-boot state. The
+// fix is `qemu-img commit`, which merges the overlay's deltas back into its
+// backing file in place — verified by booting a fresh instance from a
+// committed capture and confirming a file written and sync'd just before
+// stop is actually present (raw byte-grepping the disk image is NOT a
+// reliable way to check this — the qcow2/filesystem layout doesn't
+// guarantee short strings stay contiguous — an actual boot is the only
+// trustworthy verification).
+func (a *Adapter) CaptureBaseImage(baseImageID, sourceDataDir string) (artifactPath string, err error) {
+	if err := a.mergeQuickbootOverlay(sourceDataDir); err != nil {
+		return "", fmt.Errorf("merge quickboot overlay: %w", err)
+	}
+
+	artifactDir := filepath.Join(a.baseImageRoot, baseImageID)
+	if err := os.MkdirAll(artifactDir, 0700); err != nil {
+		return "", fmt.Errorf("create base image artifact dir: %w", err)
+	}
+	if err := copyFile(filepath.Join(sourceDataDir, "config.ini"), filepath.Join(artifactDir, "config.ini")); err != nil {
+		return "", fmt.Errorf("capture config.ini: %w", err)
+	}
+	if err := copyFile(filepath.Join(sourceDataDir, "userdata-qemu.img"), filepath.Join(artifactDir, "userdata-qemu.img")); err != nil {
+		return "", fmt.Errorf("capture userdata-qemu.img: %w", err)
+	}
+	return artifactDir, nil
+}
+
+// mergeQuickbootOverlay is a no-op if sourceDataDir has no
+// userdata-qemu.img.qcow2 (e.g. an instance that's never actually booted
+// far enough to create one — capture already requires state_data_ref to be
+// set, but that alone doesn't guarantee a boot completed).
+func (a *Adapter) mergeQuickbootOverlay(sourceDataDir string) error {
+	overlayPath := filepath.Join(sourceDataDir, "userdata-qemu.img.qcow2")
+	if _, err := os.Stat(overlayPath); err != nil {
+		return nil
+	}
+	qemuImgPath, err := a.resolveQemuImgBinary()
+	if err != nil {
+		return err
+	}
+	return a.commitOverlayFn(qemuImgPath, overlayPath)
+}
+
+// resolveQemuImgBinary finds qemu-img alongside the resolved emulator
+// binary — the Android SDK ships its own copy there (confirmed:
+// <sdk>/emulator/qemu-img), so this has no extra install requirement beyond
+// the SDK this whole package already depends on.
+func (a *Adapter) resolveQemuImgBinary() (string, error) {
+	emulatorPath, err := ResolveEmulatorBinary(a.discovery)
+	if err != nil {
+		return "", fmt.Errorf("resolve emulator binary (needed to locate sibling qemu-img): %w", err)
+	}
+	qemuImgPath := filepath.Join(filepath.Dir(emulatorPath), "qemu-img")
+	if info, err := os.Stat(qemuImgPath); err != nil || info.IsDir() {
+		return "", fmt.Errorf("qemu-img not found alongside emulator binary at %s", qemuImgPath)
+	}
+	return qemuImgPath, nil
+}
+
 // ensureInstanceAVD gives instanceID its own independently-registered AVD,
 // isolated from every other instance of the same template (and from the
 // template AVD itself) — confirmed by direct testing that the emulator's
@@ -202,7 +290,13 @@ func (a *Adapter) CleanupInstanceData(instanceID string) error {
 // registered, it's reused as-is (not re-cloned/overwritten) so an
 // already-diverged instance's data is never clobbered by a worker
 // crash-and-respawn cycle.
-func (a *Adapter) ensureInstanceAVD(instanceID string, template runtime.Template) (avdName, avdContentDir string, err error) {
+//
+// seedOverrideDir, if non-empty, is a captured base image's artifact
+// directory (see CaptureBaseImageArtifact) — both config.ini and the seed
+// userdata image are copied from there instead of the template's live,
+// on-disk AVD. Empty means "no base image has ever been promoted for this
+// template," today's original behavior.
+func (a *Adapter) ensureInstanceAVD(instanceID string, template runtime.Template, seedOverrideDir string) (avdName, avdContentDir string, err error) {
 	avdName = instanceAVDName(instanceID)
 	avdHomeDir := filepath.Join(a.discovery.HomeDir, ".android", "avd")
 	iniPath := filepath.Join(avdHomeDir, avdName+".ini")
@@ -218,11 +312,14 @@ func (a *Adapter) ensureInstanceAVD(instanceID string, template runtime.Template
 		return "", "", fmt.Errorf("create instance avd dir: %w", err)
 	}
 
-	templateAVDPath := template.Metadata["avdPath"]
-	if err := copyFile(filepath.Join(templateAVDPath, "config.ini"), filepath.Join(avdContentDir, "config.ini")); err != nil {
+	sourceDir := template.Metadata["avdPath"]
+	if seedOverrideDir != "" {
+		sourceDir = seedOverrideDir
+	}
+	if err := copyFile(filepath.Join(sourceDir, "config.ini"), filepath.Join(avdContentDir, "config.ini")); err != nil {
 		return "", "", fmt.Errorf("copy config.ini: %w", err)
 	}
-	if err := copyFile(resolveSeedUserdataPath(templateAVDPath), filepath.Join(avdContentDir, "userdata-qemu.img")); err != nil {
+	if err := copyFile(resolveSeedUserdataPath(sourceDir), filepath.Join(avdContentDir, "userdata-qemu.img")); err != nil {
 		return "", "", fmt.Errorf("seed userdata-qemu.img: %w", err)
 	}
 

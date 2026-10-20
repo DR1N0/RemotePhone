@@ -50,6 +50,10 @@ func (r *transportRuntime) CleanupInstanceData(instanceID string) error {
 	return nil
 }
 
+func (r *transportRuntime) CaptureBaseImage(baseImageID, sourceDataDir string) (string, error) {
+	return "", nil
+}
+
 func (r *transportRuntime) CreateTransportSession(req runtime.TransportSessionRequest) (runtime.TransportSession, error) {
 	r.transportCalls++
 	r.lastTransport = req

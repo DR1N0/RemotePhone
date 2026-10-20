@@ -291,6 +291,65 @@ func TestStartManagedInstancePersistsStateDataRefFromRuntimeHandle(t *testing.T)
 	}
 }
 
+// fakeBaseImageResolver is a BaseImageResolver stand-in — this package has
+// no dependency on image.Service (see instance.BaseImageResolver's doc
+// comment on the import-cycle reason), so a plain fake suffices.
+type fakeBaseImageResolver struct {
+	artifactPath string
+	ok           bool
+	err          error
+}
+
+func (f *fakeBaseImageResolver) ResolveCurrentBaseImage(ctx context.Context, templateID string) (string, bool, error) {
+	return f.artifactPath, f.ok, f.err
+}
+
+func TestStartManagedInstancePassesResolvedBaseImageArtifactPathToWorker(t *testing.T) {
+	worker := &fakeWorkerClient{
+		templates:   []runtime.Template{{TemplateID: "t-1", RuntimeClass: "android-studio-emulator"}},
+		startResult: workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{PID: 42}},
+	}
+	svc := newTestService(t, worker)
+	svc.SetBaseImageResolver(&fakeBaseImageResolver{artifactPath: "/mako/base-images/img-1", ok: true})
+	createTestUser(t, svc, "u-1", "registered", "active")
+	created, err := svc.CreateManagedInstance(context.Background(), validCreateRequest(), "u-1")
+	if err != nil {
+		t.Fatalf("CreateManagedInstance: %v", err)
+	}
+
+	actor := audit.NewContext(strPtr("u-1"), nil, "req-1")
+	if _, err := svc.StartManagedInstance(context.Background(), created.ID, "u-1", actor); err != nil {
+		t.Fatalf("StartManagedInstance: %v", err)
+	}
+
+	if len(worker.startedCalls) != 1 || worker.startedCalls[0].BaseImageArtifactPath != "/mako/base-images/img-1" {
+		t.Errorf("worker.startedCalls = %+v, want one call with BaseImageArtifactPath=/mako/base-images/img-1", worker.startedCalls)
+	}
+}
+
+func TestStartManagedInstanceLeavesBaseImageArtifactPathEmptyWhenNoneResolved(t *testing.T) {
+	worker := &fakeWorkerClient{
+		templates:   []runtime.Template{{TemplateID: "t-1", RuntimeClass: "android-studio-emulator"}},
+		startResult: workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{PID: 42}},
+	}
+	svc := newTestService(t, worker)
+	svc.SetBaseImageResolver(&fakeBaseImageResolver{ok: false})
+	createTestUser(t, svc, "u-1", "registered", "active")
+	created, err := svc.CreateManagedInstance(context.Background(), validCreateRequest(), "u-1")
+	if err != nil {
+		t.Fatalf("CreateManagedInstance: %v", err)
+	}
+
+	actor := audit.NewContext(strPtr("u-1"), nil, "req-1")
+	if _, err := svc.StartManagedInstance(context.Background(), created.ID, "u-1", actor); err != nil {
+		t.Fatalf("StartManagedInstance: %v", err)
+	}
+
+	if len(worker.startedCalls) != 1 || worker.startedCalls[0].BaseImageArtifactPath != "" {
+		t.Errorf("worker.startedCalls = %+v, want one call with empty BaseImageArtifactPath (resolver found nothing)", worker.startedCalls)
+	}
+}
+
 func TestDeleteManagedInstanceCleansUpInstanceDataWhenStateDataRefIsSet(t *testing.T) {
 	worker := &fakeWorkerClient{
 		templates:   []runtime.Template{{TemplateID: "t-1", RuntimeClass: "android-studio-emulator"}},

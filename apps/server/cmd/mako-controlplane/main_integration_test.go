@@ -7,11 +7,11 @@ import (
 )
 
 func TestAdminAndClientMuxesServeRealAuthRoutes(t *testing.T) {
-	svc, instanceSvc, sessionSvc, transportSvc, adminSvc, _ := newTestServiceForMain(t) // same real-DB-plus-bootstrap-secret pattern as every other test file
+	svc, instanceSvc, sessionSvc, transportSvc, adminSvc, imageSvc, _ := newTestServiceForMain(t) // same real-DB-plus-bootstrap-secret pattern as every other test file
 
-	adminSrv := httptest.NewServer(newAdminMux(svc, instanceSvc, adminSvc, transportSvc))
+	adminSrv := httptest.NewServer(newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc))
 	defer adminSrv.Close()
-	clientSrv := httptest.NewServer(newClientMux(svc, instanceSvc, sessionSvc, transportSvc))
+	clientSrv := httptest.NewServer(newClientMux(svc, instanceSvc, sessionSvc, transportSvc, imageSvc))
 	defer clientSrv.Close()
 
 	// /auth/status exists on the admin surface...

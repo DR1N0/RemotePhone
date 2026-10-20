@@ -50,10 +50,20 @@ type PlacementSelector interface {
 	ReleaseWorker(ctx context.Context, pid int) error
 }
 
+// BaseImageResolver is the subset of image.Service's behavior
+// startInstanceLifecycle needs — its own narrow interface (rather than a
+// direct *image.Service field) both for testability and because
+// image.Service's own capture flow needs to read the instances table
+// directly instead of depending on this package, to avoid an import cycle.
+type BaseImageResolver interface {
+	ResolveCurrentBaseImage(ctx context.Context, templateID string) (artifactPath string, ok bool, err error)
+}
+
 type Service struct {
 	db                *sql.DB
 	q                 *repo.Queries
 	placementSelector PlacementSelector
+	imageSvc          BaseImageResolver
 }
 
 // NewService constructs a Service. Unlike pre-Phase-4, there is no single
@@ -64,6 +74,16 @@ type Service struct {
 // docs/plans/worker-lifecycle.md.
 func NewService(db *sql.DB, placementSelector PlacementSelector) *Service {
 	return &Service{db: db, q: repo.New(db), placementSelector: placementSelector}
+}
+
+// SetBaseImageResolver wires in the image package's base-image resolution
+// — optional and settable after construction (rather than a NewService
+// param) so the ten-plus existing call sites that don't care about this
+// feature are unaffected. A nil imageSvc (the default) means "no base image
+// has ever been promoted for any template," i.e. every instance clones from
+// its template's live, on-disk AVD exactly as before this feature existed.
+func (s *Service) SetBaseImageResolver(imageSvc BaseImageResolver) {
+	s.imageSvc = imageSvc
 }
 
 func (s *Service) withTx(ctx context.Context, fn func(q *repo.Queries) error) error {
@@ -575,11 +595,23 @@ func (s *Service) startInstanceLifecycle(ctx context.Context, row repo.Instance,
 	}
 	workerClient := NewHTTPWorkerClient(baseURL)
 
+	// Best-effort: a resolution failure here must never block starting the
+	// instance over what's purely an optimization — it just falls back to
+	// an empty path, which the worker already treats as "no promoted base
+	// image, clone from the live AVD" (today's original behavior).
+	var baseImageArtifactPath string
+	if s.imageSvc != nil {
+		if path, ok, err := s.imageSvc.ResolveCurrentBaseImage(ctx, row.TemplateID); err == nil && ok {
+			baseImageArtifactPath = path
+		}
+	}
+
 	response, err := workerClient.StartInstance(ctx, workerapi.StartInstanceRequest{
-		InstanceID:   row.ID,
-		RuntimeClass: row.RuntimeClass,
-		TemplateID:   row.TemplateID,
-		LaunchConfig: launchConfig,
+		InstanceID:            row.ID,
+		RuntimeClass:          row.RuntimeClass,
+		TemplateID:            row.TemplateID,
+		LaunchConfig:          launchConfig,
+		BaseImageArtifactPath: baseImageArtifactPath,
 	})
 	if err != nil {
 		_ = s.placementSelector.ReleaseWorker(context.Background(), pid)

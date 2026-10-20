@@ -63,10 +63,11 @@ func NewRouter(deps Dependencies) http.Handler {
 		}
 
 		handle, err := deps.RuntimeRegistry.Start(runtimepkg.StartRequest{
-			InstanceID:   req.InstanceID,
-			RuntimeClass: req.RuntimeClass,
-			TemplateID:   req.TemplateID,
-			LaunchConfig: req.LaunchConfig,
+			InstanceID:            req.InstanceID,
+			RuntimeClass:          req.RuntimeClass,
+			TemplateID:            req.TemplateID,
+			LaunchConfig:          req.LaunchConfig,
+			BaseImageArtifactPath: req.BaseImageArtifactPath,
 		})
 		if err != nil {
 			status := http.StatusInternalServerError
@@ -205,6 +206,35 @@ func NewRouter(deps Dependencies) http.Handler {
 		}
 
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	mux.HandleFunc("POST /v1/base-images/capture", func(w http.ResponseWriter, r *http.Request) {
+		if deps.RuntimeRegistry == nil {
+			writeErrorMessage(w, http.StatusBadRequest, "runtime registry is not configured")
+			return
+		}
+
+		var req CaptureBaseImageRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErrorMessage(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		if strings.TrimSpace(req.RuntimeClass) == "" || strings.TrimSpace(req.BaseImageID) == "" || strings.TrimSpace(req.SourceDataDir) == "" {
+			writeErrorMessage(w, http.StatusBadRequest, "runtimeClass, baseImageId, and sourceDataDir are required")
+			return
+		}
+
+		artifactPath, err := deps.RuntimeRegistry.CaptureBaseImage(req.RuntimeClass, req.BaseImageID, req.SourceDataDir)
+		if err != nil {
+			httpStatus := http.StatusInternalServerError
+			if errors.Is(err, runtimepkg.ErrAdapterNotFound) {
+				httpStatus = http.StatusBadRequest
+			}
+			writeError(w, httpStatus, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, CaptureBaseImageResponse{ArtifactPath: artifactPath})
 	})
 
 	mux.HandleFunc("POST /v1/transport/session", func(w http.ResponseWriter, r *http.Request) {

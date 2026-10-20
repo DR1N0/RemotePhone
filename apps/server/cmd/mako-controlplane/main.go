@@ -18,6 +18,7 @@ import (
 	"mako/internal/controlplane/apiserver/clientapi"
 	"mako/internal/controlplane/auth"
 	"mako/internal/controlplane/controller"
+	"mako/internal/controlplane/image"
 	"mako/internal/controlplane/instance"
 	"mako/internal/controlplane/persistence"
 	"mako/internal/controlplane/placement"
@@ -30,7 +31,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func newAdminMux(svc *auth.Service, instanceSvc *instance.Service, adminSvc *admin.Service, transportSvc *transport.Service) *http.ServeMux {
+func newAdminMux(svc *auth.Service, instanceSvc *instance.Service, adminSvc *admin.Service, transportSvc *transport.Service, imageSvc *image.Service) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -39,6 +40,7 @@ func newAdminMux(svc *auth.Service, instanceSvc *instance.Service, adminSvc *adm
 	adminapi.RegisterInstanceRoutes(mux, instanceSvc, adminSvc, svc)
 	adminapi.RegisterAdminManagementRoutes(mux, adminSvc, svc, transportSvc)
 	adminapi.RegisterAdminAuditRoutes(mux, adminSvc, svc)
+	adminapi.RegisterImageRoutes(mux, imageSvc, svc)
 	return mux
 }
 
@@ -46,7 +48,7 @@ func newAdminMux(svc *auth.Service, instanceSvc *instance.Service, adminSvc *adm
 // moderation has no cross-owner admin concern (see
 // docs/plans/session-transport-redesign.md), so none of this is on
 // newAdminMux.
-func newClientMux(svc *auth.Service, instanceSvc *instance.Service, sessionSvc *session.Service, transportSvc *transport.Service) *http.ServeMux {
+func newClientMux(svc *auth.Service, instanceSvc *instance.Service, sessionSvc *session.Service, transportSvc *transport.Service, imageSvc *image.Service) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -56,6 +58,7 @@ func newClientMux(svc *auth.Service, instanceSvc *instance.Service, sessionSvc *
 	clientapi.RegisterSessionRoutes(mux, sessionSvc, transportSvc, svc)
 	clientapi.RegisterSessionInviteRoutes(mux, sessionSvc, svc)
 	clientapi.RegisterSignalingRoutes(mux, sessionSvc, instanceSvc, transportSvc, svc)
+	clientapi.RegisterImageRoutes(mux, imageSvc, svc)
 	return mux
 }
 
@@ -109,6 +112,8 @@ func run() error {
 	}
 	placementSelector := placement.NewSelector(workerproc.OSExecer{}, workerBinaryPath)
 	instanceSvc := instance.NewService(db, placementSelector)
+	imageSvc := image.NewService(db, placementSelector)
+	instanceSvc.SetBaseImageResolver(imageSvc)
 
 	// Matches the TS config's MAKO_OWNER_ABSENCE_TIMEOUT_MS default (5
 	// minutes) — see apps/controlplane/src/config/env.ts.
@@ -154,10 +159,10 @@ func run() error {
 		return err
 	}
 
-	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc, instanceSvc, adminSvc, transportSvc)}
+	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc)}
 	clientSrv := &http.Server{
 		Addr:      envOrDefault("MAKO_CLIENT_ADDR", "127.0.0.1:3000"),
-		Handler:   newClientMux(svc, instanceSvc, sessionSvc, transportSvc),
+		Handler:   newClientMux(svc, instanceSvc, sessionSvc, transportSvc, imageSvc),
 		TLSConfig: &tls.Config{Certificates: []tls.Certificate{tlsCert}},
 	}
 

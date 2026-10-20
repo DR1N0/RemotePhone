@@ -15,6 +15,7 @@ type Config struct {
 	FFmpegPath          string
 	StunURL             string
 	InstanceDataRoot    string
+	BaseImageRoot       string
 }
 
 func Load() Config {
@@ -35,6 +36,7 @@ func Load() Config {
 		FFmpegPath:          os.Getenv("MAKO_FFMPEG_PATH"),
 		StunURL:             getenv("STUN_URL", "stun:stun.l.google.com:19302"),
 		InstanceDataRoot:    getenv("MAKO_INSTANCE_DATA_ROOT", filepath.Join(homeDir, ".mako", "instance-data")),
+		BaseImageRoot:       getenv("MAKO_BASE_IMAGE_ROOT", filepath.Join(homeDir, ".mako", "base-images")),
 	}
 }
 

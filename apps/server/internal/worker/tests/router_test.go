@@ -85,6 +85,10 @@ func (r *routerRuntime) CleanupInstanceData(instanceID string) error {
 	return nil
 }
 
+func (r *routerRuntime) CaptureBaseImage(baseImageID, sourceDataDir string) (string, error) {
+	return "", nil
+}
+
 func (r *routerRuntime) CreateTransportSession(req runtime.TransportSessionRequest) (runtime.TransportSession, error) {
 	return runtime.TransportSession{
 		SessionID:     req.SessionID,

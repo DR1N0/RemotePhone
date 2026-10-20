@@ -69,6 +69,10 @@ func (s *stubRuntimeAdapter) CleanupInstanceData(instanceID string) error {
 	return nil
 }
 
+func (s *stubRuntimeAdapter) CaptureBaseImage(baseImageID, sourceDataDir string) (string, error) {
+	return "", nil
+}
+
 func (s *stubRuntimeAdapter) CreateTransportSession(req workerruntime.TransportSessionRequest) (workerruntime.TransportSession, error) {
 	return workerruntime.TransportSession{
 		SessionID:     req.SessionID,
