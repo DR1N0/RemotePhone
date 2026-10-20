@@ -31,6 +31,8 @@ Admin-only routes:
 | POST | `/api/v1/admin/users/{id}/unban` | |
 | POST | `/api/v1/admin/sessions/{id}/attachments/{attachmentId}/revoke` | revokes one guest's attachment without closing the session |
 | GET | `/api/v1/admin/audit` | cursor-paginated (`limit`, `cursor`), newest first, requires active admin |
+| GET | `/api/v1/admin/images` | `?templateId=` required; lists every captured base image for that template, newest first — how an admin discovers candidate ids to promote |
+| POST | `/api/v1/admin/images/{candidateId}/promote` | moves that candidate's template to point at it — the only base-image operation that changes what any instance resolves to; rollback is the same call with an older candidate's id |
 | GET | `/healthz` | |
 
 ## Client API — `127.0.0.1:3000` (HTTPS, self-signed — see `security-model.md`)
@@ -57,6 +59,7 @@ Client-only routes:
 | POST | `/api/v1/instances/{id}/start` | owner-checked; spawns a dedicated `mako-worker` process for this instance and calls it to boot the emulator |
 | POST | `/api/v1/instances/{id}/stop` | owner-checked |
 | DELETE | `/api/v1/instances/{id}` | owner-checked |
+| POST | `/api/v1/instances/{id}/capture-candidate-image` | owner-checked; instance must be stopped and have been started at least once. Snapshots its current AVD state into a new, immutable, *inert* `base_images` row — never affects what any other instance resolves to on its own (see `/admin/images/:candidateId/promote` above) |
 | POST | `/api/v1/sessions` | requires account-scoped credential; creates the owner attachment + its credential |
 | GET | `/api/v1/sessions/{id}` | account (owner-checked) or bound attachment credential; forbidden collapses to 404 |
 | POST | `/api/v1/sessions/{id}/join` | **tombstone** — returns `410 Gone` |
@@ -74,4 +77,4 @@ Client-only routes:
 
 ## Not yet implemented (any surface)
 
-Worker inventory, template/base-image management, pairing. These route groups exist as empty stub packages (`image/`, `pairing/`) with no HTTP routes registered anywhere yet.
+Worker inventory, pairing. `pairing/` exists as an empty stub package, deliberately deferred until a native client exists to pair with — see `security-model.md`. `image/` (template/base-image management) is implemented as of 2026-10-20 — see the capture-candidate-image/admin-images routes above, and `docs/architecture/decisions-log.md`'s 2026-10-20 entries for its current verification status (unit-tested; live end-to-end boot verification inconclusive pending a retest on a fresh host).
