@@ -46,7 +46,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
             username: _usernameController.text.trim(),
             password: _passwordController.text,
           );
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)

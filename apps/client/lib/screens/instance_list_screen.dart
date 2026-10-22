@@ -160,14 +160,17 @@ class _InstanceListScreenState extends State<InstanceListScreen> {
     final auth = context.watch<AuthService>();
     return Scaffold(
       appBar: AppBar(
-        title: Text(auth.currentUser?.displayName ?? 'Instances'),
+        title: Text(auth.activeProfile?.name ??
+            auth.currentUser?.displayName ??
+            'Instances'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loading ? null : _refresh,
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
+            tooltip: 'Switch server',
+            icon: const Icon(Icons.dns_outlined),
             onPressed: () => context.read<AuthService>().logout(),
           ),
         ],

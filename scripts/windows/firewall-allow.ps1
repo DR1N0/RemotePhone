@@ -32,6 +32,7 @@ $programs = @(
     (Join-Path $repoRoot ".bin\mako-controlplane.exe"),
     (Join-Path $repoRoot ".bin\mako-worker.exe"),
     (Join-Path $repoRoot ".bin\mako-probe.exe"),
+    (Join-Path $repoRoot ".bin\webrtc.test.exe"),
     (Join-Path $sdkRoot "emulator\emulator.exe"),
     (Join-Path $sdkRoot "emulator\qemu\windows-x86_64\qemu-system-x86_64.exe"),
     (Join-Path $sdkRoot "emulator\qemu\windows-x86_64\qemu-system-x86_64-headless.exe")

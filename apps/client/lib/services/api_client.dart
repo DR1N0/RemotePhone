@@ -19,6 +19,26 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $message';
 }
 
+class ServerInfo {
+  final String serverId;
+  final String name;
+  final String version;
+
+  const ServerInfo({
+    required this.serverId,
+    required this.name,
+    required this.version,
+  });
+
+  factory ServerInfo.fromJson(Map<String, dynamic> json) {
+    return ServerInfo(
+      serverId: json['serverId'] as String,
+      name: json['name'] as String? ?? 'mako',
+      version: json['version'] as String? ?? '',
+    );
+  }
+}
+
 /// Talks to mako-controlplane's client HTTP surface. One client per
 /// configured server; construct a fresh one whenever the server URL or
 /// bearer token changes (see AuthService).
@@ -119,6 +139,11 @@ class ApiClient {
   }
 
   // --- Auth ---
+
+  Future<ServerInfo> serverInfo() async {
+    final json = await _get('/api/v1/server/info');
+    return ServerInfo.fromJson(json);
+  }
 
   Future<(String, User)> login({
     required String username,

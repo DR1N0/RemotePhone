@@ -25,6 +25,7 @@ import (
 	"mako/internal/controlplane/persistence"
 	"mako/internal/controlplane/placement"
 	"mako/internal/controlplane/reconcile"
+	"mako/internal/controlplane/serverinfo"
 	"mako/internal/controlplane/session"
 	"mako/internal/controlplane/tlsidentity"
 	"mako/internal/controlplane/transport"
@@ -50,13 +51,14 @@ func newAdminMux(svc *auth.Service, instanceSvc *instance.Service, adminSvc *adm
 // moderation has no cross-owner admin concern (see
 // docs/plans/session-transport-redesign.md), so none of this is on
 // newAdminMux.
-func newClientMux(svc *auth.Service, instanceSvc *instance.Service, sessionSvc *session.Service, transportSvc *transport.Service, imageSvc *image.Service, pairingSvc *pairing.Service) *http.ServeMux {
+func newClientMux(svc *auth.Service, instanceSvc *instance.Service, sessionSvc *session.Service, transportSvc *transport.Service, imageSvc *image.Service, pairingSvc *pairing.Service, serverInfo *serverinfo.Info) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	clientapi.RegisterAuthRoutes(mux, svc)
 	clientapi.RegisterPairingRoutes(mux, pairingSvc)
+	serverinfo.RegisterRoutes(mux, serverInfo)
 	clientapi.RegisterInstanceRoutes(mux, instanceSvc, svc)
 	clientapi.RegisterTemplateRoutes(mux, instanceSvc, svc)
 	clientapi.RegisterSessionRoutes(mux, sessionSvc, transportSvc, svc)
@@ -166,12 +168,20 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	serverInfo, err := serverinfo.LoadOrCreate(
+		envOrDefault("MAKO_SERVER_ID_PATH", dbPath+".server-id"),
+		os.Getenv("MAKO_SERVER_NAME"),
+	)
+	if err != nil {
+		return err
+	}
+	log.Printf("server identity: %s (%s)", serverInfo.Name, serverInfo.ServerID)
 	log.Printf("pairing PIN: %s (certificate SHA-256: %s)", pairingSvc.PIN(), pairingSvc.CertSHA256())
 
 	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc)}
 	clientSrv := &http.Server{
 		Addr:      envOrDefault("MAKO_CLIENT_ADDR", "127.0.0.1:3000"),
-		Handler:   newClientMux(svc, instanceSvc, sessionSvc, transportSvc, imageSvc, pairingSvc),
+		Handler:   newClientMux(svc, instanceSvc, sessionSvc, transportSvc, imageSvc, pairingSvc, serverInfo),
 		TLSConfig: &tls.Config{Certificates: []tls.Certificate{tlsCert}},
 	}
 

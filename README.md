@@ -60,6 +60,8 @@ Set these before starting the control plane (the spawned worker inherits its env
 | `MAKO_HEADLESS` | `1` | One worker owns one instance; default `-no-window`. Set `0` only to debug with a visible emulator window. |
 | `MAKO_EMULATOR_AUDIO` | `none` | Emulator `-audio` backend. `none` keeps guest audio for `streamAudio` but plays nothing on the host; use `auto` for local debugging with host sound. |
 | `MAKO_PAIRING_PIN` | random 6 digits | PIN printed at control-plane startup and entered once in the Android client; set a stable value for automation. |
+| `MAKO_SERVER_NAME` | host name | Display name shown in the client's server picker. The stable server ID is independent of it. |
+| `MAKO_SERVER_ID_PATH` | `<db>.server-id` | Persisted UUID identifying this server across restarts/IP changes. |
 | `MAKO_WEBRTC_HOST_IP` | unset | Optional debug override: restrict ICE to one IPv4 address. By default every routable IPv4 interface (LAN, Tailscale, other VPNs) is advertised and ICE chooses. |
 
 ### 3. Build and run
@@ -116,7 +118,15 @@ On the login screen, tap **Pair server** and enter the six-digit PIN printed by 
 
 The first time `mako-worker.exe`, `emulator.exe`, or either qemu binary listens, Windows Defender Firewall may prompt. Allow private networks. Running test tools with `go run` creates a new temporary executable each time and therefore re-prompts every run — build them to a fixed path instead.
 
-For a one-time setup, run [scripts/windows/firewall-allow.ps1](scripts/windows/firewall-allow.ps1) from an elevated PowerShell. It adds inbound allow-rules for the fixed binaries (including the headless qemu) and, with `-DisableNotifications`, also silences the "blocked app" popup for unknown programs. After that, starting `mako-controlplane` is enough: it spawns each instance's worker and emulator itself.
+For a one-time setup, run [scripts/windows/firewall-allow.ps1](scripts/windows/firewall-allow.ps1) from an elevated PowerShell. It adds inbound allow-rules for the fixed binaries (including the headless qemu and `.bin\webrtc.test.exe`) and, with `-DisableNotifications`, also silences the "blocked app" popup for unknown programs. After that, starting `mako-controlplane` is enough: it spawns each instance's worker and emulator itself.
+
+`go test` normally builds a new temporary test executable, which cannot be covered by a fixed-path firewall rule. For the WebRTC transport tests, build once to the fixed path:
+
+```powershell
+cd apps/server
+go test -c -o ..\..\.bin\webrtc.test.exe ./internal/worker/transport/webrtc
+..\..\.bin\webrtc.test.exe -test.v
+```
 
 The client API (TCP 3000) and WebRTC UDP ports must be reachable from the phone.
 

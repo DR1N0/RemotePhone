@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'services/auth_service.dart';
 import 'screens/instance_list_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/server_list_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,6 +53,8 @@ class _RootRouter extends StatelessWidget {
         return const Scaffold(body: Center(child: CircularProgressIndicator()));
       case AuthStatus.unauthenticated:
         return const LoginScreen();
+      case AuthStatus.serverSelection:
+        return const ServerListScreen();
       case AuthStatus.authenticated:
         return const InstanceListScreen();
     }

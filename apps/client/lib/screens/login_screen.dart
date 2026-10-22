@@ -84,7 +84,11 @@ class _LoginScreenState extends State<LoginScreen> {
             password: _passwordController.text,
           );
       // AuthService.notifyListeners() drives the app's own auth-state
-      // routing (see app.dart) — no explicit navigation needed here.
+      // routing (see main.dart). When this screen was pushed from the server
+      // picker, also unwind back to the (now rebuilt) root.
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)

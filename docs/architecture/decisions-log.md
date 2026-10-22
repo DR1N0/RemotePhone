@@ -8,6 +8,16 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-23 — Multi-server client, stable server identity, mDNS discovery design
+
+The Android client used to hold exactly one server URL/token, so switching hosts meant logging out and losing the previous pairing. It now stores a list of `ServerProfile`s (server ID, display name, base URL, certificate SHA-256, bearer token, username) in secure storage. Startup lands on a server picker; selecting one validates its token and opens that server's instance list. The instance screen's action returns to the picker without forgetting servers. A profile is keyed by the stable server ID, not by address or name, so renaming/re-addressing does not duplicate it.
+
+The control plane now owns a stable identity: `MAKO_SERVER_ID_PATH` (default `<db>.server-id`) persists a UUID across restarts, `MAKO_SERVER_NAME` is the configurable display name (default hostname), and unauthenticated `GET /api/v1/server/info` returns `{serverId,name,version}`. The client records that identity when adding a server and refreshes the display name on selection.
+
+LAN discovery is specified in [`mdns-discovery.md`](mdns-discovery.md): advertise `_mako._tcp.local` with TXT `id`, `name`, `v`, and `path`; the client browses via Android NSD, deduplicates by server ID, and updates a known profile's address when DHCP moves it. mDNS is only an address hint — the server ID is verified via `/server/info`, and certificate pinning/PIN pairing remain mandatory. Implementation is future work; manual URL entry remains the fallback.
+
+---
+
 ### 2026-10-22 — PIN-gated certificate pinning for the Android client
 
 The client API now has a working pairing flow. The control plane generates a six-digit PIN (or uses `MAKO_PAIRING_PIN`), logs it with the server certificate SHA-256, and serves `GET /api/v1/pairing/info` plus `POST /api/v1/pairing/verify`. Verification is constant-time and rate-limited to five failures/minute. The Android login screen has a **Pair server** action; it uses a temporary unpinned client, submits the PIN, checks that the fingerprint returned by the server matches the certificate presented on that TLS connection, and stores the fingerprint in `flutter_secure_storage`. All later API clients pin that fingerprint and reject a different certificate.
