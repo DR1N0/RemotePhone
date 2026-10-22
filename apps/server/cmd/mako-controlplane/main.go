@@ -60,6 +60,7 @@ func newClientMux(svc *auth.Service, instanceSvc *instance.Service, sessionSvc *
 	})
 	clientapi.RegisterAuthRoutes(mux, svc)
 	clientapi.RegisterPairingRoutes(mux, pairingSvc)
+	clientapi.RegisterPairingAdminRoutes(mux, pairingSvc, svc)
 	serverinfo.RegisterRoutes(mux, serverInfo)
 	clientapi.RegisterInstanceRoutes(mux, instanceSvc, svc)
 	clientapi.RegisterTemplateRoutes(mux, instanceSvc, svc)

@@ -25,9 +25,10 @@
 
 The client API's self-signed certificate is trusted through a PIN-gated first contact:
 
-1. Control plane generates a six-digit PIN at startup (or uses `MAKO_PAIRING_PIN`) and logs it together with the certificate SHA-256.
-2. The client connects with a temporary unpinned HTTP client and submits the PIN to `POST /api/v1/pairing/verify`.
-3. The server verifies the PIN (constant-time; five failures/minute) and returns the certificate SHA-256; the client checks that it matches the certificate actually presented on this TLS connection, then stores it via `flutter_secure_storage`.
+1. Control plane generates a six-digit bootstrap PIN at startup (or uses `MAKO_PAIRING_PIN`) and logs it together with the certificate SHA-256.
+2. An authenticated admin can also mint a short-lived, single-use code with `POST /api/v1/admin/pairing-codes` (`ttlSeconds`, capped at one hour) and send it to a remote user. The Android client accepts either as its pairing code.
+3. The client connects with a temporary unpinned HTTP client and submits the code to `POST /api/v1/pairing/verify`.
+4. The server verifies the code (constant-time; five failures/minute; admin codes are consumed after one success) and returns the certificate SHA-256; the client checks that it matches the certificate actually presented on this TLS connection, then stores it via `flutter_secure_storage`.
 4. All later clients pin that certificate hash; a different certificate makes the TLS handshake fail.
 
 This is PIN-gated TOFU, not a PAKE: an active MITM during the very first pairing could still substitute its certificate. It does remove blind trust-on-first-use and passive interception; a future revision can add a PAKE/SAS for first-contact resistance. Authorization after pairing remains bearer-token based — pairing only establishes TLS trust, not user identity.

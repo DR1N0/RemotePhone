@@ -17,10 +17,20 @@ Connection identity is **(serverId, userId)**, not server alone. A server card g
 The add-server flow was collapsed from four concepts (pair / invite / register / login) into one page:
 
 1. URL.
-2. PIN field only when that URL has no pinned certificate; it is submitted together with the first login.
-3. Username/password, with an "I have an invite token" toggle that adds the invite field for account creation.
+2. Pairing code only when that URL has no pinned certificate; it is submitted together with the first login.
+3. Username/password and Log in. There is no client-side registration: accounts are created by an admin, so the client never has to explain invite codes or ask the user to pair before registering.
 
-The separate "Pair server" button and the standalone Register screen are gone, so registration can never claim the server is unpaired while the user is already on the pairing page. The server list is the root screen; instance lists are pushed on top, so Back returns to the server picker. New Instance moved to the top `+` action, matching the server screen.
+The separate "Pair server" button and the standalone Register screen are gone. The server picker is the root screen even with zero saved servers, so the initial page already runs mDNS discovery and shows Nearby servers; instance lists are pushed on top, so Back returns to the server picker. New Instance moved to the top `+` action, matching the server screen.
+
+For users who cannot touch the host, an authenticated admin can mint a short-lived single-use pairing code:
+
+```
+POST /api/v1/admin/pairing-codes
+Authorization: Bearer <admin token>
+{"ttlSeconds": 600}
+```
+
+The code is entered as the client's pairing code. The startup `MAKO_PAIRING_PIN` remains available for local bootstrap, but is no longer the only way to pair.
 
 ---
 
@@ -36,7 +46,7 @@ LAN discovery is implemented for both sides, following [`mdns-discovery.md`](mdn
 
 ### 2026-10-22 — PIN-gated certificate pinning for the Android client
 
-The client API now has a working pairing flow. The control plane generates a six-digit PIN (or uses `MAKO_PAIRING_PIN`), logs it with the server certificate SHA-256, and serves `GET /api/v1/pairing/info` plus `POST /api/v1/pairing/verify`. Verification is constant-time and rate-limited to five failures/minute. The Android login screen has a **Pair server** action; it uses a temporary unpinned client, submits the PIN, checks that the fingerprint returned by the server matches the certificate presented on that TLS connection, and stores the fingerprint in `flutter_secure_storage`. All later API clients pin that fingerprint and reject a different certificate.
+The client API now has a working pairing flow. The control plane generates a six-digit startup PIN (or uses `MAKO_PAIRING_PIN`) and an authenticated admin can mint short-lived single-use pairing codes via `POST /api/v1/admin/pairing-codes`. Both are printed/returned with the server certificate SHA-256, and `POST /api/v1/pairing/verify` is constant-time and rate-limited to five failures/minute. The Android add-server page shows a pairing-code field only until the URL's certificate is pinned; it submits the code together with the first login, checks that the fingerprint returned by the server matches the certificate presented on that TLS connection, and stores the fingerprint in `flutter_secure_storage`. All later API clients pin that fingerprint and reject a different certificate.
 
 This is PIN-gated TOFU, not a PAKE: an active MITM during the very first pairing could still substitute its certificate. It removes blind trust-on-first-use and passive interception; a PAKE/SAS is future work. Authorization remains bearer-token based — pairing establishes TLS trust, not user identity.
 

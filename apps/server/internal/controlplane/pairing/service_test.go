@@ -69,3 +69,26 @@ func TestNewRejectsEmptyPIN(t *testing.T) {
 		t.Fatal("New accepted empty PIN")
 	}
 }
+
+func TestIssueCodeIsSingleUse(t *testing.T) {
+	svc, err := New("123456", testCert(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, expires, err := svc.IssueCode(5 * time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(code) != 8 {
+		t.Fatalf("code length = %d, want 8", len(code))
+	}
+	if !expires.After(time.Now()) {
+		t.Fatal("issued code is already expired")
+	}
+	if err := svc.Verify(code); err != nil {
+		t.Fatalf("first Verify: %v", err)
+	}
+	if err := svc.Verify(code); err != ErrInvalidPIN {
+		t.Fatalf("second Verify = %v, want ErrInvalidPIN", err)
+	}
+}

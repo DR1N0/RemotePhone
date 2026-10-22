@@ -231,15 +231,21 @@ class _ServerListScreenState extends State<ServerListScreen> {
             _groupSection(
               context,
               title: 'LAN',
-              subtitle: 'IP may change (mDNS planned)',
+              subtitle: 'IP may move; mDNS keeps it current',
               icon: Icons.wifi,
               groups: lan,
             ),
-          if (groups.isEmpty)
-            const EmptyState(
+          if (groups.isEmpty && _nearby.isEmpty)
+            EmptyState(
               icon: Icons.dns_outlined,
               title: 'No servers yet',
-              message: 'Tap + to pair a mako server.',
+              message: 'Pair a server, or wait for one to appear under Nearby '
+                  'when it is on this LAN.',
+              action: FilledButton.icon(
+                onPressed: _addServer,
+                icon: const Icon(Icons.add),
+                label: const Text('Add server'),
+              ),
             ),
         ],
       ),

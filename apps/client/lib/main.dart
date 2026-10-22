@@ -3,7 +3,6 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 
 import 'services/auth_service.dart';
-import 'screens/login_screen.dart';
 import 'screens/server_list_screen.dart';
 import 'theme/app_theme.dart';
 
@@ -54,11 +53,8 @@ class _RootRouter extends StatelessWidget {
     if (auth.status == AuthStatus.unknown) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    // Servers are the home screen. Instance lists are pushed on top of it, so
-    // Back from an instance list always returns here instead of exiting.
-    if (auth.servers.isEmpty) {
-      return const LoginScreen();
-    }
+    // The server picker is always home, including before the first pairing:
+    // that is where mDNS Nearby results and the Add server action live.
     return const ServerListScreen();
   }
 }

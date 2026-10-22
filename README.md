@@ -113,7 +113,16 @@ The login screen takes a server URL. Use `https://10.0.2.2:3000` from an emulato
 
 Log in, tap **+**, pick a template from the server's discovered AVDs, and create as many instances as you want. Each running instance has its own **Connect** button.
 
-On the login screen, tap **Pair server** and enter the six-digit PIN printed by `mako-controlplane` at startup (`pairing PIN: …`). This pins the server certificate for that URL; later logins verify the pin. Set `MAKO_PAIRING_PIN` to choose a stable PIN, or leave it unset to get a fresh PIN each control-plane start. Already-paired devices keep working across PIN changes.
+Tap **+** (or **Pair** next to a server discovered under Nearby), enter the server URL and, on the first visit only, a pairing code. The local bootstrap PIN is printed by `mako-controlplane` at startup (`pairing PIN: …`) or set with `MAKO_PAIRING_PIN`. For a remote user who cannot touch the host, an admin can mint a short-lived code with:
+
+```powershell
+Set-Content -NoNewline $env:TEMP\pair.json '{"ttlSeconds":600}'
+curl.exe -k -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" `
+  --data-binary "@$env:TEMP\pair.json" `
+  https://192.168.1.7:3000/api/v1/admin/pairing-codes
+```
+
+Send the returned `code` to the user. Accounts are created by the admin; the client only signs in (the server still exposes registration-invite endpoints for future use). After pairing, that URL's certificate is pinned and the pairing-code field disappears.
 
 ### Firewall
 

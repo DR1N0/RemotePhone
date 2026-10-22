@@ -42,6 +42,7 @@ type Service struct {
 
 	mu       sync.Mutex
 	failures []time.Time
+	codes    map[string]time.Time
 }
 
 // New builds a pairing service for cert, using pin verbatim. pin is intended
@@ -57,6 +58,7 @@ func New(pin string, cert tls.Certificate) (*Service, error) {
 	return &Service{
 		pin:      pin,
 		certHash: hex.EncodeToString(sum[:]),
+		codes:    make(map[string]time.Time),
 	}, nil
 }
 
@@ -91,6 +93,41 @@ func (s *Service) PIN() string { return s.pin }
 // Clients pin this value after a successful pairing.
 func (s *Service) CertSHA256() string { return s.certHash }
 
+// IssueCode creates a short-lived, single-use pairing code for a remote
+// administrator to send to a client. The static startup PIN remains valid for
+// local/bootstrap use; these codes are the remote path.
+func (s *Service) IssueCode(ttl time.Duration) (string, time.Time, error) {
+	if ttl <= 0 {
+		ttl = 10 * time.Minute
+	}
+	if ttl > time.Hour {
+		ttl = time.Hour
+	}
+	code, err := generateCode()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	expiresAt := time.Now().Add(ttl)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for existing, expiry := range s.codes {
+		if now.After(expiry) {
+			delete(s.codes, existing)
+		}
+	}
+	s.codes[code] = expiresAt
+	return code, expiresAt, nil
+}
+
+func generateCode() (string, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(100_000_000))
+	if err != nil {
+		return "", fmt.Errorf("generate pairing code: %w", err)
+	}
+	return fmt.Sprintf("%08d", n.Int64()), nil
+}
+
 // Verify checks pin and enforces a small failure-rate limit so a LAN attacker
 // cannot brute-force the six-digit code at wire speed.
 func (s *Service) Verify(pin string) error {
@@ -109,10 +146,15 @@ func (s *Service) Verify(pin string) error {
 		return ErrTooManyAttempts
 	}
 
-	if subtle.ConstantTimeCompare([]byte(pin), []byte(s.pin)) != 1 {
-		s.failures = append(s.failures, now)
-		return ErrInvalidPIN
+	if subtle.ConstantTimeCompare([]byte(pin), []byte(s.pin)) == 1 {
+		s.failures = nil
+		return nil
 	}
-	s.failures = nil
-	return nil
+	if expiry, ok := s.codes[pin]; ok && now.Before(expiry) {
+		delete(s.codes, pin)
+		s.failures = nil
+		return nil
+	}
+	s.failures = append(s.failures, now)
+	return ErrInvalidPIN
 }

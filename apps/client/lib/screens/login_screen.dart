@@ -33,10 +33,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _pinController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _inviteController = TextEditingController();
 
   bool _submitting = false;
-  bool _createAccount = false;
   bool? _paired;
   Timer? _pairCheck;
 
@@ -55,7 +53,6 @@ class _LoginScreenState extends State<LoginScreen> {
     _pinController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
-    _inviteController.dispose();
     super.dispose();
   }
 
@@ -94,21 +91,11 @@ class _LoginScreenState extends State<LoginScreen> {
         if (mounted) setState(() => _paired = true);
       }
 
-      if (_createAccount) {
-        await auth.register(
-          baseUrl: url,
-          inviteToken: _inviteController.text.trim(),
-          username: _usernameController.text.trim(),
-          password: _passwordController.text,
-        );
-      } else {
-        await auth.login(
-          baseUrl: url,
-          username: _usernameController.text.trim(),
-          password: _passwordController.text,
-        );
-      }
-      if (mounted) {
+      await auth.login(
+        baseUrl: url,
+        username: _usernameController.text.trim(),
+        password: _passwordController.text,
+      );      if (mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } on ApiException catch (e) {
@@ -181,15 +168,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       keyboardType: TextInputType.number,
                       maxLength: 12,
                       decoration: const InputDecoration(
-                        labelText: 'Pairing PIN',
-                        helperText: 'First visit only. Printed by the server.',
+                        labelText: 'Pairing code',
+                        helperText: 'Ask the server admin for a one-time code.',
                         prefixIcon: Icon(Icons.lock_outline),
                         counterText: '',
                       ),
                       validator: (v) {
                         if (!needsPin) return null;
                         if (v == null || v.trim().isEmpty) {
-                          return 'Pairing PIN is required';
+                          return 'Pairing code is required';
                         }
                         return null;
                       },
@@ -235,25 +222,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     onFieldSubmitted: (_) => _submit(),
                     validator: (v) {
                       if (v == null || v.isEmpty) return 'Password is required';
-                      if (_createAccount && v.length < 8) {
-                        return 'At least 8 characters';
-                      }
                       return null;
                     },
                   ),
-                  if (_createAccount) ...[
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _inviteController,
-                      decoration: const InputDecoration(
-                        labelText: 'Invite token',
-                        prefixIcon: Icon(Icons.assignment_outlined),
-                      ),
-                      validator: (v) => (v == null || v.trim().isEmpty)
-                          ? 'Invite token is required'
-                          : null,
-                    ),
-                  ],
                   const SizedBox(height: 22),
                   FilledButton(
                     onPressed: _submitting ? null : _submit,
@@ -262,20 +233,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2))
-                        : Text(_createAccount ? 'Create account' : 'Log in'),
-                  ),
-                  const SizedBox(height: 6),
-                  TextButton(
-                    onPressed: _submitting
-                        ? null
-                        : () => setState(
-                              () => _createAccount = !_createAccount,
-                            ),
-                    child: Text(
-                      _createAccount
-                          ? 'I already have an account'
-                          : 'I have an invite token',
-                    ),
+                        : const Text('Log in'),
                   ),
                 ],
               ),
