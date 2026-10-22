@@ -8,6 +8,22 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-23 — Client design language and connection/account model
+
+The client screens were visually inconsistent (teal seed theme, mixed app bars, cards, FABs, banners). They now share one theme: black/white surfaces, a single Sri Lankan cat's-eye gold accent, flat app bars, 14px cards, and no colored decorative blocks. Login, register, server picker, instance list, and settings use the same spacing, type scale, inputs, and buttons.
+
+Connection identity is **(serverId, userId)**, not server alone. A server card groups its accounts as rows; one phone can keep different accounts on the same server, each with its own token, while sharing the certificate pin. "Add account" on a server opens the same flow with the URL pre-filled and pairing skipped.
+
+The add-server flow was collapsed from four concepts (pair / invite / register / login) into one page:
+
+1. URL.
+2. PIN field only when that URL has no pinned certificate; it is submitted together with the first login.
+3. Username/password, with an "I have an invite token" toggle that adds the invite field for account creation.
+
+The separate "Pair server" button and the standalone Register screen are gone, so registration can never claim the server is unpaired while the user is already on the pairing page. The server list is the root screen; instance lists are pushed on top, so Back returns to the server picker. New Instance moved to the top `+` action, matching the server screen.
+
+---
+
 ### 2026-10-23 — Multi-server client, stable server identity, mDNS discovery design
 
 The Android client used to hold exactly one server URL/token, so switching hosts meant logging out and losing the previous pairing. It now stores a list of `ServerProfile`s (server ID, display name, base URL, certificate SHA-256, bearer token, username) in secure storage. Startup lands on a server picker; selecting one validates its token and opens that server's instance list. The instance screen's action returns to the picker without forgetting servers. A profile is keyed by the stable server ID, not by address or name, so renaming/re-addressing does not duplicate it.

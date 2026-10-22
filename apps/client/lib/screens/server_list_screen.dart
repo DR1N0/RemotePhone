@@ -4,13 +4,15 @@ import 'package:provider/provider.dart';
 import '../models/server_profile.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/common.dart';
 import 'instance_list_screen.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
 
-/// The client's home screen. Servers are grouped by how their address behaves:
-/// fixed URLs (normally public DNS) versus LAN endpoints whose IP may move.
-/// Instance lists are pushed on top of this screen, so Back returns here.
+/// Home screen. Servers are grouped by stable server ID and each account on
+/// that server is a row underneath, so one phone can hold several identities
+/// on the same host without adding another navigation level.
 class ServerListScreen extends StatefulWidget {
   const ServerListScreen({super.key});
 
@@ -19,11 +21,11 @@ class ServerListScreen extends StatefulWidget {
 }
 
 class _ServerListScreenState extends State<ServerListScreen> {
-  String? _busyId;
+  String? _busyKey;
 
   Future<void> _open(ServerProfile profile) async {
     final auth = context.read<AuthService>();
-    setState(() => _busyId = profile.serverId);
+    setState(() => _busyKey = '${profile.serverId}:${profile.accountKey}');
     try {
       await auth.selectServer(profile);
       if (!mounted) return;
@@ -31,23 +33,34 @@ class _ServerListScreenState extends State<ServerListScreen> {
         MaterialPageRoute(builder: (_) => const InstanceListScreen()),
       );
     } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
-      }
+      _show(e.message);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Cannot connect: $e')));
-      }
+      _show('Cannot connect: $e');
     } finally {
-      if (mounted) setState(() => _busyId = null);
+      if (mounted) setState(() => _busyKey = null);
     }
+  }
+
+  void _show(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _addServer() async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
+    );
+  }
+
+  Future<void> _addAccount(ServerProfile profile) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => LoginScreen(
+          initialBaseUrl: profile.baseUrl,
+          title: 'Add account',
+        ),
+      ),
     );
   }
 
@@ -60,13 +73,14 @@ class _ServerListScreenState extends State<ServerListScreen> {
     await context.read<AuthService>().updateServerAddress(profile, address);
   }
 
-  Future<void> _remove(ServerProfile profile) async {
+  Future<void> _removeServer(ServerProfile profile) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Forget server?'),
         content: Text(
-          'Remove ${profile.name} and its saved session from this phone?',
+          'Remove ${profile.name} and every account saved for it from this '
+          'phone?',
         ),
         actions: [
           TextButton(
@@ -81,17 +95,21 @@ class _ServerListScreenState extends State<ServerListScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    await context.read<AuthService>().removeServer(profile);
+    await context.read<AuthService>().removeServerGroup(profile.serverId);
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
-    final pinned = auth.servers
-        .where((s) => s.kind == ServerAddressKind.pinnedUrl)
+    final groups = <String, List<ServerProfile>>{};
+    for (final profile in auth.servers) {
+      groups.putIfAbsent(profile.serverId, () => []).add(profile);
+    }
+    final pinned = groups.values
+        .where((g) => g.first.kind == ServerAddressKind.pinnedUrl)
         .toList();
-    final lan = auth.servers
-        .where((s) => s.kind == ServerAddressKind.lan)
+    final lan = groups.values
+        .where((g) => g.first.kind == ServerAddressKind.lan)
         .toList();
 
     return Scaffold(
@@ -112,42 +130,195 @@ class _ServerListScreenState extends State<ServerListScreen> {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          // mDNS refresh will live here; remembered profiles are always shown.
-        },
-        child: ListView(
-          padding: const EdgeInsets.only(bottom: 24),
-          children: [
-            if (pinned.isNotEmpty)
-              _ServerSection(
-                title: 'Pinned URL',
-                subtitle: 'Fixed address / public DNS',
-                icon: Icons.link,
-                profiles: pinned,
-                busyId: _busyId,
-                onOpen: _open,
-                onEditAddress: _editAddress,
-                onRemove: _remove,
-              ),
-            if (lan.isNotEmpty)
-              _ServerSection(
-                title: 'LAN',
-                subtitle: 'IP may change (mDNS planned)',
-                icon: Icons.wifi,
-                profiles: lan,
-                busyId: _busyId,
-                onOpen: _open,
-                onEditAddress: _editAddress,
-                onRemove: _remove,
-              ),
-            if (pinned.isEmpty && lan.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(32),
-                child: Text(
-                  'No servers yet. Tap + to pair one.',
-                  textAlign: TextAlign.center,
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+        children: [
+          if (pinned.isNotEmpty)
+            _groupSection(
+              context,
+              title: 'Pinned URL',
+              subtitle: 'Fixed address / public DNS',
+              icon: Icons.link,
+              groups: pinned,
+            ),
+          if (lan.isNotEmpty)
+            _groupSection(
+              context,
+              title: 'LAN',
+              subtitle: 'IP may change (mDNS planned)',
+              icon: Icons.wifi,
+              groups: lan,
+            ),
+          if (groups.isEmpty)
+            const EmptyState(
+              icon: Icons.dns_outlined,
+              title: 'No servers yet',
+              message: 'Tap + to pair a mako server.',
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _groupSection(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required List<List<ServerProfile>> groups,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader(title: title, subtitle: subtitle, icon: icon),
+        for (final accounts in groups)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _ServerGroup(
+              accounts: accounts,
+              busyKey: _busyKey,
+              onOpen: _open,
+              onAddAccount: _addAccount,
+              onEditAddress: _editAddress,
+              onRemoveServer: _removeServer,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ServerGroup extends StatelessWidget {
+  final List<ServerProfile> accounts;
+  final String? busyKey;
+  final Future<void> Function(ServerProfile) onOpen;
+  final Future<void> Function(ServerProfile) onAddAccount;
+  final Future<void> Function(ServerProfile) onEditAddress;
+  final Future<void> Function(ServerProfile) onRemoveServer;
+
+  const _ServerGroup({
+    required this.accounts,
+    required this.busyKey,
+    required this.onOpen,
+    required this.onAddAccount,
+    required this.onEditAddress,
+    required this.onRemoveServer,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final server = accounts.first;
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 6, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        server.name,
+                        style: Theme.of(context).textTheme.titleMedium,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        server.baseUrl,
+                        style: Theme.of(context).textTheme.bodySmall,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'account':
+                        onAddAccount(server);
+                      case 'edit':
+                        onEditAddress(server);
+                      case 'forget':
+                        onRemoveServer(server);
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'account',
+                      child: Text('Add account'),
+                    ),
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: Text('Edit address'),
+                    ),
+                    PopupMenuItem(
+                      value: 'forget',
+                      child: Text('Forget server'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const Divider(),
+          for (var i = 0; i < accounts.length; i++) ...[
+            if (i > 0) const Divider(),
+            _AccountRow(
+              account: accounts[i],
+              busy: busyKey ==
+                  '${accounts[i].serverId}:${accounts[i].accountKey}',
+              onTap: () => onOpen(accounts[i]),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AccountRow extends StatelessWidget {
+  final ServerProfile account;
+  final bool busy;
+  final VoidCallback onTap;
+
+  const _AccountRow({
+    required this.account,
+    required this.busy,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: busy ? null : onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Row(
+          children: [
+            const Icon(Icons.person_outline, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                account.username,
+                style: Theme.of(context).textTheme.bodyMedium,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (busy)
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              const Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: AppColors.textMuted,
               ),
           ],
         ),
@@ -198,94 +369,6 @@ class _EditAddressDialogState extends State<_EditAddressDialog> {
               Navigator.of(context).pop(_controller.text.trim()),
           child: const Text('Save'),
         ),
-      ],
-    );
-  }
-}
-
-class _ServerSection extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final List<ServerProfile> profiles;
-  final String? busyId;
-  final Future<void> Function(ServerProfile) onOpen;
-  final Future<void> Function(ServerProfile) onEditAddress;
-  final Future<void> Function(ServerProfile) onRemove;
-
-  const _ServerSection({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.profiles,
-    required this.busyId,
-    required this.onOpen,
-    required this.onEditAddress,
-    required this.onRemove,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-          child: Row(
-            children: [
-              Icon(icon, size: 18),
-              const SizedBox(width: 8),
-              Text(title, style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodySmall,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        ),
-        for (final profile in profiles)
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: ListTile(
-              title: Text(profile.name),
-              subtitle: Text(
-                '${profile.baseUrl}\n${profile.username} · ID '
-                '${profile.serverId.length > 8 ? profile.serverId.substring(0, 8) : profile.serverId}',
-              ),
-              isThreeLine: true,
-              trailing: busyId == profile.serverId
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : PopupMenuButton<String>(
-                      onSelected: (value) {
-                        switch (value) {
-                          case 'edit':
-                            onEditAddress(profile);
-                          case 'forget':
-                            onRemove(profile);
-                        }
-                      },
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(
-                          value: 'edit',
-                          child: Text('Edit address'),
-                        ),
-                        PopupMenuItem(
-                          value: 'forget',
-                          child: Text('Forget server'),
-                        ),
-                      ],
-                    ),
-              onTap: busyId == null ? () => onOpen(profile) : null,
-            ),
-          ),
       ],
     );
   }

@@ -5,6 +5,8 @@ import '../models/managed_instance.dart';
 import '../models/template_info.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/common.dart';
 import 'stream_screen.dart';
 
 class InstanceListScreen extends StatefulWidget {
@@ -165,16 +167,17 @@ class _InstanceListScreenState extends State<InstanceListScreen> {
             'Instances'),
         actions: [
           IconButton(
+            tooltip: 'New instance',
+            icon: const Icon(Icons.add),
+            onPressed: _createInstance,
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loading ? null : _refresh,
           ),
         ],
       ),
       body: _buildBody(),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _createInstance,
-        child: const Icon(Icons.add),
-      ),
     );
   }
 
@@ -183,62 +186,153 @@ class _InstanceListScreenState extends State<InstanceListScreen> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null) {
-      return Center(child: Text('Failed to load instances: $_error'));
+      return EmptyState(
+        icon: Icons.cloud_off,
+        title: 'Could not load instances',
+        message: _error!,
+        action: OutlinedButton.icon(
+          onPressed: _refresh,
+          icon: const Icon(Icons.refresh),
+          label: const Text('Retry'),
+        ),
+      );
     }
     if (_instances.isEmpty) {
-      return const Center(child: Text('No instances yet — tap + to create one.'));
+      return EmptyState(
+        icon: Icons.smartphone,
+        title: 'No instances yet',
+        message: 'Create an instance from one of the server templates to '
+            'start a remote Android device.',
+        action: FilledButton.icon(
+          onPressed: _createInstance,
+          icon: const Icon(Icons.add),
+          label: const Text('New instance'),
+        ),
+      );
     }
     return RefreshIndicator(
       onRefresh: _refresh,
-      child: ListView.builder(
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
         itemCount: _instances.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
         itemBuilder: (context, index) {
           final instance = _instances[index];
           final busy = _busyIds.contains(instance.id);
           final templateLabel = instance.templateId.split(':').last;
-          return ListTile(
-            title: Text(instance.name),
-            subtitle: Text(
-              '$templateLabel · desired: ${instance.desiredState} · observed: '
-              '${instance.observedState}'
-              '${instance.lastError != null ? ' · error: ${instance.lastError}' : ''}',
-            ),
-            trailing: busy
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (!instance.isRunning)
-                        IconButton(
-                          icon: const Icon(Icons.play_arrow),
-                          tooltip: 'Start',
-                          onPressed: () => _withBusy(
-                              instance.id, () => _api.startInstance(instance.id)),
+          final running = instance.isRunning;
+          return Card(
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: running ? () => _connect(instance) : null,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 6, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: running
+                                ? AppColors.accent.withValues(alpha: 0.12)
+                                : AppColors.surfaceHigh,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Icon(
+                            Icons.smartphone,
+                            color: running
+                                ? AppColors.accent
+                                : AppColors.textMuted,
+                            size: 24,
+                          ),
                         ),
-                      if (instance.isRunning) ...[
-                        IconButton(
-                          icon: const Icon(Icons.cast_connected),
-                          tooltip: 'Connect',
-                          onPressed: () => _connect(instance),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                instance.name,
+                                style:
+                                    Theme.of(context).textTheme.titleMedium,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                templateLabel,
+                                style: Theme.of(context).textTheme.bodySmall,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.stop),
-                          tooltip: 'Stop',
-                          onPressed: () => _withBusy(
-                              instance.id, () => _api.stopInstance(instance.id)),
-                        ),
+                        if (busy)
+                          const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        else
+                          StatusPill(
+                            label: running ? 'Running' : 'Stopped',
+                            color: running
+                                ? AppColors.success
+                                : AppColors.textMuted,
+                          ),
                       ],
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        tooltip: 'Delete',
-                        onPressed: () => _withBusy(
-                            instance.id, () => _api.deleteInstance(instance.id)),
+                    ),
+                    if (instance.lastError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        instance.lastError!,
+                        style: const TextStyle(
+                          color: AppColors.warning,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
-                  ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        if (!running)
+                          IconButton(
+                            icon: const Icon(Icons.play_arrow),
+                            tooltip: 'Start',
+                            onPressed: () => _withBusy(instance.id,
+                                () => _api.startInstance(instance.id)),
+                          ),
+                        if (running) ...[
+                          IconButton(
+                            icon: const Icon(Icons.cast_connected),
+                            tooltip: 'Connect',
+                            onPressed: () => _connect(instance),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.stop),
+                            tooltip: 'Stop',
+                            onPressed: () => _withBusy(instance.id,
+                                () => _api.stopInstance(instance.id)),
+                          ),
+                        ],
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          tooltip: 'Delete',
+                          onPressed: () => _withBusy(instance.id,
+                              () => _api.deleteInstance(instance.id)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
           );
         },
       ),

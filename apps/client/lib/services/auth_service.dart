@@ -97,6 +97,7 @@ class AuthService extends ChangeNotifier {
         baseUrl: baseUrl,
         certSha256: pin,
         token: token,
+        userId: user.id,
         username: username,
         kind: ServerProfile.kindForUrl(baseUrl),
       );
@@ -132,6 +133,7 @@ class AuthService extends ChangeNotifier {
         baseUrl: baseUrl,
         certSha256: pin,
         token: token,
+        userId: user.id,
         username: username,
         kind: ServerProfile.kindForUrl(baseUrl),
       );
@@ -203,8 +205,12 @@ class AuthService extends ChangeNotifier {
   }
 
   Future<void> _upsert(ServerProfile profile) async {
-    final index =
-        servers.indexWhere((s) => s.serverId == profile.serverId);
+    final index = servers.indexWhere(
+      (s) =>
+          s.serverId == profile.serverId &&
+          (s.accountKey == profile.accountKey ||
+              s.username == profile.username),
+    );
     if (index >= 0) {
       servers[index] = profile;
     } else {
@@ -220,11 +226,15 @@ class AuthService extends ChangeNotifier {
   /// token, or certificate pin. This is the manual fallback until mDNS
   /// discovery can rewrite the address by server ID.
   Future<void> updateServerAddress(ServerProfile profile, String newBaseUrl) async {
-    final updated = profile.copyWith(baseUrl: newBaseUrl);
-    await _upsert(updated);
+    for (var i = 0; i < servers.length; i++) {
+      if (servers[i].serverId == profile.serverId) {
+        servers[i] = servers[i].copyWith(baseUrl: newBaseUrl);
+      }
+    }
+    await _saveServers();
     if (activeProfile?.serverId == profile.serverId) {
-      activeProfile = updated;
-      baseUrl = updated.baseUrl;
+      activeProfile = activeProfile!.copyWith(baseUrl: newBaseUrl);
+      baseUrl = newBaseUrl;
       notifyListeners();
     }
   }
@@ -251,12 +261,34 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Forgets a server entirely. Also removes its certificate pin.
-  Future<void> removeServer(ServerProfile profile) async {
-    servers.removeWhere((s) => s.serverId == profile.serverId);
+  /// Forgets a server and every account saved for it. Also removes the
+  /// certificate pin shared by those accounts.
+  Future<void> removeServerGroup(String serverId) async {
+    final removed =
+        servers.where((s) => s.serverId == serverId).toList();
+    servers.removeWhere((s) => s.serverId == serverId);
     await _saveServers();
-    await clearPinnedFingerprint(profile.baseUrl);
-    if (activeProfile?.serverId == profile.serverId) {
+    final urls = removed.map((s) => s.baseUrl).toSet();
+    for (final url in urls) {
+      await clearPinnedFingerprint(url);
+    }
+    if (activeProfile?.serverId == serverId) {
+      await logout();
+    } else {
+      notifyListeners();
+    }
+  }
+
+  /// Forgets one account while keeping any other accounts for the same server.
+  Future<void> removeServer(ServerProfile profile) async {
+    servers.removeWhere(
+      (s) =>
+          s.serverId == profile.serverId &&
+          s.accountKey == profile.accountKey,
+    );
+    await _saveServers();
+    if (activeProfile?.serverId == profile.serverId &&
+        activeProfile?.accountKey == profile.accountKey) {
       await logout();
     } else {
       notifyListeners();

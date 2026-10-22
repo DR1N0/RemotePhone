@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'services/auth_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/server_list_screen.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,7 +33,10 @@ class MakoClientApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'mako',
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal)),
+      debugShowCheckedModeBanner: false,
+      theme: buildAppTheme(),
+      darkTheme: buildAppTheme(),
+      themeMode: ThemeMode.dark,
       home: const _RootRouter(),
     );
   }

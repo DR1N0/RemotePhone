@@ -29,7 +29,8 @@ The app currently trusts any TLS certificate because the server uses a self-sign
 ## What works
 
 - Login, registration with an invite code, and PIN pairing with server-certificate pinning
-- Multiple paired servers remembered on the phone: pick a server first, then its instances
+- Multiple paired servers remembered on the phone, grouped by server with one row per account; a server can have several accounts
+- One "Add server" flow: URL → PIN only on the first visit → sign in or create an account with an invite
 - Template picker backed by the server's discovered AVDs
 - Multiple instances per user: create, start, stop, delete, connect
 - WebRTC video (hardware H.264 when available) and audio (PCMU), with Android routing it as media (speaker + media volume, not the call earpiece)

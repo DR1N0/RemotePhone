@@ -1,21 +1,27 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
-import 'register_screen.dart';
+import '../widgets/common.dart';
 
-// 10.0.2.2 is the Android emulator's alias for the host machine. A real
-// phone must replace this with the host's LAN/Tailscale IP — or the build can
-// bake in a default for testing/deployments:
-//   flutter build apk --dart-define=MAKO_DEFAULT_SERVER=https://192.168.1.7:3000
 const _defaultBaseUrl = String.fromEnvironment(
   'MAKO_DEFAULT_SERVER',
   defaultValue: 'https://10.0.2.2:3000',
 );
 
+/// One flow for "add a server/account":
+///
+/// URL -> (PIN only on the first visit) -> sign in or create an account.
+/// Pairing is not a separate button or page; it happens inline before the
+/// first login and is skipped afterward because the certificate is pinned.
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final String? initialBaseUrl;
+  final String? title;
+
+  const LoginScreen({super.key, this.initialBaseUrl, this.title});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -23,246 +29,259 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _baseUrlController = TextEditingController(text: _defaultBaseUrl);
+  late final TextEditingController _baseUrlController;
+  final _pinController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _inviteController = TextEditingController();
+
   bool _submitting = false;
+  bool _createAccount = false;
+  bool? _paired;
+  Timer? _pairCheck;
+
+  @override
+  void initState() {
+    super.initState();
+    _baseUrlController =
+        TextEditingController(text: widget.initialBaseUrl ?? _defaultBaseUrl);
+    _refreshPairingState();
+  }
 
   @override
   void dispose() {
+    _pairCheck?.cancel();
     _baseUrlController.dispose();
+    _pinController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
+    _inviteController.dispose();
     super.dispose();
   }
 
-  Future<void> _pair() async {
-    final pin = await showDialog<String>(
-      context: context,
-      builder: (_) => const _PairDialog(),
-    );
-    if (pin == null || pin.trim().isEmpty) return;
-    if (!mounted) return;
+  void _onUrlChanged(String _) {
+    _pairCheck?.cancel();
+    setState(() => _paired = null);
+    _pairCheck = Timer(const Duration(milliseconds: 350), _refreshPairingState);
+  }
 
-    setState(() => _submitting = true);
-    try {
-      final fingerprint = await context.read<AuthService>().pair(
-            baseUrl: _baseUrlController.text.trim(),
-            pin: pin.trim(),
-          );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Paired. Certificate SHA-256: ${fingerprint.substring(0, 16)}…',
-            ),
-          ),
-        );
-      }
-    } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Pairing failed: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _submitting = false);
+  Future<void> _refreshPairingState() async {
+    final url = _baseUrlController.text.trim();
+    if (url.isEmpty) {
+      if (mounted) setState(() => _paired = false);
+      return;
     }
+    final pin = await context.read<AuthService>().pinnedFingerprint(url);
+    if (!mounted || _baseUrlController.text.trim() != url) return;
+    setState(() => _paired = pin != null);
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    final url = _baseUrlController.text.trim();
+    final auth = context.read<AuthService>();
+
     setState(() => _submitting = true);
     try {
-      await context.read<AuthService>().login(
-            baseUrl: _baseUrlController.text.trim(),
-            username: _usernameController.text.trim(),
-            password: _passwordController.text,
-          );
-      // AuthService.notifyListeners() drives the app's own auth-state
-      // routing (see main.dart). When this screen was pushed from the server
-      // picker, also unwind back to the (now rebuilt) root.
+      var paired = await auth.pinnedFingerprint(url) != null;
+      if (!paired) {
+        final pin = _pinController.text.trim();
+        if (pin.isEmpty) {
+          throw const ApiException(0, 'Enter the PIN shown on the server');
+        }
+        await auth.pair(baseUrl: url, pin: pin);
+        paired = true;
+        if (mounted) setState(() => _paired = true);
+      }
+
+      if (_createAccount) {
+        await auth.register(
+          baseUrl: url,
+          inviteToken: _inviteController.text.trim(),
+          username: _usernameController.text.trim(),
+          password: _passwordController.text,
+        );
+      } else {
+        await auth.login(
+          baseUrl: url,
+          username: _usernameController.text.trim(),
+          password: _passwordController.text,
+        );
+      }
       if (mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
-      }
+      _show(e.message);
     } on StateError catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message)));
-      }
+      _show(e.message);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Login failed: $e')));
-      }
+      _show('Could not continue: $e');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
   }
 
+  void _show(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
+    final canPop = Navigator.of(context).canPop();
+    final needsPin = _paired != true;
     return Scaffold(
-      appBar: AppBar(title: const Text('mako')),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              const _InsecureTlsBanner(),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _baseUrlController,
-                decoration: const InputDecoration(
-                  labelText: 'Server URL',
-                  hintText: 'https://192.168.1.10:3000',
-                ),
-                validator: (v) =>
-                    (v == null || v.isEmpty) ? 'Server URL is required' : null,
-              ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  onPressed: _submitting ? null : _pair,
-                  icon: const Icon(Icons.link),
-                  label: const Text('Pair server'),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _usernameController,
-                decoration: const InputDecoration(labelText: 'Username'),
-                validator: (v) =>
-                    (v == null || v.isEmpty) ? 'Username is required' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _passwordController,
-                decoration: const InputDecoration(labelText: 'Password'),
-                obscureText: true,
-                onFieldSubmitted: (_) => _submit(),
-                validator: (v) =>
-                    (v == null || v.isEmpty) ? 'Password is required' : null,
-              ),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: _submitting ? null : _submit,
-                child: _submitting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Log in'),
-              ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: _submitting
-                    ? null
-                    : () => Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) => RegisterScreen(
-                            initialBaseUrl: _baseUrlController.text.trim(),
+      appBar: canPop
+          ? AppBar(title: Text(widget.title ?? 'Add server'))
+          : null,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Form(
+              key: _formKey,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+                children: [
+                  if (!canPop) ...[
+                    const SizedBox(height: 28),
+                    const BrandLockup(size: 54),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Android, wherever you are.',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Add a server once, then pick one of its instances.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 28),
+                  ],
+                  TextFormField(
+                    controller: _baseUrlController,
+                    keyboardType: TextInputType.url,
+                    autocorrect: false,
+                    onChanged: _onUrlChanged,
+                    decoration: const InputDecoration(
+                      labelText: 'Server URL',
+                      hintText: 'https://192.168.1.10:3000',
+                      prefixIcon: Icon(Icons.dns_outlined),
+                    ),
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Server URL is required'
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                  if (needsPin)
+                    TextFormField(
+                      controller: _pinController,
+                      keyboardType: TextInputType.number,
+                      maxLength: 12,
+                      decoration: const InputDecoration(
+                        labelText: 'Pairing PIN',
+                        helperText: 'First visit only. Printed by the server.',
+                        prefixIcon: Icon(Icons.lock_outline),
+                        counterText: '',
+                      ),
+                      validator: (v) {
+                        if (!needsPin) return null;
+                        if (v == null || v.trim().isEmpty) {
+                          return 'Pairing PIN is required';
+                        }
+                        return null;
+                      },
+                    )
+                  else
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Icon(Icons.verified_outlined,
+                              size: 18, color: Color(0xFFD9B45B)),
+                          SizedBox(width: 8),
+                          Text(
+                            'Certificate pinned',
+                            style: TextStyle(
+                              color: Color(0xFFD9B45B),
+                              fontSize: 12,
+                            ),
                           ),
-                        )),
-                child: const Text('Have an invite token? Register'),
+                        ],
+                      ),
+                    ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _usernameController,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'Username',
+                      prefixIcon: Icon(Icons.person_outline),
+                    ),
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Username is required'
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _passwordController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Password',
+                      prefixIcon: Icon(Icons.lock_outline),
+                    ),
+                    onFieldSubmitted: (_) => _submit(),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'Password is required';
+                      if (_createAccount && v.length < 8) {
+                        return 'At least 8 characters';
+                      }
+                      return null;
+                    },
+                  ),
+                  if (_createAccount) ...[
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _inviteController,
+                      decoration: const InputDecoration(
+                        labelText: 'Invite token',
+                        prefixIcon: Icon(Icons.assignment_outlined),
+                      ),
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? 'Invite token is required'
+                          : null,
+                    ),
+                  ],
+                  const SizedBox(height: 22),
+                  FilledButton(
+                    onPressed: _submitting ? null : _submit,
+                    child: _submitting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(_createAccount ? 'Create account' : 'Log in'),
+                  ),
+                  const SizedBox(height: 6),
+                  TextButton(
+                    onPressed: _submitting
+                        ? null
+                        : () => setState(
+                              () => _createAccount = !_createAccount,
+                            ),
+                    child: Text(
+                      _createAccount
+                          ? 'I already have an account'
+                          : 'I have an invite token',
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PairDialog extends StatefulWidget {
-  const _PairDialog();
-
-  @override
-  State<_PairDialog> createState() => _PairDialogState();
-}
-
-class _PairDialogState extends State<_PairDialog> {
-  final _pinController = TextEditingController();
-
-  @override
-  void dispose() {
-    _pinController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Pair this server'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text(
-            'Enter the PIN printed by mako-controlplane on the host. '
-            'This also pins the server certificate for later connections.',
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _pinController,
-            autofocus: true,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Pairing PIN'),
-            onSubmitted: (value) => Navigator.of(context).pop(value),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(_pinController.text),
-          child: const Text('Pair'),
-        ),
-      ],
-    );
-  }
-}
-
-/// The client surface uses a self-signed certificate, so a new device must
-/// PIN-pair before it can trust the server. Surfaced here, not just in a code
-/// comment, so a user connecting over an untrusted network knows.
-class _InsecureTlsBanner extends StatelessWidget {
-  const _InsecureTlsBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.errorContainer,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.warning_amber_rounded,
-              color: Theme.of(context).colorScheme.onErrorContainer),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Pair this server first using the PIN shown by '
-              'mako-controlplane. The certificate is pinned after pairing.',
-              style: TextStyle(
-                  color: Theme.of(context).colorScheme.onErrorContainer),
             ),
           ),
-        ],
+        ),
       ),
     );
   }

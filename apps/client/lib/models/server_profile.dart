@@ -20,6 +20,7 @@ class ServerProfile {
   final String baseUrl;
   final String certSha256;
   final String token;
+  final String userId;
   final String username;
   final ServerAddressKind kind;
 
@@ -29,9 +30,14 @@ class ServerProfile {
     required this.baseUrl,
     required this.certSha256,
     required this.token,
+    required this.userId,
     required this.username,
     required this.kind,
   });
+
+  /// One server can be used by several accounts; the connection identity is
+  /// (serverId, userId), falling back to username for old profiles.
+  String get accountKey => userId.isNotEmpty ? userId : username;
 
   static ServerAddressKind kindForUrl(String baseUrl) {
     final host = Uri.tryParse(baseUrl)?.host ?? '';
@@ -51,6 +57,7 @@ class ServerProfile {
     String? baseUrl,
     String? certSha256,
     String? token,
+    String? userId,
     String? username,
     ServerAddressKind? kind,
   }) {
@@ -60,6 +67,7 @@ class ServerProfile {
       baseUrl: baseUrl ?? this.baseUrl,
       certSha256: certSha256 ?? this.certSha256,
       token: token ?? this.token,
+      userId: userId ?? this.userId,
       username: username ?? this.username,
       kind: kind ?? this.kind,
     );
@@ -67,13 +75,15 @@ class ServerProfile {
 
   factory ServerProfile.fromJson(Map<String, dynamic> json) {
     final baseUrl = json['baseUrl'] as String;
+    final username = json['username'] as String? ?? '';
     return ServerProfile(
       serverId: json['serverId'] as String,
       name: json['name'] as String? ?? 'mako',
       baseUrl: baseUrl,
       certSha256: json['certSha256'] as String,
       token: json['token'] as String,
-      username: json['username'] as String? ?? '',
+      userId: json['userId'] as String? ?? '',
+      username: username,
       kind: switch (json['kind']) {
         'lan' => ServerAddressKind.lan,
         'url' => ServerAddressKind.pinnedUrl,
@@ -88,6 +98,7 @@ class ServerProfile {
         'baseUrl': baseUrl,
         'certSha256': certSha256,
         'token': token,
+        'userId': userId,
         'username': username,
         'kind': kind == ServerAddressKind.lan ? 'lan' : 'url',
       };
