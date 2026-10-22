@@ -270,10 +270,11 @@ class AuthService extends ChangeNotifier {
   }
 
   /// Forgets every server and certificate pin. Used by Settings.
+  /// Forgets every server and session, but deliberately keeps certificate
+  /// pins: forgetting an account is not the same as distrusting the host.
+  /// Re-adding the same URL therefore only needs credentials, not a new
+  /// pairing code. Clearing all trust is an explicit app-data reset.
   Future<void> forgetAllServers() async {
-    for (final profile in servers) {
-      await clearPinnedFingerprint(profile.baseUrl);
-    }
     servers = [];
     await _storage.delete(key: _keyServers);
     await logout();
@@ -291,17 +292,12 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Forgets a server and every account saved for it. Also removes the
-  /// certificate pin shared by those accounts.
+  /// Forgets a server and every account saved for it. Certificate pins are
+  /// retained, so re-adding the same URL does not require another pairing
+  /// code; a changed certificate will still be rejected by the pin.
   Future<void> removeServerGroup(String serverId) async {
-    final removed =
-        servers.where((s) => s.serverId == serverId).toList();
     servers.removeWhere((s) => s.serverId == serverId);
     await _saveServers();
-    final urls = removed.map((s) => s.baseUrl).toSet();
-    for (final url in urls) {
-      await clearPinnedFingerprint(url);
-    }
     if (activeProfile?.serverId == serverId) {
       await logout();
     } else {

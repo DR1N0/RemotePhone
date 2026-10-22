@@ -22,6 +22,8 @@ The add-server flow was collapsed from four concepts (pair / invite / register /
 
 The separate "Pair server" button and the standalone Register screen are gone. The server picker is the root screen even with zero saved servers, so the initial page already runs mDNS discovery and shows Nearby servers; instance lists are pushed on top, so Back returns to the server picker. New Instance moved to the top `+` action, matching the server screen.
 
+Cancelling the add flow no longer removes a Nearby entry: it is only removed after a profile for that server ID actually exists. "Forget server" and "Forget all servers" remove profiles/tokens but deliberately **keep certificate pins**, so forgetting an account (including the admin's own account) is not the same as distrusting the host; re-adding the same URL only needs credentials. A certificate change is still rejected by the retained pin. Clearing pins requires clearing app data (or a future explicit reset action).
+
 For users who cannot touch the host, an authenticated admin can mint a short-lived single-use pairing code:
 
 ```

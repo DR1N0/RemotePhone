@@ -18,8 +18,9 @@ class SettingsScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'This removes every paired server, saved session, and '
-              'certificate pin from this phone.',
+              'This removes every saved server and session. Certificate '
+              'pins are kept so re-adding the same server does not need a '
+              'new pairing code.',
             ),
             const SizedBox(height: 24),
             Row(
@@ -103,7 +104,7 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   title: const Text('Forget all servers'),
                   subtitle: const Text(
-                    'Remove every server, session, and certificate pin',
+                    'Remove servers and sessions; keep certificate pins',
                   ),
                   onTap: () => _forgetAll(context),
                 ),

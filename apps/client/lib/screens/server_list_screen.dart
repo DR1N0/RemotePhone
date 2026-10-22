@@ -131,7 +131,16 @@ class _ServerListScreenState extends State<ServerListScreen> {
         ),
       ),
     );
-    if (mounted) setState(() => _nearby.remove(server.serverId));
+    if (!mounted) return;
+    final paired = context
+        .read<AuthService>()
+        .servers
+        .any((p) => p.serverId == server.serverId);
+    // Cancelling the add flow must not make the LAN server disappear; only
+    // remove the Nearby entry once it has actually been saved as a profile.
+    if (paired) {
+      setState(() => _nearby.remove(server.serverId));
+    }
   }
 
   Future<void> _addAccount(ServerProfile profile) async {
