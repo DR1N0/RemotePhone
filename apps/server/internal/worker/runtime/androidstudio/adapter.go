@@ -21,6 +21,8 @@ type Adapter struct {
 	transportStore *transport.Store
 	stunURL        string
 	ffmpegPath     string
+	streamBitRate  int
+	webRTCHostIP   string
 	dataRoot       string
 	baseImageRoot  string
 	launchFn       func(string, LaunchRequest) (ProcessHandle, error)
@@ -62,6 +64,8 @@ func NewAdapter(cfg config.Config, store runtime.HandleStore, transportStore *tr
 		transportStore: transportStore,
 		stunURL:        cfg.StunURL,
 		ffmpegPath:     cfg.FFmpegPath,
+		streamBitRate:  cfg.StreamBitRate,
+		webRTCHostIP:   cfg.WebRTCHostIP,
 		dataRoot:       cfg.InstanceDataRoot,
 		baseImageRoot:  cfg.BaseImageRoot,
 		stopFn:         StopProcess,

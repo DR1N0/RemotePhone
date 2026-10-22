@@ -3,6 +3,9 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+
+	"mako/internal/worker/host"
 )
 
 type Config struct {
@@ -16,6 +19,8 @@ type Config struct {
 	StunURL             string
 	InstanceDataRoot    string
 	BaseImageRoot       string
+	StreamBitRate       int
+	WebRTCHostIP        string
 }
 
 func Load() Config {
@@ -37,6 +42,8 @@ func Load() Config {
 		StunURL:             stunURLFromEnv(),
 		InstanceDataRoot:    getenv("MAKO_INSTANCE_DATA_ROOT", filepath.Join(homeDir, ".mako", "instance-data")),
 		BaseImageRoot:       getenv("MAKO_BASE_IMAGE_ROOT", filepath.Join(homeDir, ".mako", "base-images")),
+		StreamBitRate:       getenvInt("MAKO_STREAM_BITRATE", 2_000_000),
+		WebRTCHostIP:        firstNonEmpty(os.Getenv("MAKO_WEBRTC_HOST_IP"), host.DetectLANIP()),
 	}
 }
 
@@ -45,6 +52,22 @@ func getenv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// getenvInt parses a positive integer override, falling back on an unset or
+// invalid value (stream bitrate/fps are tuning knobs, not startup-critical
+// configuration — unlike the control plane's duration env vars, a typo here
+// should not prevent the worker from starting).
+func getenvInt(key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 // stunURLFromEnv resolves STUN_URL. The default (a public Google STUN

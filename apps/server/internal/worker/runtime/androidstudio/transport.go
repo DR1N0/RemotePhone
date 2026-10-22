@@ -31,6 +31,8 @@ func (a *Adapter) CreateTransportSession(req runtime.TransportSessionRequest) (r
 		req.InstanceID, req.AttachmentID, req.Role,
 		adbSerial, screenW, screenH, a.stunURL, grpcAddr, a.ffmpegPath,
 	)
+	candidate.SetBitRate(a.streamBitRate)
+	candidate.SetHostIP(a.webRTCHostIP)
 	if a.transportStore != nil {
 		key := req.InstanceID + ":" + req.AttachmentID
 		adapter, inserted := a.transportStore.GetOrPut(key, candidate)

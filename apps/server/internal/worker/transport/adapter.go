@@ -23,13 +23,14 @@ type Adapter interface {
 	Stop() error
 }
 
-// InputEvent carries a normalized input action from the browser.
+// InputEvent carries a normalized input action from the client.
 type InputEvent struct {
-	Type    string  `json:"type"`    // "touch" | "key"
-	Action  string  `json:"action"`  // "down" | "up" | "move" (touch only)
-	X       float64 `json:"x"`       // normalized 0–1 (touch only)
-	Y       float64 `json:"y"`       // normalized 0–1 (touch only)
-	Keycode int     `json:"keycode"` // Android keycode (key only)
+	Type      string  `json:"type"`      // "touch" | "key"
+	Action    string  `json:"action"`    // "down" | "up" | "move" | "cancel" (touch only)
+	X         float64 `json:"x"`         // normalized 0–1 (touch only)
+	Y         float64 `json:"y"`         // normalized 0–1 (touch only)
+	Keycode   int     `json:"keycode"`   // Android keycode (key only)
+	PointerID int32   `json:"pointerId"` // stable per-finger id (touch only; 0 if absent)
 }
 
 // NoopAdapter is a do-nothing implementation used in tests.

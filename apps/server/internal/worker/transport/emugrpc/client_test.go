@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	emupb "mako/internal/worker/transport/emugrpc/proto"
 )
@@ -19,6 +20,10 @@ import (
 type fakeEmulatorServer struct {
 	emupb.UnimplementedEmulatorControllerServer
 	images []*emupb.Image
+	audio  []*emupb.AudioPacket
+
+	// touches records every SendTouch call for input tests.
+	touches []*emupb.TouchEvent
 }
 
 func (s *fakeEmulatorServer) StreamScreenshot(_ *emupb.ImageFormat, stream grpc.ServerStreamingServer[emupb.Image]) error {
@@ -31,10 +36,25 @@ func (s *fakeEmulatorServer) StreamScreenshot(_ *emupb.ImageFormat, stream grpc.
 	return nil
 }
 
-// dialFakeServer starts fakeEmulatorServer on an in-memory bufconn listener
-// and returns a GRPCFrameSource dialed against it — no real network port,
-// no real emulator required.
-func dialFakeServer(t *testing.T, srv *fakeEmulatorServer) *GRPCFrameSource {
+func (s *fakeEmulatorServer) StreamAudio(_ *emupb.AudioFormat, stream grpc.ServerStreamingServer[emupb.AudioPacket]) error {
+	for _, packet := range s.audio {
+		if err := stream.Send(packet); err != nil {
+			return err
+		}
+	}
+	<-stream.Context().Done()
+	return nil
+}
+
+func (s *fakeEmulatorServer) SendTouch(_ context.Context, event *emupb.TouchEvent) (*emptypb.Empty, error) {
+	s.touches = append(s.touches, event)
+	return &emptypb.Empty{}, nil
+}
+
+// startFakeServer starts fakeEmulatorServer on an in-memory bufconn listener
+// and returns dial options that reach it — no real network port, no real
+// emulator required. Shared by the screenshot, audio, and touch tests.
+func startFakeServer(t *testing.T, srv *fakeEmulatorServer) []grpc.DialOption {
 	t.Helper()
 	lis := bufconn.Listen(1024 * 1024)
 	t.Cleanup(func() { lis.Close() })
@@ -44,20 +64,19 @@ func dialFakeServer(t *testing.T, srv *fakeEmulatorServer) *GRPCFrameSource {
 	go gs.Serve(lis)
 	t.Cleanup(gs.Stop)
 
-	// GRPCFrameSource.Frames dials by address string via grpc.NewClient,
-	// which can't target a bufconn listener directly — so this test talks
-	// to the fake server through a real client built the same way
-	// GRPCFrameSource does, just with a bufconn dialer, and exercises the
-	// receive-loop logic by constructing the FrameSource around that
-	// pre-dialed connection's target. grpc.NewClient resolves lazily, so
-	// passing "passthrough:///bufnet" with a custom resolver isn't needed:
-	// we instead dial with a context dialer override via grpc.WithContextDialer.
-	return &GRPCFrameSource{Addr: "passthrough:///bufnet", dialOpts: []grpc.DialOption{
+	// grpc.NewClient can't target a bufconn listener directly; a context
+	// dialer override with a passthrough target is the standard workaround.
+	return []grpc.DialOption{
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			return lis.DialContext(ctx)
 		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	}}
+	}
+}
+
+func dialFakeServer(t *testing.T, srv *fakeEmulatorServer) *GRPCFrameSource {
+	t.Helper()
+	return &GRPCFrameSource{Addr: "passthrough:///bufnet", dialOpts: startFakeServer(t, srv)}
 }
 
 func TestGRPCFrameSourceStreamsFrames(t *testing.T) {

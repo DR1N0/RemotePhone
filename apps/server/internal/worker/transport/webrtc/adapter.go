@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,15 +37,40 @@ type Adapter struct {
 	stunURL      string
 	grpcAddr     string // the emulator's own gRPC server, e.g. "127.0.0.1:8554"
 	ffmpegPath   string
+	bitRate      int
+	hostIP       string
 
 	forwardInput   func(string, transport.InputEvent, string, int, int) error
 	newFrameSource func(addr string, width, height int) emugrpc.FrameSource
+	newAudioSource func(addr string, sampleRate, channels int) emugrpc.AudioSource
 	startEncoder   func(ffmpegPath, codec string, opts EncodeOptions) (encoderProcess, error)
 	selectEncoder  func(ctx context.Context, explicitFFmpegPath string, width, height int) (ffmpegPath, codec string, err error)
+
+	// touchSender is the emulator-gRPC multi-touch path. Falls back to
+	// forwardInput (adb) when a send fails, so an emulator built without
+	// sendTouch still gets usable single-touch input.
+	touchSender emugrpc.TouchSender
 
 	mu      sync.Mutex
 	pc      *webrtc.PeerConnection
 	capture *captureSession
+}
+
+// SetBitRate overrides the video encoder bitrate (bits/s). A non-positive
+// value leaves the default in place. Called once per adapter at creation
+// from the worker's MAKO_STREAM_BITRATE configuration.
+func (a *Adapter) SetBitRate(bitRate int) {
+	if bitRate > 0 {
+		a.bitRate = bitRate
+	}
+}
+
+// SetHostIP restricts ICE host candidates to one LAN IPv4 address (plus
+// loopback). Without it, a multi-adapter host advertises every interface —
+// Tailscale/VPN/Hyper-V/link-local included — and a peer can select a
+// candidate that "succeeds" but loses packets. Empty leaves ICE unrestricted.
+func (a *Adapter) SetHostIP(ip string) {
+	a.hostIP = ip
 }
 
 // halveForCapture halves n and rounds down to an even number (ffmpeg's
@@ -74,10 +102,15 @@ func NewAdapter(instanceID, attachmentID, role, adbSerial string, screenW, scree
 		stunURL:      stunURL,
 		grpcAddr:     grpcAddr,
 		ffmpegPath:   ffmpegPath,
+		bitRate:      captureBitRate,
 		forwardInput: ForwardInput,
 		newFrameSource: func(addr string, width, height int) emugrpc.FrameSource {
 			return &emugrpc.GRPCFrameSource{Addr: addr, Width: width, Height: height}
 		},
+		newAudioSource: func(addr string, sampleRate, channels int) emugrpc.AudioSource {
+			return &emugrpc.GRPCAudioSource{Addr: addr, SampleRate: sampleRate, Channels: channels}
+		},
+		touchSender: emugrpc.NewGRPCTouchSender(grpcAddr),
 		startEncoder: func(ffmpegPath, codec string, opts EncodeOptions) (encoderProcess, error) {
 			return StartEncoder(ffmpegPath, codec, opts)
 		},
@@ -85,13 +118,15 @@ func NewAdapter(instanceID, attachmentID, role, adbSerial string, screenW, scree
 	}
 }
 
-// captureSession bundles one HandleOffer call's video capture pipeline:
-// the emulator gRPC frame source, the ffmpeg encoder, and the pacer
-// bridging the two. Stop tears all three down together.
+// captureSession bundles one HandleOffer call's capture pipelines: the
+// emulator gRPC video frame source, ffmpeg encoder, pacer, and the audio
+// source goroutine. Stop tears them all down together.
 type captureSession struct {
-	cancel  context.CancelFunc
-	encoder encoderProcess
-	pacer   *Pacer
+	cancel      context.CancelFunc
+	encoder     encoderProcess
+	pacer       *Pacer
+	audioCancel context.CancelFunc
+	audioDone   chan struct{}
 }
 
 func (c *captureSession) Stop() {
@@ -99,12 +134,62 @@ func (c *captureSession) Stop() {
 		return
 	}
 	c.cancel()
+	if c.audioCancel != nil {
+		c.audioCancel()
+	}
+	if c.audioDone != nil {
+		// Bound the wait: a wedged gRPC stream must not hang instance stop.
+		select {
+		case <-c.audioDone:
+		case <-time.After(2 * time.Second):
+		}
+	}
 	if c.pacer != nil {
 		c.pacer.Stop()
 	}
 	if c.encoder != nil {
 		c.encoder.Stop()
 	}
+}
+
+// startAudioCapture streams emulator audio into track as 20ms μ-law samples.
+// Audio failure is deliberately non-fatal: a session without sound is far
+// better than no session at all, and the emulator's audio service can be
+// unavailable independently of its input/video services.
+func (a *Adapter) startAudioCapture(track *webrtc.TrackLocalStaticSample) (context.CancelFunc, chan struct{}) {
+	ctx, cancel := context.WithCancel(context.Background())
+	source := a.newAudioSource(a.grpcAddr, 48000, 2)
+	packets, err := source.Packets(ctx)
+	if err != nil {
+		log.Printf("audio: capture unavailable for instance=%s: %v", a.instanceID, err)
+		cancel()
+		closed := make(chan struct{})
+		close(closed)
+		return cancel, closed
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		encoder := newPCMUEncoder()
+		var frames, bytes int64
+		for packet := range packets {
+			for _, payload := range encoder.Write(packet.Data, packet.SampleRate, packet.Channels) {
+				if err := track.WriteSample(media.Sample{Data: payload, Duration: 20 * time.Millisecond}); err != nil {
+					log.Printf("audio[%s]: WriteSample failed: %v", a.instanceID, err)
+					return
+				}
+				frames++
+				bytes += int64(len(payload))
+				if frames == 50 {
+					log.Printf("audio[%s]: streaming (%d 20ms frames, %d bytes so far, in=%dHz/%dch)",
+						a.instanceID, frames, bytes, packet.SampleRate, packet.Channels)
+				}
+			}
+		}
+		log.Printf("audio[%s]: stream ended after %d frames", a.instanceID, frames)
+	}()
+	return cancel, done
 }
 
 // startVideoCapture wires together this connection's video pipeline:
@@ -137,7 +222,7 @@ func (a *Adapter) startVideoCapture(pc *webrtc.PeerConnection, videoTrack *webrt
 		Width:   captureW,
 		Height:  captureH,
 		FPS:     captureFPS,
-		BitRate: captureBitRate,
+		BitRate: a.bitRate,
 	})
 	if err != nil {
 		cancel()
@@ -188,6 +273,20 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 	}
 
 	se := webrtc.SettingEngine{}
+	// IPv4/UDP only: IPv6 candidates on a multi-adapter dev box are another
+	// path an Android client may select and lose packets on.
+	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+	if a.hostIP != "" {
+		if parsed := net.ParseIP(a.hostIP); parsed != nil {
+			hostIP := parsed.To4()
+			se.SetIPFilter(func(candidateIP net.IP) bool {
+				if candidateIP.IsLoopback() {
+					return true // local probes/tests only
+				}
+				return hostIP != nil && candidateIP.Equal(hostIP)
+			})
+		}
+	}
 	mediaEngine := &webrtc.MediaEngine{}
 	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
 		return "", fmt.Errorf("register default codecs: %w", err)
@@ -224,6 +323,27 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 	if _, err = pc.AddTrack(videoTrack); err != nil {
 		_ = pc.Close()
 		return "", fmt.Errorf("add video track: %w", err)
+	}
+
+	// Add the audio track. PCMU rather than Opus: it needs no cgo/libopus
+	// dependency, every WebRTC endpoint supports it, and 8 kHz mono is
+	// enough to prove the emulator-audio path end to end. Opus can replace
+	// the codec later without touching capture.
+	audioTrack, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{
+			MimeType:  webrtc.MimeTypePCMU,
+			ClockRate: pcmuSampleRate,
+			Channels:  1,
+		},
+		"audio", "mako-audio",
+	)
+	if err != nil {
+		_ = pc.Close()
+		return "", fmt.Errorf("create audio track: %w", err)
+	}
+	if _, err = pc.AddTrack(audioTrack); err != nil {
+		_ = pc.Close()
+		return "", fmt.Errorf("add audio track: %w", err)
 	}
 
 	// Chrome creates the input data channel as part of its offer.
@@ -266,6 +386,7 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 		log.Printf("capture: start failed for instance=%s: %v", a.instanceID, err)
 		return "", err
 	}
+	capture.audioCancel, capture.audioDone = a.startAudioCapture(audioTrack)
 
 	a.mu.Lock()
 	a.pc = pc
@@ -323,7 +444,47 @@ func (a *Adapter) HandleInput(ev transport.InputEvent) error {
 }
 
 func (a *Adapter) handleInputEvent(ev transport.InputEvent) error {
-	return a.forwardInput(a.adbSerial, ev, a.Role(), a.screenW, a.screenH)
+	role := a.Role()
+	if ev.Type == "touch" && a.touchSender != nil && allowsInput(role) {
+		pressure := int32(1)
+		switch strings.ToLower(ev.Action) {
+		case "up", "cancel":
+			pressure = 0
+		}
+		x := int32(math.Round(ev.X * float64(a.screenW)))
+		y := int32(math.Round(ev.Y * float64(a.screenH)))
+		x = clampCoordinate(x, a.screenW)
+		y = clampCoordinate(y, a.screenH)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := a.touchSender.SendTouch(ctx, []emugrpc.TouchPoint{{
+			ID:       ev.PointerID,
+			X:        x,
+			Y:        y,
+			Pressure: pressure,
+		}})
+		cancel()
+		if err == nil {
+			return nil
+		}
+		// Fall back to adb for emulators whose sendTouch isn't available;
+		// still gives single-touch input instead of no input at all.
+		log.Printf("input: sendTouch failed (falling back to adb): %v", err)
+	}
+	return a.forwardInput(a.adbSerial, ev, role, a.screenW, a.screenH)
+}
+
+// clampCoordinate keeps a normalized input coordinate inside the physical
+// display, so a drag that leaves the video widget (x/y clamped to 0..1 by
+// the client) or rounding can never produce an out-of-range emulator event.
+func clampCoordinate(value int32, limit int) int32 {
+	if value < 0 {
+		return 0
+	}
+	if limit > 0 && value >= int32(limit) {
+		return int32(limit - 1)
+	}
+	return value
 }
 
 func (a *Adapter) SetRole(role string) {
@@ -380,7 +541,10 @@ func (a *Adapter) Stop() error {
 		cap.Stop()
 	}
 	if pc != nil {
-		return pc.Close()
+		_ = pc.Close()
+	}
+	if a.touchSender != nil {
+		_ = a.touchSender.Close()
 	}
 	return nil
 }

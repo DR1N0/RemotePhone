@@ -225,12 +225,17 @@ func buildFFmpegArgs(ffmpegPath, codec string, opts EncodeOptions) []string {
 			"-b:v", strconv.Itoa(opts.BitRate), "-g", strconv.Itoa(opts.FPS), "-bf", "0",
 		)
 	case "h264_amf":
-		// No -bf here: AMF rejects/ignores the generic option with a noisy
-		// "Maxium number of B frames needs to be specified." warning even
-		// though the encode succeeds; lowlatency usage already implies no
-		// B-frames, and baseline profile cannot use them anyway.
+		// `-usage lowlatency` never emits another IDR after the first frame
+		// (measured: 1 IDR in 5s with -g 30), so a client that loses the
+		// opening keyframe — or any reference — freezes forever with RTP
+		// still flowing. `lowlatency_high_quality` honors -g (one IDR/sec at
+		// 30fps), and `-header_spacing <gop>` repeats SPS/PPS with each IDR
+		// so a client joining mid-stream can decode. No -bf: AMF warns about
+		// it and baseline cannot use B-frames anyway.
 		args = append(args,
-			"-c:v", "h264_amf", "-pix_fmt", "yuv420p", "-usage", "lowlatency", "-quality", "speed", "-rc", "cbr",
+			"-c:v", "h264_amf", "-pix_fmt", "yuv420p",
+			"-usage", "lowlatency_high_quality", "-quality", "speed", "-rc", "cbr",
+			"-header_spacing", strconv.Itoa(opts.FPS),
 			"-profile:v", "constrained_baseline", "-level:v", h264Level,
 			"-b:v", strconv.Itoa(opts.BitRate), "-g", strconv.Itoa(opts.FPS),
 		)

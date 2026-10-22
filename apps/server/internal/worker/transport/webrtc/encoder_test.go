@@ -3,6 +3,7 @@ package webrtc
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -74,6 +75,23 @@ func TestDefaultEncoderCandidatesPutsSoftwareLast(t *testing.T) {
 		if last := candidates[len(candidates)-1]; last != "libx264" {
 			t.Errorf("defaultEncoderCandidates(%q) last candidate = %q, want libx264 (software fallback)", goos, last)
 		}
+	}
+}
+
+func TestBuildFFmpegArgsAMFKeepsKeyframesAndHeaders(t *testing.T) {
+	args := buildFFmpegArgs("ffmpeg", "h264_amf", EncodeOptions{Width: 540, Height: 1200, FPS: 30, BitRate: 2_000_000})
+	joined := strings.Join(args, " ")
+	// `-usage lowlatency` suppresses periodic IDRs in AMF; without a
+	// keyframe every second a client that loses one reference frame freezes
+	// permanently. lowlatency_high_quality + header_spacing keeps recovery
+	// possible.
+	for _, want := range []string{"lowlatency_high_quality", "-header_spacing 30", "-g 30"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("h264_amf args missing %q: %v", want, args)
+		}
+	}
+	if strings.Contains(joined, "-usage lowlatency ") {
+		t.Errorf("h264_amf must not use lowlatency usage (suppresses IDRs): %v", args)
 	}
 }
 

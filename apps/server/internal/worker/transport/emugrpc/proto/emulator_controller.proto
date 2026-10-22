@@ -1,26 +1,28 @@
 // Hand-trimmed subset of the Android Emulator's EmulatorController gRPC
-// service, vendored for mako's video-capture pipeline (see
-// docs/plans — gRPC + hardware-encoded video capture).
+// service, vendored for mako's capture and input pipelines.
 //
 // Source: https://github.com/google/android-emulator-webrtc/blob/master/proto/emulator_controller.proto
 // (mirrors https://android.googlesource.com/platform/prebuilts/android-emulator/+/master/linux-x86_64/lib/emulator_controller.proto)
-// Fetched: 2026-10-17. Upstream license: Apache 2.0, (C) The Android Open
-// Source Project.
+// Fetched: 2026-10-17 (screenshot), extended 2026-10-22 (audio + touch).
+// Upstream license: Apache 2.0, (C) The Android Open Source Project.
 //
 // The upstream file defines dozens of unrelated RPCs (phone/SMS, XR/AR
-// glasses, sensors, battery, GPS, clipboard, ...). This file keeps ONLY the
-// `streamScreenshot` RPC and its direct message dependencies, since that's
-// the only RPC mako's capture pipeline calls. Field numbers are preserved
-// exactly as upstream for wire compatibility — proto3 safely ignores any
-// fields the real emulator sends that aren't declared here. To add another
-// RPC later (e.g. input injection via sendTouch/sendKey), copy the relevant
-// service method and message(s) from the upstream file, preserving field
-// numbers.
+// glasses, sensors, battery, GPS, clipboard, ...). This file keeps only the
+// RPCs mako actually calls:
+//   - streamScreenshot: video capture
+//   - streamAudio: audio capture
+//   - sendTouch: multi-touch input (replaces per-event `adb shell input`)
+// Field numbers are preserved exactly as upstream for wire compatibility —
+// proto3 safely ignores any fields the real emulator sends that aren't
+// declared here. To add another RPC later, copy the relevant service method
+// and message(s) from the upstream file, preserving field numbers.
 syntax = "proto3";
 
 option go_package = "mako/internal/worker/transport/emugrpc/proto";
 
 package android.emulation.control;
+
+import "google/protobuf/empty.proto";
 
 service EmulatorController {
     // Streams a series of screenshots in the desired format. A new frame is
@@ -28,6 +30,16 @@ service EmulatorController {
     // polled) — see ImageFormat/Image below for the full semantics as
     // documented upstream.
     rpc streamScreenshot(ImageFormat) returns (stream Image) {}
+
+    // Streams audio packets in the desired format, roughly every 20-30ms
+    // while the emulated device produces audio. A sampling rate of 0 defaults
+    // to 44100 Hz. The stream blocks while the emulator has no audio to send.
+    rpc streamAudio(AudioFormat) returns (stream AudioPacket) {}
+
+    // Sends touch events to the emulator. Coordinates are physical pixels of
+    // the display. Each Touch's identifier maps to an internal multitouch
+    // slot; pressure must be non-zero while touching and zero to lift.
+    rpc sendTouch(TouchEvent) returns (google.protobuf.Empty) {}
 }
 
 message ImageFormat {
@@ -69,4 +81,81 @@ message Image {
     // Unix timestamp in microseconds when the emulator estimates the frame
     // was generated.
     uint64 timestampUs = 6;
+}
+
+message AudioFormat {
+    enum SampleFormat {
+        AUD_FMT_U8 = 0;  // Unsigned 8 bit
+        AUD_FMT_S16 = 1; // Signed 16 bit (little endian)
+    }
+
+    enum Channels {
+        Mono = 0;
+        Stereo = 1;
+    }
+
+    enum DeliveryMode {
+        MODE_UNSPECIFIED = 0;
+        MODE_REAL_TIME = 1;
+    }
+
+    // Sampling rate to use, defaulting to 44100 if this is not set.
+    uint64 samplingRate = 1;
+    Channels channels = 2;
+    SampleFormat format = 3;
+
+    // [Input Only] The mode used when delivering audio packets.
+    DeliveryMode mode = 4;
+}
+
+message AudioPacket {
+    AudioFormat format = 1;
+
+    // Unix epoch in us when this frame was captured.
+    uint64 timestamp = 2;
+
+    // Contains a sample in the given audio format.
+    bytes audio = 3;
+}
+
+message Touch {
+    // Horizontal coordinate in physical pixels (0 = leftmost).
+    int32 x = 1;
+
+    // Vertical coordinate in physical pixels (0 = topmost).
+    int32 y = 2;
+
+    // Arbitrary non-negative tracking id, stable for the duration of one
+    // finger's contact. Up to 10 concurrent touches are supported.
+    int32 identifier = 3;
+
+    // Physical pressure. Must be non-zero while touching and zero to lift —
+    // a zero-pressure event is what unregisters the identifier.
+    int32 pressure = 4;
+
+    // Optional contact area / longer dimension.
+    int32 touch_major = 5;
+
+    // Optional shorter dimension (ignored when touch_major is an area).
+    int32 touch_minor = 6;
+
+    enum EventExpiration {
+        EVENT_EXPIRATION_UNSPECIFIED = 0;
+        NEVER_EXPIRE = 1;
+    }
+
+    EventExpiration expiration = 7;
+
+    // Orientation of the contact, if any.
+    int32 orientation = 8;
+}
+
+// A TouchEvent contains a list of Touch objects in contact with the touch
+// surface, delivered in order using Linux multitouch "Protocol B".
+message TouchEvent {
+    repeated Touch touches = 1;
+
+    // Display device where the touch occurred; 0 (or omitted) is the main
+    // display.
+    int32 display = 2;
 }

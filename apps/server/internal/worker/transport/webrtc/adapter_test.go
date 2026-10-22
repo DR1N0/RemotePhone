@@ -210,3 +210,67 @@ func waitForTestGathering(t *testing.T, gathering <-chan struct{}) {
 		t.Fatal(fmt.Errorf("timed out waiting for ICE gathering"))
 	}
 }
+
+type fakeTouchSender struct {
+	points []emugrpc.TouchPoint
+	err    error
+}
+
+func (f *fakeTouchSender) SendTouch(_ context.Context, points []emugrpc.TouchPoint) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.points = append(f.points, points...)
+	return nil
+}
+
+func (f *fakeTouchSender) Close() error { return nil }
+
+func TestHandleInputSendsTouchThroughGRPCWithPointerID(t *testing.T) {
+	adapter := NewAdapter("instance-1", "attachment-1", "participant", "adb", 1080, 2400, "", "127.0.0.1:8554", "")
+	sender := &fakeTouchSender{}
+	adapter.touchSender = sender
+	adapter.forwardInput = func(string, transport.InputEvent, string, int, int) error {
+		t.Fatal("touch should not fall back to adb when gRPC succeeds")
+		return nil
+	}
+
+	if err := adapter.HandleInput(transport.InputEvent{Type: "touch", Action: "down", X: 0.5, Y: 0.25, PointerID: 3}); err != nil {
+		t.Fatalf("HandleInput down: %v", err)
+	}
+	if err := adapter.HandleInput(transport.InputEvent{Type: "touch", Action: "up", X: 0.5, Y: 0.25, PointerID: 3}); err != nil {
+		t.Fatalf("HandleInput up: %v", err)
+	}
+
+	if len(sender.points) != 2 {
+		t.Fatalf("sent %d points, want 2", len(sender.points))
+	}
+	down := sender.points[0]
+	if down.ID != 3 || down.X != 540 || down.Y != 600 || down.Pressure != 1 {
+		t.Errorf("down point = %+v, want id=3 x=540 y=600 pressure=1", down)
+	}
+	up := sender.points[1]
+	if up.ID != 3 || up.Pressure != 0 {
+		t.Errorf("up point = %+v, want id=3 pressure=0", up)
+	}
+}
+
+func TestHandleInputFallsBackToADBWhenTouchRPCFails(t *testing.T) {
+	adapter := NewAdapter("instance-1", "attachment-1", "participant", "adb", 1080, 2400, "", "127.0.0.1:8554", "")
+	adapter.touchSender = &fakeTouchSender{err: fmt.Errorf("emulator has no sendTouch")}
+	var forwarded bool
+	adapter.forwardInput = func(_ string, _ transport.InputEvent, role string, _, _ int) error {
+		forwarded = true
+		if role != "participant" {
+			t.Errorf("fallback role = %q, want participant", role)
+		}
+		return nil
+	}
+
+	if err := adapter.HandleInput(transport.InputEvent{Type: "touch", Action: "down", X: 0.1, Y: 0.1}); err != nil {
+		t.Fatalf("HandleInput: %v", err)
+	}
+	if !forwarded {
+		t.Error("expected adb fallback after sendTouch failure")
+	}
+}
