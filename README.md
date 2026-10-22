@@ -57,6 +57,8 @@ Set these before starting the control plane (the spawned worker inherits its env
 | `MAKO_TLS_CERT_PATH` / `MAKO_TLS_KEY_PATH` | defaults beside the DB | Self-signed cert/key |
 | `MAKO_STREAM_BITRATE` | `2000000` | H.264 bitrate (bits/s); lower it for weak WiFi |
 | `MAKO_AUDIO_DEBUG` | `1` | Log audio packet RMS/peak and `WriteSample` stalls (diagnostics only) |
+| `MAKO_HEADLESS` | `1` | One worker owns one instance; default `-no-window`. Set `0` only to debug with a visible emulator window. |
+| `MAKO_EMULATOR_AUDIO` | `none` | Emulator `-audio` backend. `none` keeps guest audio for `streamAudio` but plays nothing on the host; use `auto` for local debugging with host sound. |
 | `MAKO_WEBRTC_HOST_IP` | unset | Optional debug override: restrict ICE to one IPv4 address. By default every routable IPv4 interface (LAN, Tailscale, other VPNs) is advertised and ICE chooses. |
 
 ### 3. Build and run

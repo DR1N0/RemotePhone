@@ -8,6 +8,18 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-22 — One worker per instance; headless is the worker deployment default
+
+The product topology is **one worker process per instance** (the control plane spawns a worker per instance and each worker owns one emulator). That makes headless a deployment policy rather than a per-client choice: `MAKO_HEADLESS` defaults to `1`, and `androidstudio.Adapter.Start` overrides `LaunchRequest.Headless` from config. `MAKO_HEADLESS=0` exists only for local debugging with a visible emulator.
+
+Verified on the real phone against a headless instance: qemu ran as `qemu-system-x86_64-headless.exe` with `-no-window` and no emulator window; video stayed ~30fps (`framesDecoded` tracking), audio ran at ~50 packets/s with non-zero level, `getevent` saw touch events, and the guest was switched to three-button navigation. The client's `launchConfig.headless` is now true but the worker is authoritative.
+
+Headless initially still played the guest's tone on the Windows host speakers while streaming. Fixed by launching the emulator with `-audio none` (`MAKO_EMULATOR_AUDIO`, default `none`): the guest audio graph and gRPC `streamAudio` still work (host probe decoded 440Hz/RMS≈164), but the emulator has no host audio backend, so the host is silent. `MAKO_EMULATOR_AUDIO=auto` restores host sound for local debugging.
+
+Still open for server deployment: running the worker under a Windows service/Session 0 may lose the interactive GPU/audio device; test a logon-triggered scheduled task first, then a service with software-GPU fallback. The quickboot stale-audio issue also remains: a stop/start can restore a muted guest, so cold-boot if audio is silent.
+
+---
+
 ### 2026-10-22 — Full-screen stream with guest-native navigation, phone Back exits
 
 The phone's own Back/Home gestures cannot be forwarded to the guest (Android consumes them before the app sees them). Earlier client overlays (status pill, Exit button, floating ball, bottom control bar) duplicated the guest's controls and the floating ball overlapped the guest's Home button. The final simpler design:

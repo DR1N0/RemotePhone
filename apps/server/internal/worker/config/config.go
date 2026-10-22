@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -20,6 +21,8 @@ type Config struct {
 	StreamBitRate       int
 	WebRTCHostIP        string
 	AudioDebug          bool
+	Headless            bool
+	EmulatorAudio       string
 }
 
 func Load() Config {
@@ -44,6 +47,14 @@ func Load() Config {
 		StreamBitRate:       getenvInt("MAKO_STREAM_BITRATE", 2_000_000),
 		WebRTCHostIP:        os.Getenv("MAKO_WEBRTC_HOST_IP"),
 		AudioDebug:          os.Getenv("MAKO_AUDIO_DEBUG") == "1",
+		// One worker owns one instance, so headless is the deployment default;
+		// MAKO_HEADLESS=0 is only for local debugging with a visible emulator.
+		Headless: getenvBool("MAKO_HEADLESS", true),
+		// Default to the emulator's "none" audio backend: the guest's audio
+		// graph still feeds gRPC streamAudio (verified 440Hz), but nothing is
+		// played on the host speakers. Use MAKO_EMULATOR_AUDIO=auto for a
+		// local debugging session where host sound is wanted.
+		EmulatorAudio: getenv("MAKO_EMULATOR_AUDIO", "none"),
 	}
 }
 
@@ -68,6 +79,19 @@ func getenvInt(key string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func getenvBool(key string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "":
+		return fallback
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 // stunURLFromEnv resolves STUN_URL. The default (a public Google STUN

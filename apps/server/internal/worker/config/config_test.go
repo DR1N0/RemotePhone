@@ -55,6 +55,32 @@ func TestLoadAudioDebug(t *testing.T) {
 	}
 }
 
+func TestLoadHeadless(t *testing.T) {
+	t.Setenv("MAKO_HEADLESS", "")
+	if cfg := Load(); !cfg.Headless {
+		t.Error("Headless = false, want true by default")
+	}
+	t.Setenv("MAKO_HEADLESS", "0")
+	if cfg := Load(); cfg.Headless {
+		t.Error("Headless = true, want false for MAKO_HEADLESS=0")
+	}
+	t.Setenv("MAKO_HEADLESS", "nonsense")
+	if cfg := Load(); !cfg.Headless {
+		t.Error("invalid MAKO_HEADLESS should fall back to true")
+	}
+}
+
+func TestLoadEmulatorAudio(t *testing.T) {
+	t.Setenv("MAKO_EMULATOR_AUDIO", "")
+	if cfg := Load(); cfg.EmulatorAudio != "none" {
+		t.Errorf("EmulatorAudio = %q, want none by default", cfg.EmulatorAudio)
+	}
+	t.Setenv("MAKO_EMULATOR_AUDIO", "auto")
+	if cfg := Load(); cfg.EmulatorAudio != "auto" {
+		t.Errorf("EmulatorAudio = %q, want auto override", cfg.EmulatorAudio)
+	}
+}
+
 func TestLoadStunNoneDisablesSTUN(t *testing.T) {
 	t.Setenv("STUN_URL", "none")
 	if cfg := Load(); cfg.StunURL != "" {

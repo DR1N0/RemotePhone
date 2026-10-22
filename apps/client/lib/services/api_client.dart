@@ -169,13 +169,10 @@ class ApiClient {
         'accelerationMode': 'auto',
         'streamProfile': 'balanced',
       },
-      // headless: false — a headless (no-window) emulator can fall back to
-      // software rendering when it has no window surface/GPU context, which
-      // makes screen capture and H.264 encoding dramatically slower. Keep a
-      // visible emulator window for local use; revisit for a true headless
-      // server target (where GPU passthrough/software rendering can be
-      // configured explicitly).
-      'launchConfig': {'headless': false},
+      // One worker owns one instance; the worker enforces headless mode
+      // (MAKO_HEADLESS=0 is a debug override). This value is only the
+      // client's preference and is not what normally decides the launch.
+      'launchConfig': {'headless': true},
     });
     return ManagedInstance.fromJson(json['instance'] as Map<String, dynamic>);
   }

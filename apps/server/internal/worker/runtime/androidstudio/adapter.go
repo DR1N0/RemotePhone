@@ -24,6 +24,8 @@ type Adapter struct {
 	streamBitRate  int
 	webRTCHostIP   string
 	audioDebug     bool
+	headless       bool
+	emulatorAudio  string
 	dataRoot       string
 	baseImageRoot  string
 	launchFn       func(string, LaunchRequest) (ProcessHandle, error)
@@ -68,6 +70,8 @@ func NewAdapter(cfg config.Config, store runtime.HandleStore, transportStore *tr
 		streamBitRate:  cfg.StreamBitRate,
 		webRTCHostIP:   cfg.WebRTCHostIP,
 		audioDebug:     cfg.AudioDebug,
+		headless:       cfg.Headless,
+		emulatorAudio:  cfg.EmulatorAudio,
 		dataRoot:       cfg.InstanceDataRoot,
 		baseImageRoot:  cfg.BaseImageRoot,
 		stopFn:         StopProcess,
@@ -129,6 +133,13 @@ func (a *Adapter) Start(req runtime.StartRequest) (runtime.InstanceHandle, error
 	}
 
 	launchReq := BuildLaunchRequestFromStart(req, ports, instanceAVDName)
+	// One worker owns one instance; headless is a worker deployment policy,
+	// not something each client gets to choose. MAKO_HEADLESS=0 keeps a
+	// visible window for local debugging.
+	launchReq.Headless = a.headless
+	if a.emulatorAudio != "" {
+		launchReq.ExtraArgs = append(launchReq.ExtraArgs, "-audio", a.emulatorAudio)
+	}
 	process, err := a.launchFn(template.Metadata["emulatorPath"], launchReq)
 	if err != nil {
 		return runtime.InstanceHandle{}, err
