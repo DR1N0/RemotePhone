@@ -98,6 +98,7 @@ class AuthService extends ChangeNotifier {
         certSha256: pin,
         token: token,
         username: username,
+        kind: ServerProfile.kindForUrl(baseUrl),
       );
       await _upsert(profile);
       await _activate(profile, user);
@@ -132,6 +133,7 @@ class AuthService extends ChangeNotifier {
         certSha256: pin,
         token: token,
         username: username,
+        kind: ServerProfile.kindForUrl(baseUrl),
       );
       await _upsert(profile);
       await _activate(profile, user);
@@ -213,6 +215,29 @@ class AuthService extends ChangeNotifier {
 
   Future<void> _saveServers() =>
       _storage.write(key: _keyServers, value: ServerProfile.listToJson(servers));
+
+  /// Updates a LAN profile's cached address without changing its identity,
+  /// token, or certificate pin. This is the manual fallback until mDNS
+  /// discovery can rewrite the address by server ID.
+  Future<void> updateServerAddress(ServerProfile profile, String newBaseUrl) async {
+    final updated = profile.copyWith(baseUrl: newBaseUrl);
+    await _upsert(updated);
+    if (activeProfile?.serverId == profile.serverId) {
+      activeProfile = updated;
+      baseUrl = updated.baseUrl;
+      notifyListeners();
+    }
+  }
+
+  /// Forgets every server and certificate pin. Used by Settings.
+  Future<void> forgetAllServers() async {
+    for (final profile in servers) {
+      await clearPinnedFingerprint(profile.baseUrl);
+    }
+    servers = [];
+    await _storage.delete(key: _keyServers);
+    await logout();
+  }
 
   /// Leaves the selected server but keeps it (and its token) in the picker.
   Future<void> logout() async {

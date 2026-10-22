@@ -3,7 +3,6 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 
 import 'services/auth_service.dart';
-import 'screens/instance_list_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/server_list_screen.dart';
 
@@ -48,15 +47,14 @@ class _RootRouter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
-    switch (auth.status) {
-      case AuthStatus.unknown:
-        return const Scaffold(body: Center(child: CircularProgressIndicator()));
-      case AuthStatus.unauthenticated:
-        return const LoginScreen();
-      case AuthStatus.serverSelection:
-        return const ServerListScreen();
-      case AuthStatus.authenticated:
-        return const InstanceListScreen();
+    if (auth.status == AuthStatus.unknown) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+    // Servers are the home screen. Instance lists are pushed on top of it, so
+    // Back from an instance list always returns here instead of exiting.
+    if (auth.servers.isEmpty) {
+      return const LoginScreen();
+    }
+    return const ServerListScreen();
   }
 }

@@ -168,11 +168,6 @@ class _InstanceListScreenState extends State<InstanceListScreen> {
             icon: const Icon(Icons.refresh),
             onPressed: _loading ? null : _refresh,
           ),
-          IconButton(
-            tooltip: 'Switch server',
-            icon: const Icon(Icons.dns_outlined),
-            onPressed: () => context.read<AuthService>().logout(),
-          ),
         ],
       ),
       body: _buildBody(),
