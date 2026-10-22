@@ -33,6 +33,7 @@ The app currently trusts any TLS certificate because the server uses a self-sign
 - Multiple instances per user: create, start, stop, delete, connect
 - WebRTC video (hardware H.264 when available) and audio (PCMU), with Android routing it as media (speaker + media volume, not the call earpiece)
 - Multi-touch with per-finger pointer IDs, injected via the emulator's gRPC `sendTouch`
+- Full-screen streaming: the phone's system bars are hidden, the guest uses three-button navigation inside the video, and the phone's Back gesture disconnects and returns to the instance list
 
 ## Not implemented yet
 

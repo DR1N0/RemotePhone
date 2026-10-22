@@ -8,6 +8,18 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-22 — Full-screen stream with guest-native navigation, phone Back exits
+
+The phone's own Back/Home gestures cannot be forwarded to the guest (Android consumes them before the app sees them). Earlier client overlays (status pill, Exit button, floating ball, bottom control bar) duplicated the guest's controls and the floating ball overlapped the guest's Home button. The final simpler design:
+
+- The client hides the phone's status/nav bars through a small `mako/window` MethodChannel (Flutter's `immersiveSticky` still left the status bar visible on MIUI).
+- The worker switches the guest to **three-button navigation** via `cmd overlay enable-exclusive --category com.android.internal.systemui.navbar.threebutton` when handling an offer. The guest's Back/Home/Recents buttons are part of the video and are touchable, so there is no client-side navigation overlay.
+- The phone's Back gesture is the only client-side exit: `PopScope` disconnects the attachment and returns to the instance list.
+
+Verified on the real phone: full-screen video with no phone status/nav bars, guest three-button nav at the bottom, phone Back returned to the instance list and restored the phone's system bars. This also removes the overlay touch pass-through/coordinate problems entirely.
+
+---
+
 ### 2026-10-22 — Android client plays stream audio as media, not a phone call
 
 The real phone initially treated the WebRTC audio track as `USAGE_VOICE_COMMUNICATION`: it came out of the earpiece and the volume keys adjusted call volume. Fixed by calling `WebRTC.initialize(options: {'androidAudioConfiguration': AndroidAudioConfiguration.media.toMap()})` before the first peer connection. flutter_webrtc applies those attributes while building its `JavaAudioDeviceModule`, so this must happen at startup, not per connection.

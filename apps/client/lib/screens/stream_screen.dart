@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 
@@ -6,6 +7,11 @@ import '../models/managed_instance.dart';
 import '../services/auth_service.dart';
 import '../services/webrtc_session.dart';
 
+/// Full-screen remote display. The guest Android device uses three-button
+/// navigation (configured by the worker when a session starts), so Back/Home/
+/// Recents are part of the remote video and need no client-side chrome.
+/// The phone's own Back gesture leaves the stream (and disconnects); there is
+/// no floating overlay to obscure the guest's navigation bar.
 class StreamScreen extends StatefulWidget {
   final ManagedInstance instance;
 
@@ -19,6 +25,10 @@ class _StreamScreenState extends State<StreamScreen> {
   late final WebrtcSession _session;
   final GlobalKey _videoKey = GlobalKey();
   bool _disconnected = false;
+  bool _allowPop = false;
+  bool _leaving = false;
+
+  static const _windowChannel = MethodChannel('mako/window');
 
   @override
   void initState() {
@@ -27,13 +37,35 @@ class _StreamScreenState extends State<StreamScreen> {
       api: context.read<AuthService>().client,
       instanceId: widget.instance.id,
     );
+    _enterFullscreen();
     _session.connect();
   }
 
   @override
   void dispose() {
+    _setFullscreen(false);
     _disconnectOnce();
     super.dispose();
+  }
+
+  void _enterFullscreen() {
+    _setFullscreen(true);
+  }
+
+  Future<void> _setFullscreen(bool enabled) async {
+    try {
+      await _windowChannel.invokeMethod<void>(
+        enabled ? 'enterFullscreen' : 'exitFullscreen',
+      );
+    } on MissingPluginException {
+      await SystemChrome.setEnabledSystemUIMode(
+        enabled ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
+      );
+    } on PlatformException {
+      await SystemChrome.setEnabledSystemUIMode(
+        enabled ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
+      );
+    }
   }
 
   void _disconnectOnce() {
@@ -42,12 +74,19 @@ class _StreamScreenState extends State<StreamScreen> {
     _session.disconnect();
   }
 
-  // Normalizes against the full video widget box, not the actual
-  // letterboxed video content rect — if the emulator's aspect ratio
-  // doesn't match the screen's, a tap in the letterbox bars maps to the
-  // nearest video edge instead of being rejected. Acceptable for this
-  // MVP; a precise version would compare against
-  // remoteRenderer.videoWidth/videoHeight.
+  Future<void> _leave() async {
+    if (_leaving) return;
+    _leaving = true;
+    _disconnected = true;
+    // Let PopScope's canPop become true before the programmatic pop below.
+    if (mounted) setState(() => _allowPop = true);
+    await _session.disconnect();
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
+
   Offset? _normalizedPosition(Offset globalPosition) {
     final box = _videoKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize || box.size.isEmpty) return null;
@@ -70,34 +109,23 @@ class _StreamScreenState extends State<StreamScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: Text(widget.instance.name),
-        actions: [
-          ListenableBuilder(
-            listenable: _session,
-            builder: (context, _) => Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Center(child: Text(_statusLabel(_session.state))),
-            ),
-          ),
-        ],
-      ),
-      body: ListenableBuilder(
-        listenable: _session,
-        builder: (context, _) => _buildBody(_session.state),
+    return PopScope(
+      canPop: _allowPop,
+      // Phone Back is the only way out of the stream: it disconnects the
+      // attachment and returns to the instance list. The guest's own
+      // three-button nav handles Back/Home/Recents inside the video.
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _leave();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: ListenableBuilder(
+          listenable: _session,
+          builder: (context, _) => _buildBody(_session.state),
+        ),
       ),
     );
   }
-
-  String _statusLabel(SessionConnectionState state) => switch (state) {
-        SessionConnectionState.idle => 'Idle',
-        SessionConnectionState.connecting => 'Connecting…',
-        SessionConnectionState.connected => 'Connected',
-        SessionConnectionState.failed => 'Failed',
-        SessionConnectionState.disconnected => 'Disconnected',
-      };
 
   Widget _buildBody(SessionConnectionState state) {
     if (state == SessionConnectionState.failed) {
@@ -120,6 +148,11 @@ class _StreamScreenState extends State<StreamScreen> {
               },
               child: const Text('Retry'),
             ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: _leave,
+              child: const Text('Exit'),
+            ),
           ],
         ),
       );
@@ -130,12 +163,8 @@ class _StreamScreenState extends State<StreamScreen> {
         child: CircularProgressIndicator(color: Colors.white),
       );
     }
-    // connected or disconnected: keep showing the last video frame rather
-    // than flashing to a blank screen on a transient state change.
     // RTCVideoViewObjectFitContain preserves the video's own aspect ratio
-    // (letterboxing as needed) within whatever box it's given, so this
-    // just fills the available body area rather than guessing a fixed
-    // ratio — the emulator's actual resolution varies per template.
+    // (letterboxing as needed); the emulator's resolution varies per template.
     return Listener(
       onPointerDown: (e) => _handlePointer(e, 'down'),
       onPointerMove: (e) => _handlePointer(e, 'move'),

@@ -318,6 +318,12 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 		_ = oldPc.Close()
 	}
 
+	// The phone cannot forward its own system back/home gestures, and the
+	// guest's edge-swipe navigation would fight the video's edge touches.
+	// Use the guest's three-button navigation and expose explicit buttons in
+	// the client control bar.
+	ConfigureGuestNavigation(a.adbSerial)
+
 	se := webrtc.SettingEngine{}
 	// IPv4/UDP only for now. By default advertise every routable IPv4
 	// interface (LAN, Tailscale, other VPNs) and let ICE choose — that is

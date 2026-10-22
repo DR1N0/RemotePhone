@@ -1,16 +1,44 @@
 package webrtc
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"math"
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
+	"time"
 
 	"mako/internal/worker/transport"
 )
 
 var wmSizeRE = regexp.MustCompile(`(\d+)x(\d+)`)
+
+// ConfigureGuestNavigation switches the emulated Android device from
+// edge-swipe gesture navigation to three-button navigation. The phone's own
+// back/home gestures cannot be forwarded to the guest (the phone OS consumes
+// them), and edge swipes inside the video would otherwise trigger the guest's
+// back gesture as well. Stream clients get explicit Back/Home/Recents buttons
+// instead. Best-effort: an old image where the overlay name is missing just
+// logs and keeps the existing navigation mode.
+func ConfigureGuestNavigation(adbSerial string) {
+	if adbSerial == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "adb", "-s", adbSerial, "shell",
+		"cmd", "overlay", "enable-exclusive", "--category",
+		"com.android.internal.systemui.navbar.threebutton").CombinedOutput()
+	if err != nil {
+		log.Printf("guest nav: switch %s to three-button failed: %v (%s)",
+			adbSerial, err, strings.TrimSpace(string(out)))
+		return
+	}
+	log.Printf("guest nav: %s uses three-button navigation", adbSerial)
+}
 
 // QueryScreenSize returns adbSerial's actual display resolution via
 // "adb shell wm size", falling back to (fallbackW, fallbackH) if the device

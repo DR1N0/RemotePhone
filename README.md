@@ -131,6 +131,7 @@ flutter analyze
 
 - **Audio is 8 kHz mono μ-law (PCMU), not Opus.** It is carried over WebRTC and playable on the Android client, but it is telephone-quality; Opus is the next quality step.
 - **Multi-touch is implemented through the emulator's gRPC `sendTouch`** (pointer IDs are carried from the client), with an adb single-touch fallback if gRPC input fails. Keyboard events still use adb.
+- **Full-screen phone UI; the guest owns navigation.** The client hides the phone's system bars, the worker switches the emulated device to three-button navigation, and the guest's Back/Home/Recents buttons are tapped inside the video. The phone's Back gesture exits the stream and disconnects.
 - **Trusted LAN only.** The client API uses a self-signed certificate and the client accepts any certificate; PIN pairing/SPKI pinning is still deferred. Do not expose it to the public internet without a VPN or reverse proxy.
 - **ICE advertises every routable IPv4 interface** (LAN, Tailscale, other VPNs), excluding only link-local, multicast and IPv6; loopback is kept for local probes. ICE chooses. `MAKO_WEBRTC_HOST_IP` is only a debug override. There is no Tailscale-specific configuration.
 - **An Android emulator is a poor test client on the same Windows host.** Its NAT hairpin to the host's own LAN IP loses packets under video load; a real phone on the LAN is the trustworthy end-to-end test. The host-side WebRTC probe is unaffected.
