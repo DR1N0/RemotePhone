@@ -39,9 +39,13 @@ func StopProcess(pid int) error {
 func stopEmulator(handle runtime.InstanceHandle) error {
 	if handle.ConsolePort > 0 {
 		serial := fmt.Sprintf("emulator-%d", handle.ConsolePort)
-		_ = exec.Command("adb", "-s", serial, "emu", "kill").Run()
-		if waitForProcessExit(handle.PID, emulatorShutdownTimeout) {
-			return nil
+		// Only wait for a graceful exit when adb accepted the command; if
+		// adb is missing or the console is gone, go straight to the
+		// process-kill fallback instead of burning the full timeout.
+		if err := exec.Command("adb", "-s", serial, "emu", "kill").Run(); err == nil {
+			if waitForProcessExit(handle.PID, emulatorShutdownTimeout) {
+				return nil
+			}
 		}
 	}
 	if handle.PID <= 0 {
