@@ -5,9 +5,14 @@ import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import 'register_screen.dart';
 
-// 10.0.2.2 is the Android emulator's alias for the host machine. On a real
-// phone the user must replace this with the host's LAN IP.
-const _defaultBaseUrl = 'https://10.0.2.2:3000';
+// 10.0.2.2 is the Android emulator's alias for the host machine. A real
+// phone must replace this with the host's LAN/Tailscale IP — or the build can
+// bake in a default for testing/deployments:
+//   flutter build apk --dart-define=MAKO_DEFAULT_SERVER=https://192.168.1.7:3000
+const _defaultBaseUrl = String.fromEnvironment(
+  'MAKO_DEFAULT_SERVER',
+  defaultValue: 'https://10.0.2.2:3000',
+);
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});

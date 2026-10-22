@@ -56,7 +56,7 @@ Set these before starting the control plane (the spawned worker inherits its env
 | `MAKO_CLIENT_ADDR` | `0.0.0.0:3000` | Bind the client API on the LAN for phones |
 | `MAKO_TLS_CERT_PATH` / `MAKO_TLS_KEY_PATH` | defaults beside the DB | Self-signed cert/key |
 | `MAKO_STREAM_BITRATE` | `2000000` | H.264 bitrate (bits/s); lower it for weak WiFi |
-| `MAKO_WEBRTC_HOST_IP` | `192.168.1.7` | Advertise this one LAN IP for WebRTC; auto-detected (192.168/10/172) when unset |
+| `MAKO_WEBRTC_HOST_IP` | unset | Optional debug override: restrict ICE to one IPv4 address. By default every routable IPv4 interface (LAN, Tailscale, other VPNs) is advertised and ICE chooses. |
 
 ### 3. Build and run
 
@@ -77,7 +77,8 @@ $env:MAKO_FFMPEG_PATH = "C:\ffmpeg\bin\ffmpeg.exe"
 $env:STUN_URL = "none"
 $env:MAKO_CLIENT_ADDR = "0.0.0.0:3000"
 $env:MAKO_STREAM_BITRATE = "2000000"
-# Optional: force one LAN interface for WebRTC (auto-detected otherwise)
+# Optional debug override only (normally leave unset so LAN + Tailscale are
+# both advertised and ICE picks the reachable path):
 # $env:MAKO_WEBRTC_HOST_IP = "192.168.1.7"
 .\mako-controlplane.exe
 ```
@@ -96,7 +97,8 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3001/api/v1/auth/setup `
 ```powershell
 cd apps/client
 flutter pub get
-flutter build apk --debug
+# Optional: bake in the server URL so a real phone does not need to type it
+flutter build apk --debug --dart-define=MAKO_DEFAULT_SERVER=https://192.168.1.7:3000
 adb install -r build\app\outputs\flutter-apk\app-debug.apk
 ```
 
@@ -129,7 +131,7 @@ flutter analyze
 - **Audio is 8 kHz mono μ-law (PCMU), not Opus.** It is carried over WebRTC and playable on the Android client, but it is telephone-quality; Opus is the next quality step.
 - **Multi-touch is implemented through the emulator's gRPC `sendTouch`** (pointer IDs are carried from the client), with an adb single-touch fallback if gRPC input fails. Keyboard events still use adb.
 - **Trusted LAN only.** The client API uses a self-signed certificate and the client accepts any certificate; PIN pairing/SPKI pinning is still deferred. Do not expose it to the public internet without a VPN or reverse proxy.
-- **WebRTC advertises one LAN IPv4 interface.** `MAKO_WEBRTC_HOST_IP` (or auto-detection) prevents Tailscale/VPN/link-local candidates from being selected. If auto-detection picks wrong, set it explicitly.
+- **ICE advertises every routable IPv4 interface** (LAN, Tailscale, other VPNs), excluding loopback/link-local/IPv6, and lets ICE choose. `MAKO_WEBRTC_HOST_IP` is only a debug override. There is no Tailscale-specific configuration.
 - **An Android emulator is a poor test client on the same Windows host.** Its NAT hairpin to the host's own LAN IP loses packets under video load; a real phone on the LAN is the trustworthy end-to-end test. The host-side WebRTC probe is unaffected.
 - **No capacity enforcement.** Each instance costs a full emulator (RAM/CPU/disk); start only what the host can carry.
 - Base-image capture/promote is unit-tested, but its live boot verification is still open (see [`docs/windows-migration-handoff.md`](docs/windows-migration-handoff.md) and the decisions log).

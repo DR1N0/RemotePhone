@@ -15,6 +15,7 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/pkg/media"
+	"mako/internal/worker/host"
 	"mako/internal/worker/transport"
 	"mako/internal/worker/transport/emugrpc"
 )
@@ -65,10 +66,10 @@ func (a *Adapter) SetBitRate(bitRate int) {
 	}
 }
 
-// SetHostIP restricts ICE host candidates to one LAN IPv4 address (plus
-// loopback). Without it, a multi-adapter host advertises every interface —
-// Tailscale/VPN/Hyper-V/link-local included — and a peer can select a
-// candidate that "succeeds" but loses packets. Empty leaves ICE unrestricted.
+// SetHostIP is an optional debugging override: when set, ICE host candidates
+// are restricted to this one address instead of the normal "all routable
+// IPv4 interfaces" policy. It is not required for LAN or Tailscale — both
+// work by default because every routable IPv4 address is advertised.
 func (a *Adapter) SetHostIP(ip string) {
 	a.hostIP = ip
 }
@@ -273,8 +274,10 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 	}
 
 	se := webrtc.SettingEngine{}
-	// IPv4/UDP only: IPv6 candidates on a multi-adapter dev box are another
-	// path an Android client may select and lose packets on.
+	// IPv4/UDP only for now. By default advertise every routable IPv4
+	// interface (LAN, Tailscale, other VPNs) and let ICE choose — that is
+	// what ICE is for. MAKO_WEBRTC_HOST_IP is only a debugging override for
+	// a specific interface.
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 	if a.hostIP != "" {
 		if parsed := net.ParseIP(a.hostIP); parsed != nil {
@@ -286,6 +289,8 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 				return hostIP != nil && candidateIP.Equal(hostIP)
 			})
 		}
+	} else {
+		se.SetIPFilter(host.IsAdvertisableIPv4)
 	}
 	mediaEngine := &webrtc.MediaEngine{}
 	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {

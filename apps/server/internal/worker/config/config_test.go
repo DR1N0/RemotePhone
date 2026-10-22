@@ -38,6 +38,10 @@ func TestLoadWebRTCHostIPOverride(t *testing.T) {
 	if cfg := Load(); cfg.WebRTCHostIP != "192.168.1.7" {
 		t.Errorf("WebRTCHostIP = %q, want explicit override", cfg.WebRTCHostIP)
 	}
+	t.Setenv("MAKO_WEBRTC_HOST_IP", "")
+	if cfg := Load(); cfg.WebRTCHostIP != "" {
+		t.Errorf("WebRTCHostIP = %q, want empty (advertise all routable IPv4)", cfg.WebRTCHostIP)
+	}
 }
 
 func TestLoadStunNoneDisablesSTUN(t *testing.T) {

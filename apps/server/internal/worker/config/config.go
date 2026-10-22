@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-
-	"mako/internal/worker/host"
 )
 
 type Config struct {
@@ -43,7 +41,7 @@ func Load() Config {
 		InstanceDataRoot:    getenv("MAKO_INSTANCE_DATA_ROOT", filepath.Join(homeDir, ".mako", "instance-data")),
 		BaseImageRoot:       getenv("MAKO_BASE_IMAGE_ROOT", filepath.Join(homeDir, ".mako", "base-images")),
 		StreamBitRate:       getenvInt("MAKO_STREAM_BITRATE", 2_000_000),
-		WebRTCHostIP:        firstNonEmpty(os.Getenv("MAKO_WEBRTC_HOST_IP"), host.DetectLANIP()),
+		WebRTCHostIP:        os.Getenv("MAKO_WEBRTC_HOST_IP"),
 	}
 }
 

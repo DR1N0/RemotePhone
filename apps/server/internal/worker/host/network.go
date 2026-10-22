@@ -1,86 +1,29 @@
 package host
 
-import (
-	"net"
-	"strings"
-)
+import "net"
 
-// DetectLANIP picks the host's most likely LAN IPv4 address for WebRTC host
-// candidates. Windows dev boxes routinely have several virtual adapters
-// (Tailscale/ZeroTier 100.64/10, Hyper-V/WSL, link-local 169.254/16, VPN
-// tunnels), and advertising all of them lets an ICE peer select a path that
-// looks "succeeded" but is lossy — observed on an Android emulator client
-// choosing a Tailscale candidate and freezing video while the host probe on
-// 192.168.1.7 streamed fine.
+// IsAdvertisableIPv4 reports whether ip should be offered as a WebRTC host
+// candidate. The policy is deliberately policy-free: every routable IPv4
+// interface is advertised, including LAN, Tailscale (100.64/10), and other
+// VPNs. ICE exists to choose among multiple interfaces, so hard-coding one
+// "LAN" address (or special-casing Tailscale) defeats the mechanism and
+// makes the other deployment mode unreachable.
 //
-// Preference order: 192.168/16, 10/8, 172.16/12, then anything else public;
-// loopback, link-local and CGNAT (100.64/10, Tailscale) are skipped.
-func DetectLANIP() string {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return ""
-	}
-	bestIP := ""
-	bestScore := -1
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			ipNet, ok := addr.(*net.IPNet)
-			if !ok {
-				continue
-			}
-			ip := ipNet.IP.To4()
-			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-				continue
-			}
-			score := lanIPScore(ip)
-			if score > bestScore {
-				bestIP = ip.String()
-				bestScore = score
-			}
-		}
-	}
-	return bestIP
-}
-
-func lanIPScore(ip net.IP) int {
-	ip = ip.To4()
+// Excluded: IPv6 (the worker currently configures UDP4 only), link-local
+// (169.254/16, not routable), multicast/unspecified. Loopback is kept so a
+// local probe/test can connect without a LAN interface.
+func IsAdvertisableIPv4(ip net.IP) bool {
 	if ip == nil {
-		return -1
+		return false
 	}
-	switch {
-	case ip[0] == 192 && ip[1] == 168:
-		return 4
-	case ip[0] == 10:
-		return 3
-	case ip[0] == 172 && ip[1] >= 16 && ip[1] <= 31:
-		return 2
-	case ip[0] == 100 && ip[1] >= 64 && ip[1] <= 127:
-		// RFC 6598 carrier-grade NAT; Tailscale uses this range.
-		return -1
-	case ip[0] == 169 && ip[1] == 254:
-		return -1
-	default:
-		return 1
+	if ip.To4() == nil {
+		return false // IPv6 is not gathered while network types are UDP4-only
 	}
-}
-
-// IsVirtualAdapterName reports whether a network interface name looks like a
-// VPN/tunnel/virtual switch that should not be advertised to LAN clients.
-// Interface names are locale-dependent on Windows, so this is a best-effort
-// secondary filter; the IP-based score above is the primary one.
-func IsVirtualAdapterName(name string) bool {
-	lower := strings.ToLower(name)
-	for _, marker := range []string{"tailscale", "zerotier", "vethernet", "hyper-v", "wsl", "vmware", "virtualbox", "tun", "tap", "wireguard", "openvpn", "bluetooth"} {
-		if strings.Contains(lower, marker) {
-			return true
-		}
+	if ip.IsLoopback() {
+		return true
 	}
-	return false
+	if ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return false
+	}
+	return ip.IsGlobalUnicast()
 }

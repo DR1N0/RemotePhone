@@ -8,6 +8,16 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-22 — ICE advertises all routable IPv4; no Tailscale-specific config
+
+An earlier attempt at the same date restricted ICE to one detected `192.168/10/172` address to stop an Android emulator client from selecting a Tailscale candidate through a Windows NAT hairpin. That fixed a test-environment symptom by breaking a real deployment: a phone on Tailscale only saw an unreachable LAN candidate, and the worker's UDP socket also only listened on that address. Special-casing Tailscale would repeat the same mistake one layer up.
+
+The policy is now: IPv4/UDP only, advertise every routable IPv4 interface (LAN, Tailscale `100.64/10`, other VPNs), exclude only loopback/link-local/multicast/IPv6, and let ICE choose. `MAKO_WEBRTC_HOST_IP` remains as a debug override for a specific interface, not as a Tailscale prerequisite. `host.IsAdvertisableIPv4` owns the predicate and is unit-tested for LAN, Tailscale, link-local, multicast and IPv6.
+
+Verified on a real phone (Xiaomi 23127PN0CC, Wi-Fi `192.168.1.4`): ICE selected `192.168.1.4 -> 192.168.1.7`, video ran at ~30fps with `framesDecoded` tracking `framesReceived` and no freeze over the test window. The emulator-as-client hairpin remains a test-environment artifact and is not a reason to restrict candidates.
+
+---
+
 ### 2026-10-22 — Audio (PCMU) and multi-touch (gRPC sendTouch) land on Windows
 
 **Audio path.** The emulator's `streamAudio` RPC is now in the vendored proto and `internal/worker/transport/emugrpc/audio.go` streams S16LE packets (requested 48 kHz stereo). `webrtc/audio.go` downmixes to mono, linearly resamples to 8 kHz, μ-law-encodes, and writes 20 ms (160-byte) samples to a WebRTC audio track. The codec is deliberately **PCMU, not Opus**: Opus needs either cgo/libopus or a hand-written encoder, PCMU is pure Go and universally supported, and 8 kHz mono is enough to prove the path. A real 440 Hz tone played in the guest was captured at exactly 440.0 Hz (7 s, 56,000 bytes, RMS 192) — not silence.
@@ -19,7 +29,7 @@ The Android client now adds a recv-only audio transceiver (without it the worker
 **Bugs this surfaced:**
 - The PCMU resampler could compute a drop index a few samples past its buffer (packet sizes are not multiples of the 48k→8k ratio) and panicked the worker. Fixed by clamping, with a regression test using emulator-sized (1088-frame) packets.
 - AMF `-usage lowlatency` emits **one IDR ever** (measured 1 IDR in 5 s with `-g 30`), so a client that loses any reference frame freezes permanently. Switched to `lowlatency_high_quality` + `-header_spacing <gop>`; AMF now emits an IDR and SPS/PPS every second. This is why a real client could freeze while the RTP stream kept flowing.
-- The host has several virtual adapters (Tailscale 100.64/10, Hyper-V, link-local, IPv6); advertising all of them let ICE pick a lossy path. Worker ICE is now IPv4/UDP only and filtered to one LAN IP (`MAKO_WEBRTC_HOST_IP`, auto-detected preferring 192.168/10/172 and skipping CGNAT/link-local). `MAKO_STREAM_BITRATE` makes the H.264 bitrate tunable for weak links.
+- The host has several virtual adapters (Tailscale 100.64/10, Hyper-V, link-local, IPv6); advertising all of them let ICE pick a lossy path on the same-host emulator. The final policy is to advertise all routable IPv4 (Tailscale included) and let ICE choose; an intermediate attempt to filter to one LAN IP was reverted the same day because it broke Tailscale clients. `MAKO_STREAM_BITRATE` makes the H.264 bitrate tunable for weak links.
 
 **Still open:** an Android emulator acting as the client on the same Windows host goes through a Windows NAT hairpin to the host's own LAN IP and loses packets under video load (host-side probe on the same worker receives a steady 30 fps). Audio and touch work through that path; video decodes initially and then stalls on lost keyframe packets. The trustworthy end-to-end video check is a physical phone on the LAN, which has not been available in this session.
 

@@ -8,7 +8,8 @@ Android is the only supported platform (iOS distribution was deliberately ruled 
 
 ```powershell
 flutter pub get
-flutter build apk --debug
+# Optional: bake in the server URL (otherwise the login screen defaults to 10.0.2.2:3000)
+flutter build apk --debug --dart-define=MAKO_DEFAULT_SERVER=https://192.168.1.7:3000
 adb install -r build\app\outputs\flutter-apk\app-debug.apk
 ```
 
