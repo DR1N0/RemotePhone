@@ -60,7 +60,12 @@ class _StreamScreenState extends State<StreamScreen> {
   void _handlePointer(PointerEvent event, String action) {
     final normalized = _normalizedPosition(event.position);
     if (normalized == null) return;
-    _session.sendTouch(action: action, x: normalized.dx, y: normalized.dy);
+    _session.sendTouch(
+      action: action,
+      x: normalized.dx,
+      y: normalized.dy,
+      pointerId: event.pointer,
+    );
   }
 
   @override

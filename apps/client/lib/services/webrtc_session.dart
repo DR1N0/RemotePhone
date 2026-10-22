@@ -95,15 +95,21 @@ class WebrtcSession extends ChangeNotifier {
       _pc = pc;
       debugPrint('[webrtc] peer connection created');
 
-      // Without this, createOffer() has no video m-line at all (the
-      // client never adds a local video track), so the worker's answer
-      // can't carry a video track back either — silent black screen, no
-      // error anywhere in the handshake.
+      // Without these, createOffer() has no m-lines for the media the worker
+      // sends (the client never adds local tracks), so the answer can't carry
+      // video/audio back — silent black screen / no sound, no error anywhere
+      // in the handshake. Audio is required for the worker to negotiate its
+      // PCMU track; the Flutter WebRTC plugin plays the remote audio track
+      // automatically (no renderer needed).
       await pc.addTransceiver(
         kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
         init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
       );
-      debugPrint('[webrtc] video transceiver added');
+      await pc.addTransceiver(
+        kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
+        init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
+      );
+      debugPrint('[webrtc] video+audio transceivers added');
 
       pc.onTrack = (event) {
         debugPrint('[webrtc] onTrack: kind=${event.track.kind} streams=${event.streams.length}');
@@ -190,8 +196,22 @@ class WebrtcSession extends ChangeNotifier {
   /// Sends one normalized input event — wire format fixed by the worker
   /// (transport.InputEvent, internal/worker/transport/adapter.go): plain
   /// JSON text, x/y normalized 0-1 against the video's own dimensions.
-  void sendTouch({required String action, required double x, required double y}) {
-    _send({'type': 'touch', 'action': action, 'x': x, 'y': y, 'keycode': 0});
+  /// pointerId keeps each finger distinct so the worker can inject a real
+  /// multi-touch stream via the emulator's gRPC sendTouch.
+  void sendTouch({
+    required String action,
+    required double x,
+    required double y,
+    int pointerId = 0,
+  }) {
+    _send({
+      'type': 'touch',
+      'action': action,
+      'x': x,
+      'y': y,
+      'keycode': 0,
+      'pointerId': pointerId,
+    });
   }
 
   void sendKey({required String action, required int keycode}) {
@@ -214,11 +234,32 @@ class WebrtcSession extends ChangeNotifier {
     _statsTimer?.cancel();
     _statsTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
       final reports = await pc.getStats();
+      final byId = <String, dynamic>{ for (final r in reports) r.id: r };
+      for (final report in reports) {
+        if (report.type != 'candidate-pair') continue;
+        final selected = report.values['selected'] == true ||
+            report.values['nominated'] == true;
+        if (!selected) continue;
+        final local = byId[report.values['localCandidateId']];
+        final remote = byId[report.values['remoteCandidateId']];
+        debugPrint('[webrtc] candidate pair: '
+            '${local?.values['candidateType']} ${local?.values['address']}:${local?.values['port']} '
+            '-> ${remote?.values['candidateType']} ${remote?.values['address']}:${remote?.values['port']} '
+            'rtt=${report.values['currentRoundTripTime']}');
+      }
       for (final report in reports) {
         if (report.type != 'inbound-rtp') continue;
-        if (report.values['kind'] != 'video' && report.values['mediaType'] != 'video') {
+        final kind = report.values['kind'] ?? report.values['mediaType'];
+        if (kind == 'audio') {
+          // Same black-box diagnosis as video: packetsReceived growing but
+          // no sound means a decode/route problem, not an empty stream.
+          debugPrint('[webrtc] audio stats: packetsReceived=${report.values['packetsReceived']} '
+              'bytesReceived=${report.values['bytesReceived']} '
+              'audioLevel=${report.values['audioLevel']} '
+              'jitter=${report.values['jitter']}');
           continue;
         }
+        if (kind != 'video') continue;
         debugPrint('[webrtc] video stats: packetsReceived=${report.values['packetsReceived']} '
             'bytesReceived=${report.values['bytesReceived']} '
             'framesReceived=${report.values['framesReceived']} '
