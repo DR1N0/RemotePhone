@@ -28,8 +28,28 @@ class WebrtcSession extends ChangeNotifier {
   String? _attachmentId;
   String? _attachmentToken;
   Timer? _statsTimer;
+  bool _rendererInitialized = false;
 
   WebrtcSession({required this.api, required this.instanceId});
+
+  Future<void> _closePeerConnection() async {
+    _statsTimer?.cancel();
+    _statsTimer = null;
+    final channel = _inputChannel;
+    _inputChannel = null;
+    if (channel != null) {
+      try {
+        await channel.close();
+      } catch (_) {}
+    }
+    final pc = _pc;
+    _pc = null;
+    if (pc != null) {
+      try {
+        await pc.close();
+      } catch (_) {}
+    }
+  }
 
   /// Resumes the cached session for this instance if one exists (a prior
   /// disconnect only starts the server's owner-absence grace period, it
@@ -74,7 +94,15 @@ class WebrtcSession extends ChangeNotifier {
     notifyListeners();
     try {
       debugPrint('[webrtc] connect() start, instance=$instanceId');
-      await remoteRenderer.initialize();
+      // A Retry happens on this same object: tear down the failed peer
+      // connection and data channel first, otherwise the old PC's callbacks
+      // and the new PC race over state and the renderer.
+      await _closePeerConnection();
+      if (!_rendererInitialized) {
+        await remoteRenderer.initialize();
+        _rendererInitialized = true;
+      }
+      remoteRenderer.srcObject = null;
       debugPrint('[webrtc] renderer initialized');
 
       final (sessionId, attachmentId, attachmentToken) = await _openSession();
@@ -294,9 +322,11 @@ class WebrtcSession extends ChangeNotifier {
         // matters more than this call succeeding.
       }
     }
-    await _inputChannel?.close();
-    await _pc?.close();
-    await remoteRenderer.dispose();
+    await _closePeerConnection();
+    if (_rendererInitialized) {
+      await remoteRenderer.dispose();
+      _rendererInitialized = false;
+    }
     state = SessionConnectionState.disconnected;
     notifyListeners();
     debugPrint('[webrtc] disconnect() done');

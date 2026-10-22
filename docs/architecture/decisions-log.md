@@ -8,6 +8,14 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-22 — Android client plays stream audio as media, not a phone call
+
+The real phone initially treated the WebRTC audio track as `USAGE_VOICE_COMMUNICATION`: it came out of the earpiece and the volume keys adjusted call volume. Fixed by calling `WebRTC.initialize(options: {'androidAudioConfiguration': AndroidAudioConfiguration.media.toMap()})` before the first peer connection. flutter_webrtc applies those attributes while building its `JavaAudioDeviceModule`, so this must happen at startup, not per connection.
+
+Verified on the Xiaomi phone: the active track's `Usg` became `1` (media), the route is `speaker`, and Volume Up changed `STREAM_MUSIC` 47→57 while `STREAM_VOICE_CALL` stayed at 11. The stream audio is PCMU; this only changes Android's usage/route/volume category.
+
+---
+
 ### 2026-10-22 — Silent audio was a stale emulator quickboot state, not WebRTC port muxing
 
 A real phone received audio packets but `audioLevel` stayed 0. A host-side probe decoded the worker's PCMU output as digital silence (`rms=0`, `peak=0`), and the phone's own WebRTC `AudioTrack` was active but writing zeros. So the fault was upstream of ICE/RTP, not "audio and video share one UDP port".

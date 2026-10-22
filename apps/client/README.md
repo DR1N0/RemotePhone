@@ -31,7 +31,7 @@ The app currently trusts any TLS certificate because the server uses a self-sign
 - Login, registration with an invite code
 - Template picker backed by the server's discovered AVDs
 - Multiple instances per user: create, start, stop, delete, connect
-- WebRTC video (hardware H.264 when available) and audio (PCMU)
+- WebRTC video (hardware H.264 when available) and audio (PCMU), with Android routing it as media (speaker + media volume, not the call earpiece)
 - Multi-touch with per-finger pointer IDs, injected via the emulator's gRPC `sendTouch`
 
 ## Not implemented yet
