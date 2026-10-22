@@ -2,6 +2,8 @@
 
 This captures the design intent for subsystems that don't exist in code yet, so the rationale survives even though the original design document it came from has been retired. Unlike the rest of `docs/architecture/`, this file describes a **target**, not current reality — each section should move to `overview.md`/`data-model.md`/`security-model.md`/`api-surfaces.md` (and be deleted from here) once actually implemented, and should be revised in place if the target itself changes.
 
+> **Status 2026-10-22:** the worker lifecycle, controller, and the core of the networking sections below are now implemented — see `overview.md`, `decisions-log.md`, and `docs/plans/worker-lifecycle.md`. This file is kept as design rationale, not a to-do list. Still genuinely unbuilt: pooled/remote workers (and the `workers` table that would reintroduce), WebRTC interface filtering/UDP port ranges, TURN/NAT traversal, and pairing.
+
 ## Worker lifecycle: one ephemeral OS process per running instance, not a shared pool
 
 `mako-worker` must be spawned and supervised by the control plane (via `exec.Command`, port assigned at spawn time), not called in-process as `worker.NewWorker(...)` from a controller goroutine — even though the worker has no cgo/`unsafe` and so wouldn't risk a native crash taking down the control plane.

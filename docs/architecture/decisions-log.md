@@ -8,7 +8,29 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-22 — Windows host support, multi-instance per owner, and two real multi-instance bugs
+
+**Windows host.** The server previously only built on macOS/POSIX. Making Windows a first-class host required four changes, each verified on a real Ryzen 9700X / RX 9070 / Windows 11 box:
+
+- `bootstrapsecret` split into platform files: Unix keeps `O_NOFOLLOW` + exact `0600` mode check; Windows rejects reparse points via `GetFileAttributes` and relies on the per-user NTFS ACL (POSIX mode bits are synthesized there, so the old check made `/auth/setup` fail with mode 666).
+- Emulator liveness/stop split into platform files: Windows uses `OpenProcess`/`GetExitCodeProcess` and `taskkill /T /F`, because Windows has no signal-0 or `ps`. Instance stop now first asks the emulator to shut down through `adb -s emulator-<consolePort> emu kill` on every platform, waits up to 15s, and only then falls back to the process kill — this is what makes stop work at all on Windows, and it gives Unix a cleaner shutdown than bare SIGTERM.
+- Emulator/`qemu-img`/worker executable resolution is platform-aware (`.exe`, Windows SDK paths, `MAKO_WORKER_BINARY_PATH` default), and `DiscoverTemplates` respects `ANDROID_AVD_HOME`.
+- `STUN_URL=none` disables STUN explicitly (the historical default is a public Google STUN server, which is unnecessary on a LAN and often unreachable).
+
+The full Go test suite now passes natively on Windows (with POSIX-only tests skipped or build-tagged). End-to-end on this host: controlplane + two concurrent emulator instances + Flutter Android client, with the client reporting `framesDecoded` tracking `framesReceived` at 30fps (540x1200, decode ~5ms).
+
+**AMD AMF probe false negative.** `h264_amf` encodes real 540x1200 frames fine on the RX 9070, but the old `RealEncoderProber` used a hardcoded 64x64 probe; AMF's `encoder->Init()` fails at that size, so `SelectEncoder` silently fell through to `libx264`. `EncoderProber.Probe` now takes the real capture dimensions, and the worker logs the chosen encoder. Verified: logs show `selected encoder h264_amf`, and the client decodes the resulting stream. The `-bf 0` flag was also removed from the AMF branch — AMF ignores it with a noisy "Maxium number of B frames needs to be specified." warning even though the encode succeeds.
+
+**Multi-instance per owner.** The original model allowed exactly one instance per user (`instances_unique_owner`, migration 0011). For an open-source product that is the wrong constraint: one user should be able to create several instances from a template and connect to whichever is running. Migration `0014` drops the unique index and adds a plain `(owner_id)` index; `ErrOwnerConflict`/409 were removed. `GET /api/v1/templates` was added so the client can show a real template picker instead of asking for a typed template id.
+
+**Bug 1: per-instance cloned AVDs appeared as templates.** `DiscoverTemplates` scanned every `.ini` in `~/.android/avd`, including mako's own `mako_instance_*` clones, so after starting one instance it showed up as a selectable template (and could be cloned again). Discovery now skips the reserved `mako_instance_` prefix.
+
+**Bug 2: two concurrent starts got the same emulator ports.** Every worker process started its console/adb/grpc search at 5600/5601/8554, so a second instance raced the first for the same ports (observed: both handles reported console 5600; only one emulator survived). The control plane now allocates the triple (`MAKO_EMULATOR_PORTS=console,adb,grpc`) under a mutex before spawning, checking real TCP availability; the worker honors the assignment. Re-verified with two instances on distinct ports (5604/5606) both streaming simultaneously.
+
+**Bug 3: multi-slice H.264 inflated RTP timestamps.** `pipeH264` treated every slice NAL as a complete access unit. `libx264 -tune zerolatency` emits one slice per CPU core (16 on this host), so each picture became 16 RTP samples and timestamps advanced ~16× too fast. Grouping now uses `first_mb_in_slice == 0` (and AUD NALs when present) to start a new picture; continuation slices stay in the same sample. A unit test covers the multi-slice case, and the real client now reports ~30 network/decode fps instead of hundreds.
+
 ### 2026-10-20 — Base image capture/promote (Phase 6) built; live boot verification unresolved
+
 
 `internal/controlplane/image` (capture-candidate/promote/resolve), the `templates`/`base_images` tables (migration `0013`), and the routes designed in `planned-subsystems.md` all landed and pass unit tests — see `data-model.md`'s "What `0013` did" for the schema and mechanism.
 

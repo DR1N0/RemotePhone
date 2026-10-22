@@ -53,9 +53,10 @@ Client-only routes:
 | POST | `/api/v1/auth/credentials/{id}/revoke` | requires account-scoped credential, owner-checked |
 | POST | `/api/v1/auth/pairing-invites` | **tombstone** — returns `410 Gone` |
 | POST | `/api/v1/auth/pairing-invites/redeem` | **tombstone** — returns `410 Gone` |
-| POST | `/api/v1/instances` | requires account-scoped credential; owner becomes the caller |
+| POST | `/api/v1/instances` | requires account-scoped credential; owner becomes the caller; may be called repeatedly (multi-instance per owner) |
 | GET | `/api/v1/instances` | owner-scoped list |
 | GET | `/api/v1/instances/{id}` | owner-checked |
+| GET | `/api/v1/templates` | requires account-scoped credential; lists the host's discovered AVDs (`templateId`/`displayName`/`runtimeClass`) for the client's template picker |
 | POST | `/api/v1/instances/{id}/start` | owner-checked; spawns a dedicated `mako-worker` process for this instance and calls it to boot the emulator |
 | POST | `/api/v1/instances/{id}/stop` | owner-checked |
 | DELETE | `/api/v1/instances/{id}` | owner-checked |
@@ -77,4 +78,4 @@ Client-only routes:
 
 ## Not yet implemented (any surface)
 
-Worker inventory, pairing. `pairing/` exists as an empty stub package, deliberately deferred until a native client exists to pair with — see `security-model.md`. `image/` (template/base-image management) is implemented as of 2026-10-20 — see the capture-candidate-image/admin-images routes above, and `docs/architecture/decisions-log.md`'s 2026-10-20 entries for its current verification status (unit-tested; live end-to-end boot verification inconclusive pending a retest on a fresh host).
+Pairing (PIN-confirmed client trust / SPKI pinning). `pairing/` exists as an empty stub package, deliberately deferred — see `security-model.md`. Audio capture and multi-touch input are also not implemented yet (video + single-pointer touch only).

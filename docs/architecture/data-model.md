@@ -1,6 +1,6 @@
 # Data model
 
-SQLite, migrations applied in order from `apps/server/internal/controlplane/persistence/migrations/` (currently `0000` through `0013`). This describes the schema **as migrated today**. It is not a copy of any design document — table/column names below were read directly from the migration files.
+SQLite, migrations applied in order from `apps/server/internal/controlplane/persistence/migrations/` (currently `0000` through `0014`). This describes the schema **as migrated today**. It is not a copy of any design document — table/column names below were read directly from the migration files.
 
 ## Current tables
 
@@ -9,7 +9,7 @@ SQLite, migrations applied in order from `apps/server/internal/controlplane/pers
 | `users` | Accounts (renamed from `principals` in `0008`). | `user_type` (`registered`/`admin`/`guest` — `guest` rows are created by session-invite redemption, see `decisions-log.md` 2026-10-14), `username` (unique, case-insensitive), `password_hash`, `status` (`active`/`banned`). `is_server_owner` and `enrollment_required` were dropped in `0010` — see below. |
 | `credentials` | Bearer-token-backed credentials, scoped to an account or a specific attachment. | `user_id`, `token_hash`, `scope` (`account`/`attachment`), `session_id`, `attachment_id`, `not_before`, `expires_at`, `revoked_at`. |
 | `registration_invites` | Single-use tokens an admin issues so a new user can self-register. Renamed from `pairing_invites` in `0010`. | `token_hash`, `created_by`, `expires_at`, `consumed_at`, `consumed_by_user_id`. |
-| `instances` | A managed runtime instance (an Android emulator session's durable record). | `runtime_class`, `template_id`, `placement_policy_json`, `resource_profile_json`, `launch_config_json`, `desired_state`/`observed_state`, `runtime_handle_json`, `state_data_ref`, `owner_id` (unique-indexed as of `0011`, see below). No `worker_id` column — the worker currently serving an instance is runtime status, tracked in `runtime_handle_json`/`observed_state`, not a separate column (see `decisions-log.md`, 2026-10-14). As of Phase 4 (worker lifecycle), `runtime_handle_json` (`runtime.InstanceHandle`) carries two more fields alongside the pre-existing emulator-process ones (`pid`/`consolePort`/`adbPort`/`grpcPort`): `workerPid` and `workerBaseUrl`, identifying the control-plane-spawned `mako-worker` OS process currently serving this instance — independent of the emulator fields, which survive a worker respawn unchanged. Still zero new schema: both live in the same JSON blob column. |
+| `instances` | A managed runtime instance (an Android emulator session's durable record). | `runtime_class`, `template_id`, `placement_policy_json`, `resource_profile_json`, `launch_config_json`, `desired_state`/`observed_state`, `runtime_handle_json`, `state_data_ref`, `owner_id` (non-unique index as of `0014`; a user may own many instances). No `worker_id` column — the worker currently serving an instance is runtime status, tracked in `runtime_handle_json`/`observed_state`, not a separate column (see `decisions-log.md`, 2026-10-14). As of Phase 4 (worker lifecycle), `runtime_handle_json` (`runtime.InstanceHandle`) carries two more fields alongside the pre-existing emulator-process ones (`pid`/`consolePort`/`adbPort`/`grpcPort`): `workerPid` and `workerBaseUrl`, identifying the control-plane-spawned `mako-worker` OS process currently serving this instance — independent of the emulator fields, which survive a worker respawn unchanged. Still zero new schema: both live in the same JSON blob column. |
 | `sessions` | A live session against an instance. | `instance_id`, `status`, `owner_absence_deadline` (renamed from `idle_expires_at` in `0006`), `owner_absence_timeout_ms`, `reconnect_token`. |
 | `attachments` | One client's attachment to a session (a browser tab or future native client connection). | `session_id`, `client_id`, `role`, `status`, `user_id` (renamed from `principal_id`), `pending_target_role` (sole pending-role column as of `0012`, see below), `transport_teardown_pending`, `reconnect_token`. |
 | `session_invites` | Single-use tokens inviting another user to attach to an existing session. | `session_id`, `created_by_user_id`, `token_hash`, `expires_at`, `consumed_at`. |
@@ -41,7 +41,7 @@ DROP TABLE settings;
 CREATE UNIQUE INDEX instances_unique_owner ON instances(owner_id);
 ```
 
-`workers` and `settings` were dropped per the 2026-10-14 decisions-log entry (one-worker-per-instance model has no registry to populate; `settings` had zero callers). `instances_unique_owner` enforces the one-instance-per-owner invariant directly in the database — `instance.Service.CreateManagedInstance` relies on this index and maps its constraint-violation error to `ErrOwnerConflict`, rather than porting the TS code's check-then-insert-inside-an-immediate-transaction dance (which existed only because the TS schema never had a real unique index — see `apps/controlplane/src/persistence/repositories/instances.ts`'s `ensureUniqueInstanceOwnerIndex`, a runtime remediation path for legacy pre-ownership data that doesn't exist in this fresh schema).
+`workers` and `settings` were dropped per the 2026-10-14 decisions-log entry (one-worker-per-instance model has no registry to populate; `settings` had zero callers). `instances_unique_owner` enforced the original one-instance-per-owner invariant; **migration `0014` removes it** — see "What `0014` did" below.
 
 ## What `0012` did
 
@@ -78,3 +78,15 @@ Ships roadmap Phase 6 (`image.Service`): capturing a candidate image (owner-scop
 The original design (see `planned-subsystems.md`'s now-corrected "Base image and user data model" section) assumed a base image would back a QEMU qcow2 backing-file chain. Direct testing during the per-instance-isolation work that preceded this migration disproved that: the emulator's `-datadir`/`-init-data` flags, which that scheme depended on, turn out to be silently ignored (or rejected outright) once `-avd <name>` is given. The mechanism that actually works — and that `base_images.artifact_path` stores — is a plain directory holding a copied `config.ini` and seed `userdata-qemu.img`, the same two files `androidstudio.ensureInstanceAVD` already clones per-instance from. Capturing a candidate is just: copy those same two files out of a stopped instance's own AVD (`instances.state_data_ref`) into durable, versioned storage instead.
 
 `templates` rows are created lazily, on first capture for a given `TemplateID` — never pre-populated from `androidstudio.DiscoverTemplates`'s on-disk AVD scan. A template with no row (the common case, for every template no admin has ever captured) behaves exactly as it did before this migration: new instances clone straight from the template's live, on-disk AVD.
+
+## What `0014` did
+
+```sql
+DROP INDEX IF EXISTS instances_unique_owner;
+CREATE INDEX IF NOT EXISTS instances_owner_id ON instances(owner_id);
+```
+
+The product model is now explicit multi-instance per user: one account may create any number of instances from any discovered template and start/connect them independently. The `0011` unique index was a leftover from the original one-seat-per-account MVP; it made a second `CreateManagedInstance` fail with `ErrOwnerConflict`. Migration `0014` drops that index and keeps a non-unique `(owner_id)` index for the owner-scoped listing query. `ErrOwnerConflict` and the 409 mapping were removed with it.
+
+Two related changes shipped alongside: `GET /api/v1/templates` lets a client discover the host's real AVDs (instead of typing a template id), and `androidstudio.DiscoverTemplates` now skips `mako_instance_*` clones so one instance's per-instance AVD never appears as a selectable template.
+

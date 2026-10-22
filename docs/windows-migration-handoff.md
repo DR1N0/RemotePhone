@@ -1,5 +1,16 @@
 # Handoff: LAN/real-device testing + AMD GPU verification on Windows
 
+## Status 2026-10-22 — Windows host is working
+
+Both problems below have been worked on the Windows machine. Summary:
+
+- **Server builds/tests/serves natively on Windows 11** (Go 1.27.3, Ryzen 9700X, RX 9070). The POSIX-only blockers were fixed (bootstrap-secret platform split, Win32 process liveness/stop, adb-first graceful emulator shutdown, `.exe`/SDK path resolution, `STUN_URL=none`); the full Go test suite passes natively.
+- **AMD `h264_amf` is confirmed working at real capture size.** `ffmpeg -encoders` has it, a 60-frame 540x1200 rawvideo pipe encoded and decoded cleanly (Constrained Baseline, level 3.1), and the worker now logs `selected encoder h264_amf`. The old 64x64 probe was the actual bug: AMF's `encoder->Init()` fails at that size, so `SelectEncoder` silently fell through to `libx264`. The probe now receives the real capture dimensions. `-bf 0` was removed from the AMF branch (it produced a noisy AMF warning).
+- **End-to-end verified on Windows**, including the Android client in an emulator: controlplane + worker + two concurrent emulator instances on distinct ports, both streaming 30fps H.264; the Flutter client listed both instances and streamed one with `framesDecoded` tracking `framesReceived` (~5ms decode).
+- **Problem 1 (LAN from a real phone) is still open.** The verification above used an Android emulator as the client, not a physical phone. The Mac-specific firewall/Netskope theory behind Problem 1 is still unconfirmed on Windows; try a real phone with `MAKO_CLIENT_ADDR=0.0.0.0:3000` and a firewall allow rule.
+
+Path references below predate the move of the Go server into `apps/server/`; `internal/worker/...` means `apps/server/internal/worker/...`, `cmd/...` means `apps/server/cmd/...`.
+
 ## Who this is for
 
 A fresh agent (no prior context) picking up work on the user's Windows PC (AMD GPU). This doc exists because two pieces of work got blocked on the current dev machine (a corporate-managed Mac) for reasons specific to that machine, not to mako's code — both are expected to just work on an unmanaged Windows PC, but need real verification there.
@@ -49,7 +60,7 @@ Candidate order for Windows (`defaultEncoderCandidates`): `h264_nvenc` → `h264
 2. Confirm `SelectEncoder`'s real probe (`RealEncoderProber.Probe`, a throwaway `ffmpeg -f lavfi -i color=black:s=64x64:d=0.2 -c:v h264_amf -f null -`) actually succeeds on this hardware — i.e., the AMF driver/runtime is actually initialized, not just compiled into ffmpeg.
 3. Confirm the actual capture pipeline (`buildFFmpegArgs`'s `h264_amf` branch: `-usage lowlatency -quality speed -rc cbr -profile:v constrained_baseline -level:v 3.1`) produces output pion/WebRTC can actually decode end-to-end — connect a real client and confirm video renders (not just that ffmpeg exits 0). Pay close attention to the same class of bug that bit the videotoolbox path earlier this session: a profile/level mismatch between what the hardware encoder actually emits and what's been negotiated can look "connected" at the transport layer while silently producing an undecodable stream (`framesReceived` grows, `framesDecoded` stays at 0). Use the client's WebRTC stats polling (`webrtc_session.dart`'s periodic `getStats()` logging) to confirm `framesDecoded` tracks `framesReceived`, not just that the peer connection reports "Connected".
 4. If `constrained_baseline` isn't actually a valid value for AMF's `-profile:v` on this ffmpeg build (profile enum values for `h264_amf` have varied across ffmpeg versions — some only accept `main`/`high`), adjust `buildFFmpegArgs`'s `h264_amf` case accordingly and update the comment that currently flags this as unverified.
-5. Update `docs/plans/windows-migration-handoff.md` (this file) or `encoder.go`'s comments once verified, removing the "unverified/best-effort" caveats so future readers know this path is now confirmed, not just hopeful.
+5. Update `docs/windows-migration-handoff.md` (this file) or `encoder.go`'s comments once verified, removing the "unverified/best-effort" caveats so future readers know this path is now confirmed, not just hopeful.
 
 ### Setting up the dev environment on Windows
 

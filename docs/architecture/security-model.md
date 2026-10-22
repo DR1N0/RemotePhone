@@ -6,7 +6,7 @@
 
 **Bearer tokens** (`auth/token.go`): 32 cryptographically random bytes, base64url-encoded without padding (43 chars, 256 bits of entropy). Looked up by plain (unsalted) SHA-256 hex digest — unsalted deliberately, since the input is already high-entropy random data, not a low-entropy secret a dictionary attack could target.
 
-**Bootstrap secret** (`auth/bootstrapsecret.go`): exactly 32 random bytes, base64url-encoded (43 chars), file mode exactly `0600`, parent directory `0700`, written via `O_CREATE|O_EXCL` (never overwrites an existing file), read via `os.Lstat` first and rejected if it's a symlink. Used once, to authorize `POST /api/v1/auth/setup` (first-admin bootstrap).
+**Bootstrap secret** (`auth/bootstrapsecret.go` + platform files): exactly 32 random bytes, base64url-encoded (43 chars). On Unix the file is created with mode exactly `0600` in a `0700` directory and read through `O_NOFOLLOW` with an exact-mode check; on Windows the file inherits the per-user NTFS ACL of its directory and a reparse point/symlink at the path is rejected before reading (POSIX mode bits are meaningless there). Writes go through a temp file + `os.Link`, so the published name never exposes a partially written secret. Used once, to authorize `POST /api/v1/auth/setup` (first-admin bootstrap).
 
 **Authorization layering** (`apiserver/middleware/auth.go`): two distinct middleware layers, not one combined check —
 - `RequireAuth` — missing/invalid/expired/revoked credential or banned user all collapse to a generic 401 (anti-enumeration: an attacker can't distinguish "wrong token" from "banned account" from "token for a scope that doesn't apply here").
@@ -18,7 +18,7 @@
 
 ## Current network reality
 
-- **Client API** (`127.0.0.1:3000`) serves **HTTPS** with the self-signed certificate above. No client-side trust verification exists yet (no PIN-pairing, no TOFU/SPKI pinning) — a real client would have to blindly trust-on-first-use today, which is why this surface still must stay loopback-only or behind a manually-configured reverse proxy; see below.
+- **Client API** (`127.0.0.1:3000` by default, `MAKO_CLIENT_ADDR=0.0.0.0:3000` for LAN) serves **HTTPS** with the self-signed certificate above. No client-side trust verification exists yet (no PIN-pairing, no TOFU/SPKI pinning); the Android client in `apps/client` currently accepts any certificate (`badCertificateCallback`), which is why this surface is only safe on a trusted LAN or behind a manually-configured reverse proxy. See below.
 - **Admin API** (`127.0.0.1:3001`) is unchanged: **plain HTTP, loopback-bound**. Its loopback binding is its own independent security barrier (a stolen bearer token or missed authorization check still can't be exploited without actual host access) — TLS doesn't change that, and the roadmap's "HTTPS for the client surface" was always scoped to the client surface only.
 
 ## Designed, not yet built: PIN-pairing trust bootstrap
@@ -30,12 +30,12 @@ The long-term target (from the Go-backend-consolidation design work) replaces bl
 3. Client persists the server's SPKI fingerprint (not the whole certificate — a same-key cert renewal doesn't break trust).
 4. Any later connection presenting a different key is rejected.
 
-Authorization after pairing stays bearer-token based (unchanged from what's implemented today) — PIN-pairing only replaces how the TLS channel is first trusted, not how requests are authorized afterward. **Deliberately deferred** (decided with the user, 2026-10-16): there's no native client yet to pair with or verify a handshake against, and this sketch isn't a concrete protocol (no KDF, challenge format, or rotation story specified) — building it now would be unverifiable except against a simulated-client test harness, unlike every other phase of this port, each checked against a real counterpart. `internal/controlplane/pairing/` stays an empty stub package until a real client exists. Until this is built, the client API must stay loopback-only or behind a manually-configured reverse proxy — there is no safe way to expose `127.0.0.1:3000` directly to a LAN today.
+Authorization after pairing stays bearer-token based (unchanged from what's implemented today) — PIN-pairing only replaces how the TLS channel is first trusted, not how requests are authorized afterward. **Deliberately deferred** (decided with the user, 2026-10-16): although the Android client now exists, this sketch still isn't a concrete protocol (no KDF, challenge format, or rotation story specified), and building it would be unverifiable except against a simulated-client test harness. `internal/controlplane/pairing/` stays an empty stub package until that protocol is specified. Until then, the client API must stay on a trusted LAN or behind a manually-configured reverse proxy.
 
 ## Networking target (designed, not yet built)
 
 Three distinct traffic paths are planned:
 
 1. **Control-plane client API** — HTTPS as of this phase (self-signed, no client trust verification yet); target is PIN-paired + LAN-reachable, see above.
-2. **Worker media/data ports** — not yet relevant; the worker's pion WebRTC stack still binds loopback-only, unrelated to worker *process* lifecycle (which is built — see `docs/plans/worker-lifecycle.md`).
+2. **Worker media/data ports** — the worker's pion WebRTC stack binds the host's interfaces (no interface filter or ephemeral-port range is configured yet), so a phone on the LAN can reach its ICE candidates directly. Only the control plane's client API is authenticated by bearer tokens; the media channel is protected by SDP/ICE secrecy, not application auth.
 3. **Worker internal control API** — strictly `127.0.0.1`-bound, never LAN-reachable; unaffected by this phase.

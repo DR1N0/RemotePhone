@@ -61,9 +61,9 @@ run: ## Run both frontend and worker applications
 	wait $$WORKER $$FRONTEND
 
 .PHONY: run-client
-run-client: ## Run the Flutter client app on macOS
+run-client: ## Run the Flutter Android client on a connected device/emulator
 	@echo "Running client..."
-	@cd apps/client && flutter run -d macos
+	@cd apps/client && flutter run
 
 .PHONY: build-admin
 build-admin: ## Build admin frontend to apps/admin/dist
