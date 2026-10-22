@@ -25,6 +25,10 @@ type Adapter struct {
 	baseImageRoot  string
 	launchFn       func(string, LaunchRequest) (ProcessHandle, error)
 	stopFn         func(int) error
+	// stopEmulatorFn owns the graceful shutdown path (adb console "emu kill",
+	// then a process-kill fallback). Swappable in tests so they never shell
+	// out to a real adb/emulator.
+	stopEmulatorFn func(runtime.InstanceHandle) error
 	// commitOverlayFn merges a running (or just-stopped) instance's
 	// quickboot qcow2 overlay into its backing userdata-qemu.img — see
 	// CaptureBaseImage's doc comment for why this is necessary. Swappable
@@ -61,6 +65,7 @@ func NewAdapter(cfg config.Config, store runtime.HandleStore, transportStore *tr
 		dataRoot:       cfg.InstanceDataRoot,
 		baseImageRoot:  cfg.BaseImageRoot,
 		stopFn:         StopProcess,
+		stopEmulatorFn: stopEmulator,
 	}
 	adapter.launchFn = func(emulatorPath string, req LaunchRequest) (ProcessHandle, error) {
 		cmd, err := Launch(emulatorPath, req)
@@ -152,7 +157,11 @@ func (a *Adapter) Stop(instanceID string) (runtime.InstanceStatus, error) {
 	}
 
 	lastError := ""
-	if err := a.stopFn(handle.PID); err != nil {
+	stop := a.stopEmulatorFn
+	if stop == nil {
+		stop = func(h runtime.InstanceHandle) error { return a.stopFn(h.PID) }
+	}
+	if err := stop(handle); err != nil {
 		lastError = err.Error()
 	}
 	if a.store != nil {
@@ -261,19 +270,22 @@ func (a *Adapter) mergeQuickbootOverlay(sourceDataDir string) error {
 }
 
 // resolveQemuImgBinary finds qemu-img alongside the resolved emulator
-// binary — the Android SDK ships its own copy there (confirmed:
-// <sdk>/emulator/qemu-img), so this has no extra install requirement beyond
-// the SDK this whole package already depends on.
+// binary — the Android SDK ships its own copy there (<sdk>/emulator/qemu-img
+// on Unix, <sdk>/emulator/qemu-img.exe on Windows), so this has no extra
+// install requirement beyond the SDK this whole package already depends on.
 func (a *Adapter) resolveQemuImgBinary() (string, error) {
 	emulatorPath, err := ResolveEmulatorBinary(a.discovery)
 	if err != nil {
 		return "", fmt.Errorf("resolve emulator binary (needed to locate sibling qemu-img): %w", err)
 	}
-	qemuImgPath := filepath.Join(filepath.Dir(emulatorPath), "qemu-img")
-	if info, err := os.Stat(qemuImgPath); err != nil || info.IsDir() {
-		return "", fmt.Errorf("qemu-img not found alongside emulator binary at %s", qemuImgPath)
+	dir := filepath.Dir(emulatorPath)
+	candidates := []string{filepath.Join(dir, qemuImgBinaryName()), filepath.Join(dir, "qemu-img")}
+	for _, qemuImgPath := range candidates {
+		if info, err := os.Stat(qemuImgPath); err == nil && !info.IsDir() {
+			return qemuImgPath, nil
+		}
 	}
-	return qemuImgPath, nil
+	return "", fmt.Errorf("qemu-img not found alongside emulator binary in %s (tried %s)", dir, strings.Join(candidates, ", "))
 }
 
 // ensureInstanceAVD gives instanceID its own independently-registered AVD,
@@ -337,7 +349,7 @@ func (a *Adapter) ensureInstanceAVD(instanceID string, template runtime.Template
 // instanceAVDName derives a valid, collision-free AVD identifier from an
 // instance ID (a UUID) — AVD names/.ini filenames don't accept hyphens.
 func instanceAVDName(instanceID string) string {
-	return "mako_instance_" + strings.ReplaceAll(instanceID, "-", "_")
+	return instanceAVDPrefix + strings.ReplaceAll(instanceID, "-", "_")
 }
 
 // resolveSeedUserdataPath picks the seed userdata image a new instance's

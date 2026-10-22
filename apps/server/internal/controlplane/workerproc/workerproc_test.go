@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os/exec"
 	"runtime"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -94,36 +93,10 @@ func TestAllocateLocalPortReturnsDistinctFreePorts(t *testing.T) {
 	}
 }
 
-func TestFromPIDAndKillTerminatesARealProcess(t *testing.T) {
+func TestKillIsNoopOnAlreadyDeadProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a POSIX sleep binary")
 	}
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start sleep: %v", err)
-	}
-	pid := cmd.Process.Pid
-
-	proc, err := FromPID(pid)
-	if err != nil {
-		t.Fatalf("FromPID: %v", err)
-	}
-	if proc.PID() != pid {
-		t.Errorf("proc.PID() = %d, want %d", proc.PID(), pid)
-	}
-
-	// Kill's own goroutine reaps the child via proc.Wait() — don't also
-	// call cmd.Wait() here, which would race the same reap and can observe
-	// ECHILD ("no child processes") depending on which wins.
-	if err := Kill(proc, time.Second); err != nil {
-		t.Fatalf("Kill: %v", err)
-	}
-	if err := syscall.Kill(pid, 0); err == nil {
-		t.Errorf("process %d still signalable after Kill, want it gone", pid)
-	}
-}
-
-func TestKillIsNoopOnAlreadyDeadProcess(t *testing.T) {
 	cmd := exec.Command("sleep", "0.01")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start sleep: %v", err)

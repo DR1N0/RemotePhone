@@ -3,10 +3,6 @@ package androidstudio
 import (
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"strings"
-	"syscall"
 
 	"mako/internal/worker/runtime"
 )
@@ -54,36 +50,19 @@ func ReconcileHandles(store runtime.HandleStore) ([]runtime.InstanceStatus, erro
 	return statuses, nil
 }
 
+// processIsRunnable is the platform-neutral liveness check; the actual OS
+// probe lives in process_unix.go / process_windows.go (Windows has no
+// signal-0 or `ps`, so this cannot be a single portable implementation).
 func processIsRunnable(pid int) (bool, error) {
 	if pid <= 0 {
 		return false, errors.New("emulator process not running")
 	}
-
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false, fmt.Errorf("find emulator process: %w", err)
-	}
-	if err := process.Signal(syscall.Signal(0)); err != nil && !errors.Is(err, syscall.EPERM) {
-		return false, errors.New("emulator process not running")
-	}
-
-	state, err := readProcessState(pid)
+	running, err := processRunning(pid)
 	if err != nil {
 		return false, fmt.Errorf("inspect emulator process state: %w", err)
 	}
-	if state == "" {
+	if !running {
 		return false, errors.New("emulator process not running")
 	}
-	if strings.Contains(state, "Z") {
-		return false, errors.New("emulator process is not runnable")
-	}
 	return true, nil
-}
-
-func readProcessState(pid int) (string, error) {
-	output, err := exec.Command("ps", "-o", "stat=", "-p", fmt.Sprintf("%d", pid)).Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
 }

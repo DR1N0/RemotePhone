@@ -9,7 +9,6 @@ import (
 var (
 	ErrNotFound       = errors.New("managed instance not found")
 	ErrForbidden      = errors.New("user may not manage this instance")
-	ErrOwnerConflict  = errors.New("user already owns a managed instance")
 	ErrInvalidRequest = errors.New("invalid instance request")
 )
 

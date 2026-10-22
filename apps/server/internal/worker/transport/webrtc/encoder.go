@@ -66,8 +66,11 @@ func defaultEncoderCandidates(goos string) []string {
 // EncoderProber checks whether codec actually initializes on this machine —
 // compiled-in ffmpeg support isn't the same as "will work" (VAAPI needs a
 // real /dev/dri render node, NVENC needs a loaded NVIDIA driver, etc).
+// Probe takes the capture dimensions because some hardware encoders
+// (notably h264_amf on AMD) refuse to initialize at arbitrary tiny probe
+// sizes even though they handle the real 540x1200+ capture fine.
 type EncoderProber interface {
-	Probe(ctx context.Context, ffmpegPath, codec string) error
+	Probe(ctx context.Context, ffmpegPath, codec string, width, height int) error
 }
 
 // RealEncoderProber runs a tiny throwaway encode (`-f null -`, the standard
@@ -76,14 +79,17 @@ type EncoderProber interface {
 // initialize on this machine.
 type RealEncoderProber struct{}
 
-func (RealEncoderProber) Probe(ctx context.Context, ffmpegPath, codec string) error {
+func (RealEncoderProber) Probe(ctx context.Context, ffmpegPath, codec string, width, height int) error {
+	if width <= 0 || height <= 0 {
+		width, height = 540, 1200
+	}
 	cmd := exec.CommandContext(ctx, ffmpegPath,
-		"-f", "lavfi", "-i", "color=black:s=64x64:d=0.2",
+		"-f", "lavfi", "-i", fmt.Sprintf("color=black:s=%dx%d:d=0.2", width, height),
 		"-c:v", codec,
 		"-f", "null", "-",
 	)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("probe %s: %w", codec, err)
+		return fmt.Errorf("probe %s at %dx%d: %w", codec, width, height, err)
 	}
 	return nil
 }
@@ -95,17 +101,17 @@ const probeTimeout = 2 * time.Second
 // initializes. Call once per worker process (e.g. memoized by the caller)
 // — probing is real subprocess work, not free, and candidate availability
 // doesn't change between connections on the same host.
-func SelectEncoder(ctx context.Context, ffmpegPath string) (string, error) {
-	return SelectEncoderFrom(ctx, ffmpegPath, defaultEncoderCandidates(runtime.GOOS), RealEncoderProber{})
+func SelectEncoder(ctx context.Context, ffmpegPath string, width, height int) (string, error) {
+	return SelectEncoderFrom(ctx, ffmpegPath, defaultEncoderCandidates(runtime.GOOS), RealEncoderProber{}, width, height)
 }
 
 // SelectEncoderFrom is SelectEncoder's testable core: explicit candidates
 // and prober, so tests never shell out to a real ffmpeg.
-func SelectEncoderFrom(ctx context.Context, ffmpegPath string, candidates []string, prober EncoderProber) (string, error) {
+func SelectEncoderFrom(ctx context.Context, ffmpegPath string, candidates []string, prober EncoderProber, width, height int) (string, error) {
 	var errs []error
 	for _, codec := range candidates {
 		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
-		err := prober.Probe(probeCtx, ffmpegPath, codec)
+		err := prober.Probe(probeCtx, ffmpegPath, codec, width, height)
 		cancel()
 		if err == nil {
 			return codec, nil
@@ -128,13 +134,13 @@ var (
 // the same host, and both are real subprocess work, not free. Every
 // HandleOffer call shares this one cached result (or error) for the
 // process's lifetime.
-func cachedSelectEncoder(ctx context.Context, explicitFFmpegPath string) (ffmpegPath, codec string, err error) {
+func cachedSelectEncoder(ctx context.Context, explicitFFmpegPath string, width, height int) (ffmpegPath, codec string, err error) {
 	encoderOnce.Do(func() {
 		resolvedFFmpegBin, encoderErr = ResolveFFmpegBinary(explicitFFmpegPath)
 		if encoderErr != nil {
 			return
 		}
-		encoderChoice, encoderErr = SelectEncoder(ctx, resolvedFFmpegBin)
+		encoderChoice, encoderErr = SelectEncoder(ctx, resolvedFFmpegBin, width, height)
 	})
 	return resolvedFFmpegBin, encoderChoice, encoderErr
 }
@@ -180,9 +186,12 @@ const h264Level = "3.1"
 // is the safe, universally-decodable choice; revisit only if negotiating
 // a higher profile end-to-end is deliberately desired later.
 //
-// nvenc/vaapi/amf flag specifics are necessarily best-effort here — this
-// development environment has no Linux or AMD GPU to verify them against;
-// expect to tune on first real Linux/Windows deployment.
+// nvenc/vaapi flag specifics remain best-effort (no NVIDIA/Linux host has
+// been used for verification). The AMD h264_amf branch is verified on real
+// hardware (RX 9070, Windows 11, ffmpeg 7.0.2): it encodes 540x1200 at
+// 30fps and the client decodes it. Note that h264_amf refuses to initialize
+// at very small sizes, which is why the prober uses real capture dimensions
+// rather than a fixed 64x64 probe.
 func buildFFmpegArgs(ffmpegPath, codec string, opts EncodeOptions) []string {
 	size := fmt.Sprintf("%dx%d", opts.Width, opts.Height)
 	args := []string{
@@ -216,10 +225,14 @@ func buildFFmpegArgs(ffmpegPath, codec string, opts EncodeOptions) []string {
 			"-b:v", strconv.Itoa(opts.BitRate), "-g", strconv.Itoa(opts.FPS), "-bf", "0",
 		)
 	case "h264_amf":
+		// No -bf here: AMF rejects/ignores the generic option with a noisy
+		// "Maxium number of B frames needs to be specified." warning even
+		// though the encode succeeds; lowlatency usage already implies no
+		// B-frames, and baseline profile cannot use them anyway.
 		args = append(args,
 			"-c:v", "h264_amf", "-pix_fmt", "yuv420p", "-usage", "lowlatency", "-quality", "speed", "-rc", "cbr",
 			"-profile:v", "constrained_baseline", "-level:v", h264Level,
-			"-b:v", strconv.Itoa(opts.BitRate), "-g", strconv.Itoa(opts.FPS), "-bf", "0",
+			"-b:v", strconv.Itoa(opts.BitRate), "-g", strconv.Itoa(opts.FPS),
 		)
 	default: // libx264 and any unrecognized future candidate
 		// -pix_fmt yuv420p is load-bearing, not cosmetic: libx264's default

@@ -2,11 +2,25 @@ package placement
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"os"
+	"sync"
 	"time"
 
 	"mako/internal/controlplane/workerproc"
+)
+
+// Emulator port ranges the control plane hands out before spawning a
+// worker. The worker process cannot allocate these itself safely: every
+// worker starts its search at the same defaults, so two concurrent instance
+// starts both picked 5600/5601/8554 and the second emulator lost the bind
+// race. The control plane is the only spawner, so a process-local counter
+// guarded by a mutex is enough to make each instance's ports unique.
+const (
+	firstEmulatorConsolePort = 5600
+	firstEmulatorGRPCPort    = 8554
 )
 
 // workerHealthyTimeout bounds how long AcquireWorker waits for a freshly
@@ -41,10 +55,19 @@ type Policy struct {
 type Selector struct {
 	execer           workerproc.Execer
 	workerBinaryPath string
+
+	portMu          sync.Mutex
+	nextConsolePort int
+	nextGRPCPort    int
 }
 
 func NewSelector(execer workerproc.Execer, workerBinaryPath string) *Selector {
-	return &Selector{execer: execer, workerBinaryPath: workerBinaryPath}
+	return &Selector{
+		execer:           execer,
+		workerBinaryPath: workerBinaryPath,
+		nextConsolePort:  firstEmulatorConsolePort,
+		nextGRPCPort:     firstEmulatorGRPCPort,
+	}
 }
 
 // Validate reports ErrUnsupported unless policy's kind is "local-only" —
@@ -66,12 +89,17 @@ func (s *Selector) AcquireWorker(ctx context.Context, instanceID string) (baseUR
 	if err != nil {
 		return "", 0, fmt.Errorf("allocate worker port: %w", err)
 	}
+	emulatorPorts, err := s.allocateEmulatorPorts()
+	if err != nil {
+		return "", 0, fmt.Errorf("allocate emulator ports: %w", err)
+	}
 	// os.Environ(), not nil: workerproc.Spawn's env slice becomes the
 	// child's ENTIRE environment (exec.Cmd.Env semantics), so the control
 	// plane's own PATH/HOME/MAKO_ANDROID_SDK_ROOT/etc. must be passed
 	// through explicitly or the spawned mako-worker starts with none of
 	// them — e.g. unable to find the emulator binary or any AVD at all.
-	proc, baseURL, err := workerproc.Spawn(ctx, s.execer, s.workerBinaryPath, instanceID, port, os.Environ())
+	env := append(os.Environ(), "MAKO_EMULATOR_PORTS="+emulatorPorts)
+	proc, baseURL, err := workerproc.Spawn(ctx, s.execer, s.workerBinaryPath, instanceID, port, env)
 	if err != nil {
 		return "", 0, fmt.Errorf("spawn worker: %w", err)
 	}
@@ -80,6 +108,43 @@ func (s *Selector) AcquireWorker(ctx context.Context, instanceID string) (baseUR
 		return "", 0, fmt.Errorf("wait for worker healthy: %w", err)
 	}
 	return baseURL, proc.PID(), nil
+}
+
+// allocateEmulatorPorts hands out a unique (console, adb, grpc) triple for
+// one worker's emulator. Ports are checked with a real bind so an
+// already-running external emulator or unrelated listener is skipped; the
+// counter ensures two concurrent calls never pick the same starting point
+// even before either emulator has bound.
+func (s *Selector) allocateEmulatorPorts() (string, error) {
+	s.portMu.Lock()
+	defer s.portMu.Unlock()
+
+	for attempt := 0; attempt < 500; attempt++ {
+		console := s.nextConsolePort
+		s.nextConsolePort += 2
+		if console > 65000 {
+			s.nextConsolePort = firstEmulatorConsolePort
+			continue
+		}
+		grpcPort := s.nextGRPCPort
+		s.nextGRPCPort++
+		if s.nextGRPCPort > 65000 {
+			s.nextGRPCPort = firstEmulatorGRPCPort
+		}
+		if portAvailable(console) && portAvailable(console+1) && portAvailable(grpcPort) {
+			return fmt.Sprintf("%d,%d,%d", console, console+1, grpcPort), nil
+		}
+	}
+	return "", errors.New("no free emulator console/adb/grpc port triple found")
+}
+
+func portAvailable(port int) bool {
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return false
+	}
+	_ = listener.Close()
+	return true
 }
 
 // ReleaseWorker kills the worker process identified by pid — reconstructed

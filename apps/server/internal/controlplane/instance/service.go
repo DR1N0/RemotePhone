@@ -1,12 +1,9 @@
 // Package instance ports mako's TypeScript InstanceService
 // (apps/controlplane/src/services/instance-service.ts) to Go: ownership-
 // checked instance CRUD and start/stop/delete lifecycle against one
-// configured worker. This is a faithful port with two deliberate
-// deviations, both recorded in docs/architecture/decisions-log.md: (1) the
-// one-instance-per-owner invariant is enforced by a real DB unique index
-// (instances_unique_owner, migration 0011) instead of TS's check-then-
-// insert-inside-an-immediate-transaction dance, which existed only to work
-// around the absence of that index; (2) the stale `enrollmentRequired`
+// configured worker. Unlike the original TS port, a user may own more than
+// one instance (migration 0014 removed the one-per-owner unique index), so
+// there is no create-time conflict to map. The stale `enrollmentRequired`
 // check in assertCanCreateInstance is dropped, since that column no longer
 // exists (migration 0010).
 package instance
@@ -17,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	"mako/internal/controlplane/audit"
 	"mako/internal/controlplane/persistence/repo"
@@ -232,6 +228,33 @@ func (s *Service) resolveTemplate(ctx context.Context, templateID string) (runti
 	return runtime.Template{}, fmt.Errorf("%w: runtime template not found: %s", ErrInvalidRequest, templateID)
 }
 
+// ListTemplates discovers the host's available runtime templates for the
+// client template picker. It spawns a short-lived discovery worker exactly
+// like resolveTemplate, but returns the client-safe subset (no host paths
+// or other Metadata) — the control plane never exposes worker-local filesystem
+// details to a client.
+func (s *Service) ListTemplates(ctx context.Context) ([]TemplateInfo, error) {
+	client, release, err := s.acquireDiscoveryWorker(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	templates, err := client.ListTemplates(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list templates: %w", err)
+	}
+	result := make([]TemplateInfo, 0, len(templates))
+	for _, t := range templates {
+		result = append(result, TemplateInfo{
+			TemplateID:   t.TemplateID,
+			DisplayName:  t.DisplayName,
+			RuntimeClass: t.RuntimeClass,
+		})
+	}
+	return result, nil
+}
+
 func (s *Service) acquireDiscoveryWorker(ctx context.Context) (WorkerClient, func(), error) {
 	baseURL, pid, err := s.placementSelector.AcquireWorker(ctx, "discovery-"+uuid.NewString())
 	if err != nil {
@@ -278,11 +301,11 @@ func (s *Service) runningWorker(row repo.Instance) (runtime.InstanceHandle, Work
 
 // CreateManagedInstance validates req, resolves its template and placement
 // policy against the one configured worker, and inserts the instance row.
-// Unlike the TS version, there is no separate "validate placement, then
-// insert in a transaction" step: Placement.Validate is a pure in-memory
-// check (no workers table to race against — see decisions-log.md,
-// 2026-10-14), and the one-instance-per-owner invariant is enforced by the
-// instances_unique_owner DB index, so a single INSERT is already atomic.
+// A user may create any number of instances (each becomes its own AVD and
+// its own worker process when started) — the original one-per-owner unique
+// index was removed by migration 0014. Placement.Validate is a pure
+// in-memory check (no workers table to race against — see decisions-log.md,
+// 2026-10-14), so a single INSERT remains atomic.
 func (s *Service) CreateManagedInstance(ctx context.Context, req CreateInstanceRequest, ownerID string) (ManagedInstance, error) {
 	if err := req.Validate(); err != nil {
 		return ManagedInstance{}, err
@@ -322,9 +345,6 @@ func (s *Service) CreateManagedInstance(ctx context.Context, req CreateInstanceR
 		OwnerID:             ownerID,
 	})
 	if err != nil {
-		if isUniqueConstraintViolation(err) {
-			return ManagedInstance{}, fmt.Errorf("%w: %s", ErrOwnerConflict, ownerID)
-		}
 		return ManagedInstance{}, fmt.Errorf("create instance: %w", err)
 	}
 	return toManagedInstance(row)
@@ -779,8 +799,4 @@ func (s *Service) deleteInstanceLifecycle(ctx context.Context, row repo.Instance
 		}
 		return audit.Record(ctx, q, actor, actionInstanceDelete, targetTypeInstance, row.ID, audit.OutcomeSuccess)
 	})
-}
-
-func isUniqueConstraintViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

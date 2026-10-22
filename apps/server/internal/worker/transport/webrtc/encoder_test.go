@@ -10,12 +10,15 @@ import (
 // shelling out to a real ffmpeg — mirrors the Execer/FakeExecer pattern
 // used elsewhere in this codebase for process-spawning seams.
 type fakeEncoderProber struct {
-	working map[string]bool
-	probed  []string // records call order, for assertions
+	working    map[string]bool
+	probed     []string // records call order, for assertions
+	lastWidth  int
+	lastHeight int
 }
 
-func (f *fakeEncoderProber) Probe(_ context.Context, _, codec string) error {
+func (f *fakeEncoderProber) Probe(_ context.Context, _, codec string, width, height int) error {
 	f.probed = append(f.probed, codec)
+	f.lastWidth, f.lastHeight = width, height
 	if f.working[codec] {
 		return nil
 	}
@@ -24,7 +27,7 @@ func (f *fakeEncoderProber) Probe(_ context.Context, _, codec string) error {
 
 func TestSelectEncoderFromPrefersFirstWorkingCandidate(t *testing.T) {
 	prober := &fakeEncoderProber{working: map[string]bool{"h264_videotoolbox": true, "libx264": true}}
-	codec, err := SelectEncoderFrom(context.Background(), "ffmpeg", []string{"h264_videotoolbox", "libx264"}, prober)
+	codec, err := SelectEncoderFrom(context.Background(), "ffmpeg", []string{"h264_videotoolbox", "libx264"}, prober, 540, 1200)
 	if err != nil {
 		t.Fatalf("SelectEncoderFrom: %v", err)
 	}
@@ -34,11 +37,14 @@ func TestSelectEncoderFromPrefersFirstWorkingCandidate(t *testing.T) {
 	if len(prober.probed) != 1 {
 		t.Errorf("probed %v candidates, want exactly 1 (should stop at first success)", prober.probed)
 	}
+	if prober.lastWidth != 540 || prober.lastHeight != 1200 {
+		t.Errorf("probe dimensions = %dx%d, want 540x1200 (real capture size, not a tiny fixed probe)", prober.lastWidth, prober.lastHeight)
+	}
 }
 
 func TestSelectEncoderFromFallsBackWhenFirstFails(t *testing.T) {
 	prober := &fakeEncoderProber{working: map[string]bool{"libx264": true}}
-	codec, err := SelectEncoderFrom(context.Background(), "ffmpeg", []string{"h264_nvenc", "h264_vaapi", "libx264"}, prober)
+	codec, err := SelectEncoderFrom(context.Background(), "ffmpeg", []string{"h264_nvenc", "h264_vaapi", "libx264"}, prober, 540, 1200)
 	if err != nil {
 		t.Fatalf("SelectEncoderFrom: %v", err)
 	}
@@ -52,7 +58,7 @@ func TestSelectEncoderFromFallsBackWhenFirstFails(t *testing.T) {
 
 func TestSelectEncoderFromReturnsErrorWhenNoneWork(t *testing.T) {
 	prober := &fakeEncoderProber{working: map[string]bool{}}
-	_, err := SelectEncoderFrom(context.Background(), "ffmpeg", []string{"h264_nvenc", "libx264"}, prober)
+	_, err := SelectEncoderFrom(context.Background(), "ffmpeg", []string{"h264_nvenc", "libx264"}, prober, 540, 1200)
 	if err == nil {
 		t.Fatal("expected an error when no candidate works")
 	}

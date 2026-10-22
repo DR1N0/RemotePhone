@@ -1,8 +1,8 @@
 package transport_test
 
 import (
-	"testing"
 	"mako/internal/worker/transport"
+	"testing"
 )
 
 func TestStoreGetPutDelete(t *testing.T) {

@@ -174,17 +174,29 @@ func TestCreateManagedInstanceSuccess(t *testing.T) {
 	}
 }
 
-func TestCreateManagedInstanceRejectsSecondInstanceForSameOwner(t *testing.T) {
+func TestCreateManagedInstanceAllowsMultipleInstancesForSameOwner(t *testing.T) {
 	worker := &fakeWorkerClient{templates: []runtime.Template{{TemplateID: "t-1", RuntimeClass: "android-studio-emulator"}}}
 	svc := newTestService(t, worker)
 	createTestUser(t, svc, "u-1", "registered", "active")
 
-	if _, err := svc.CreateManagedInstance(context.Background(), validCreateRequest(), "u-1"); err != nil {
+	first, err := svc.CreateManagedInstance(context.Background(), validCreateRequest(), "u-1")
+	if err != nil {
 		t.Fatalf("first CreateManagedInstance: %v", err)
 	}
-	_, err := svc.CreateManagedInstance(context.Background(), validCreateRequest(), "u-1")
-	if !errors.Is(err, ErrOwnerConflict) {
-		t.Errorf("second CreateManagedInstance() error = %v, want ErrOwnerConflict", err)
+	second, err := svc.CreateManagedInstance(context.Background(), validCreateRequest(), "u-1")
+	if err != nil {
+		t.Fatalf("second CreateManagedInstance (same owner, same template): %v", err)
+	}
+	if first.ID == second.ID {
+		t.Error("two CreateManagedInstance calls returned the same instance id")
+	}
+
+	instances, err := svc.ListManagedInstances(context.Background(), "u-1")
+	if err != nil {
+		t.Fatalf("ListManagedInstances: %v", err)
+	}
+	if len(instances) != 2 {
+		t.Errorf("ListManagedInstances returned %d instances, want 2", len(instances))
 	}
 }
 

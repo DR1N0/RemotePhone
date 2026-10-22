@@ -109,7 +109,7 @@ func TestWorkerEndpoints(t *testing.T) {
 		displayName:  "Android Studio Emulator",
 		templates: []runtime.Template{
 			{
-				TemplateID:   "macos-android-studio:Medium_Phone",
+				TemplateID:   "android-studio:Medium_Phone",
 				RuntimeClass: "android-studio-emulator",
 				DisplayName:  "Medium_Phone",
 				Metadata: map[string]string{
@@ -133,7 +133,7 @@ func TestWorkerEndpoints(t *testing.T) {
 			State: "running",
 			Handle: runtime.InstanceHandle{
 				InstanceID:   "instance-1",
-				TemplateID:   "macos-android-studio:Medium_Phone",
+				TemplateID:   "android-studio:Medium_Phone",
 				RuntimeClass: "android-studio-emulator",
 				WorkerID:     "local",
 				PID:          4321,
@@ -146,7 +146,7 @@ func TestWorkerEndpoints(t *testing.T) {
 			State: "stopped",
 			Handle: runtime.InstanceHandle{
 				InstanceID:   "instance-1",
-				TemplateID:   "macos-android-studio:Medium_Phone",
+				TemplateID:   "android-studio:Medium_Phone",
 				RuntimeClass: "android-studio-emulator",
 				WorkerID:     "local",
 				PID:          4321,
@@ -162,7 +162,7 @@ func TestWorkerEndpoints(t *testing.T) {
 	registry := runtime.NewRegistryWithHandles(handles, androidRuntime, foreignRuntime)
 	handles.Put(runtime.InstanceHandle{
 		InstanceID:   "instance-1",
-		TemplateID:   "macos-android-studio:Medium_Phone",
+		TemplateID:   "android-studio:Medium_Phone",
 		RuntimeClass: "android-studio-emulator",
 		WorkerID:     "local",
 		PID:          4321,
@@ -216,7 +216,7 @@ func TestWorkerEndpoints(t *testing.T) {
 			t.Fatalf("expected 1 template, got %d", len(body.Templates))
 		}
 
-		if body.Templates[0].TemplateID != "macos-android-studio:Medium_Phone" {
+		if body.Templates[0].TemplateID != "android-studio:Medium_Phone" {
 			t.Fatalf("unexpected template id %q", body.Templates[0].TemplateID)
 		}
 	})
@@ -225,7 +225,7 @@ func TestWorkerEndpoints(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/instances/start", strings.NewReader(`{
             "instanceId": "instance-1",
             "runtimeClass": "android-studio-emulator",
-            "templateId": "macos-android-studio:Medium_Phone",
+            "templateId": "android-studio:Medium_Phone",
             "launchConfig": {
                 "headless": true,
                 "readOnly": true,
@@ -309,7 +309,7 @@ func TestWorkerEndpoints(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/instances/instance-2/adopt", strings.NewReader(`{
             "handle": {
                 "instanceId": "instance-2",
-                "templateId": "macos-android-studio:Medium_Phone",
+                "templateId": "android-studio:Medium_Phone",
                 "runtimeClass": "android-studio-emulator",
                 "workerId": "local",
                 "pid": 9999,

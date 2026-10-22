@@ -2,6 +2,7 @@ package tests
 
 import (
 	"os/exec"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -26,6 +27,9 @@ func TestAndroidStudioInspectHandleRejectsForeignRuntimeOwnership(t *testing.T) 
 }
 
 func TestAndroidStudioInspectHandleFailsForZombieProcess(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("Windows has no zombie process state; liveness there uses OpenProcess/GetExitCodeProcess")
+	}
 	cmd := exec.Command("sh", "-c", "exit 0")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start short-lived process: %v", err)

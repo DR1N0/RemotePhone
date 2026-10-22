@@ -141,7 +141,7 @@ func TestHandleOfferNegotiatesH264VideoForRecvonlyOffer(t *testing.T) {
 	adapter.newFrameSource = func(string, int, int) emugrpc.FrameSource {
 		return emugrpc.NewFakeFrameSource()
 	}
-	adapter.selectEncoder = func(context.Context, string) (string, string, error) {
+	adapter.selectEncoder = func(context.Context, string, int, int) (string, string, error) {
 		return "ffmpeg", "libx264", nil
 	}
 	adapter.startEncoder = func(string, string, EncodeOptions) (encoderProcess, error) {

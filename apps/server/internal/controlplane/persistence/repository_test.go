@@ -50,7 +50,7 @@ func TestCreateAndGetInstance(t *testing.T) {
 		t.Errorf("GetInstanceByID() = %+v, want id=i-1 owner_id=u-1", got)
 	}
 
-	if _, err := q.CreateInstance(ctx, repo.CreateInstanceParams{
+	if second, err := q.CreateInstance(ctx, repo.CreateInstanceParams{
 		ID:                  "i-2",
 		Name:                "second-instance",
 		RuntimeClass:        "android-studio-emulator",
@@ -59,7 +59,17 @@ func TestCreateAndGetInstance(t *testing.T) {
 		ResourceProfileJson: `{}`,
 		LaunchConfigJson:    `{}`,
 		OwnerID:             "u-1",
-	}); err == nil {
-		t.Error("CreateInstance() with a second instance for the same owner succeeded, want unique-owner constraint violation")
+	}); err != nil {
+		t.Fatalf("CreateInstance() with a second instance for the same owner failed: %v (migration 0014 allows multi-instance ownership)", err)
+	} else if second.ID != "i-2" {
+		t.Errorf("second instance id = %q, want i-2", second.ID)
+	}
+
+	owned, err := q.ListInstancesByOwner(ctx, "u-1")
+	if err != nil {
+		t.Fatalf("ListInstancesByOwner: %v", err)
+	}
+	if len(owned) != 2 {
+		t.Errorf("ListInstancesByOwner returned %d instances, want 2", len(owned))
 	}
 }

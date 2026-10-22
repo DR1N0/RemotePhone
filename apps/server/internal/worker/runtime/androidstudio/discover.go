@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strings"
 
@@ -13,9 +14,38 @@ import (
 )
 
 const (
-	RuntimeClass                   = "android-studio-emulator"
-	defaultSDKRelativeEmulatorPath = "emulator/emulator"
+	RuntimeClass = "android-studio-emulator"
+
+	// TemplateIDPrefix is deliberately host-OS neutral: the same AVD
+	// discovered on macOS, Linux, or Windows must produce the same template
+	// id, otherwise instance rows (and clients) would be tied to whichever
+	// OS happened to discover them first. This used to be
+	// "macos-android-studio:", a leftover from the project's macOS-only
+	// origins.
+	TemplateIDPrefix = "android-studio:"
+
+	// instanceAVDPrefix marks mako's own per-instance cloned AVDs. They live
+	// in the same ~/.android/avd directory as real templates, so discovery
+	// must skip them — otherwise a running instance's clone shows up as a
+	// selectable template (and can be cloned again, producing chains).
+	instanceAVDPrefix = "mako_instance_"
 )
+
+// emulatorBinaryName returns the platform's emulator executable filename.
+func emulatorBinaryName() string {
+	if goruntime.GOOS == "windows" {
+		return "emulator.exe"
+	}
+	return "emulator"
+}
+
+// qemuImgBinaryName returns the platform's qemu-img executable filename.
+func qemuImgBinaryName() string {
+	if goruntime.GOOS == "windows" {
+		return "qemu-img.exe"
+	}
+	return "qemu-img"
+}
 
 type DiscoveryOptions struct {
 	HomeDir              string
@@ -24,17 +54,26 @@ type DiscoveryOptions struct {
 }
 
 func ResolveEmulatorBinary(opts DiscoveryOptions) (string, error) {
-	candidates := make([]string, 0, 4)
+	binaryName := emulatorBinaryName()
+	candidates := make([]string, 0, 8)
 	if opts.ExplicitEmulatorPath != "" {
 		candidates = append(candidates, opts.ExplicitEmulatorPath)
 	}
 	if opts.AndroidSDKRoot != "" {
-		candidates = append(candidates, filepath.Join(opts.AndroidSDKRoot, defaultSDKRelativeEmulatorPath))
+		candidates = append(candidates, filepath.Join(opts.AndroidSDKRoot, "emulator", binaryName))
 	}
 	if opts.HomeDir != "" {
 		candidates = append(candidates,
-			filepath.Join(opts.HomeDir, "Library", "Android", "sdk", defaultSDKRelativeEmulatorPath),
-			filepath.Join(opts.HomeDir, "Library", "Android", "sdk", "tools", defaultSDKRelativeEmulatorPath),
+			// macOS Android Studio's SDK location.
+			filepath.Join(opts.HomeDir, "Library", "Android", "sdk", "emulator", binaryName),
+			filepath.Join(opts.HomeDir, "Library", "Android", "sdk", "tools", "emulator", binaryName),
+			// Linux user-scoped SDK location.
+			filepath.Join(opts.HomeDir, "Android", "Sdk", "emulator", binaryName),
+			filepath.Join(opts.HomeDir, "Android", "sdk", "emulator", binaryName),
+			// Windows' default per-user SDK location. Derived from the home
+			// directory rather than $LOCALAPPDATA so discovery stays
+			// deterministic and testable with a fake home.
+			filepath.Join(opts.HomeDir, "AppData", "Local", "Android", "Sdk", "emulator", binaryName),
 		)
 	}
 
@@ -47,7 +86,7 @@ func ResolveEmulatorBinary(opts DiscoveryOptions) (string, error) {
 		}
 	}
 
-	return "", errors.New("android studio emulator binary not found")
+	return "", errors.New("android studio emulator binary not found (set MAKO_ANDROID_EMULATOR_PATH or MAKO_ANDROID_SDK_ROOT)")
 }
 
 func DiscoverTemplates(opts DiscoveryOptions) ([]runtime.Template, error) {
@@ -56,7 +95,10 @@ func DiscoverTemplates(opts DiscoveryOptions) ([]runtime.Template, error) {
 		return nil, err
 	}
 
-	avdDir := filepath.Join(opts.HomeDir, ".android", "avd")
+	avdDir := os.Getenv("ANDROID_AVD_HOME")
+	if avdDir == "" {
+		avdDir = filepath.Join(opts.HomeDir, ".android", "avd")
+	}
 	entries, err := os.ReadDir(avdDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -72,6 +114,9 @@ func DiscoverTemplates(opts DiscoveryOptions) ([]runtime.Template, error) {
 		}
 
 		avdName := strings.TrimSuffix(entry.Name(), ".ini")
+		if strings.HasPrefix(avdName, instanceAVDPrefix) {
+			continue
+		}
 		iniValues, err := readIniFile(filepath.Join(avdDir, entry.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("read avd ini for %s: %w", avdName, err)
@@ -101,7 +146,7 @@ func DiscoverTemplates(opts DiscoveryOptions) ([]runtime.Template, error) {
 		}
 
 		templates = append(templates, runtime.Template{
-			TemplateID:   "macos-android-studio:" + avdName,
+			TemplateID:   TemplateIDPrefix + avdName,
 			RuntimeClass: RuntimeClass,
 			DisplayName:  formatDisplayName(avdName),
 			Metadata:     metadata,

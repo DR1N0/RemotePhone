@@ -3,6 +3,7 @@ package auth
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 )
@@ -10,6 +11,9 @@ import (
 // bootstrapSecretPattern is defined in bootstrapsecret.go (same package).
 
 func TestGetOrCreateCreatesFileWithExactPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not meaningful on Windows; the .exe build is covered by the functional tests")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "bootstrap-secret")
 	bs := NewBootstrapSecret(path)
@@ -48,6 +52,9 @@ func TestGetOrCreateIsIdempotent(t *testing.T) {
 }
 
 func TestGetOrCreateRejectsWrongPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not meaningful on Windows")
+	}
 	path := filepath.Join(t.TempDir(), "secret")
 	if err := os.WriteFile(path, []byte("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), 0640); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -66,7 +73,11 @@ func TestGetOrCreateRejectsSymlink(t *testing.T) {
 	}
 	link := filepath.Join(dir, "linked-secret")
 	if err := os.Symlink(real, link); err != nil {
-		t.Fatalf("Symlink: %v", err)
+		// Windows only grants SeCreateSymbolicLinkPrivilege to elevated /
+		// developer-mode processes; the production code still refuses
+		// reparse points via GetFileAttributes, this test just can't create
+		// one here.
+		t.Skipf("cannot create symlink on this host: %v", err)
 	}
 	bs := NewBootstrapSecret(link)
 	if _, err := bs.GetOrCreate(); err == nil {

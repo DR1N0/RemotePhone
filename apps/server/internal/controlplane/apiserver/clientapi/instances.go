@@ -17,8 +17,6 @@ func instanceErrorStatus(err error) int {
 	switch {
 	case errors.Is(err, instance.ErrInvalidRequest):
 		return http.StatusBadRequest
-	case errors.Is(err, instance.ErrOwnerConflict):
-		return http.StatusConflict
 	case errors.Is(err, instance.ErrForbidden):
 		return http.StatusForbidden
 	case errors.Is(err, instance.ErrNotFound):

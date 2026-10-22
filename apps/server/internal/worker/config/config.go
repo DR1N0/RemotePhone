@@ -34,7 +34,7 @@ func Load() Config {
 		AndroidSDKRoot:      firstNonEmpty(os.Getenv("MAKO_ANDROID_SDK_ROOT"), os.Getenv("ANDROID_SDK_ROOT"), os.Getenv("ANDROID_HOME")),
 		AndroidEmulatorPath: os.Getenv("MAKO_ANDROID_EMULATOR_PATH"),
 		FFmpegPath:          os.Getenv("MAKO_FFMPEG_PATH"),
-		StunURL:             getenv("STUN_URL", "stun:stun.l.google.com:19302"),
+		StunURL:             stunURLFromEnv(),
 		InstanceDataRoot:    getenv("MAKO_INSTANCE_DATA_ROOT", filepath.Join(homeDir, ".mako", "instance-data")),
 		BaseImageRoot:       getenv("MAKO_BASE_IMAGE_ROOT", filepath.Join(homeDir, ".mako", "base-images")),
 	}
@@ -45,6 +45,22 @@ func getenv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// stunURLFromEnv resolves STUN_URL. The default (a public Google STUN
+// server) is useful for NAT-traversal experiments but is both unreachable in
+// some networks and unnecessary on a trusted LAN, where host candidates are
+// enough. Setting STUN_URL to "none" or "-" disables it explicitly; an empty
+// unset value keeps the historical default for backwards compatibility.
+func stunURLFromEnv() string {
+	switch value := os.Getenv("STUN_URL"); value {
+	case "none", "-":
+		return ""
+	case "":
+		return "stun:stun.l.google.com:19302"
+	default:
+		return value
+	}
 }
 
 func firstNonEmpty(values ...string) string {

@@ -86,6 +86,40 @@ func TestPipeH264EmitsOneWriteSampleCallPerAccessUnit(t *testing.T) {
 	}
 }
 
+func TestPipeH264GroupsMultiSliceFrameIntoOneSample(t *testing.T) {
+	// libx264 -tune zerolatency splits one picture into one slice per CPU
+	// core. Every slice of that picture must land in a single Sample, or
+	// pion advances the RTP timestamp once per slice and the stream runs
+	// many times faster than real time. Byte 0x80 encodes
+	// first_mb_in_slice=0 (new picture); 0x40 encodes first_mb_in_slice=1
+	// (continuation slice of the same picture).
+	sps := nal(0x07, 0xAA)
+	pps := nal(0x08, 0xBB)
+	slice0 := nal(0x05, 0x80, 0x11)
+	slice1 := nal(0x05, 0x40, 0x22)
+	nextFrame := nal(0x01, 0x80, 0x33)
+
+	writer := &fakeSampleWriter{}
+	pipeH264(bytes.NewReader(annexBStream(sps, pps, slice0, slice1, nextFrame)), writer, "test")
+
+	if len(writer.samples) != 2 {
+		t.Fatalf("WriteSample called %d times, want 2 (one per picture, not one per slice)", len(writer.samples))
+	}
+	wantFirst := bytes.Join([][]byte{
+		withStartCode([]byte{0x07, 0xAA}),
+		withStartCode([]byte{0x08, 0xBB}),
+		withStartCode([]byte{0x05, 0x80, 0x11}),
+		withStartCode([]byte{0x05, 0x40, 0x22}),
+	}, nil)
+	if !bytes.Equal(writer.samples[0].Data, wantFirst) {
+		t.Errorf("first sample = %x, want both slices of picture one = %x", writer.samples[0].Data, wantFirst)
+	}
+	wantSecond := withStartCode([]byte{0x01, 0x80, 0x33})
+	if !bytes.Equal(writer.samples[1].Data, wantSecond) {
+		t.Errorf("second sample = %x, want %x", writer.samples[1].Data, wantSecond)
+	}
+}
+
 func TestPipeH264FlushesTrailingNALWithoutAFollowingSlice(t *testing.T) {
 	// A parameter-set NAL that never gets a following slice before the
 	// stream ends (e.g. the encoder was killed mid-GOP) must still be

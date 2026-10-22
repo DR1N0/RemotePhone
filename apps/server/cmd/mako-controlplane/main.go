@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -55,6 +56,7 @@ func newClientMux(svc *auth.Service, instanceSvc *instance.Service, sessionSvc *
 	})
 	clientapi.RegisterAuthRoutes(mux, svc)
 	clientapi.RegisterInstanceRoutes(mux, instanceSvc, svc)
+	clientapi.RegisterTemplateRoutes(mux, instanceSvc, svc)
 	clientapi.RegisterSessionRoutes(mux, sessionSvc, transportSvc, svc)
 	clientapi.RegisterSessionInviteRoutes(mux, sessionSvc, svc)
 	clientapi.RegisterSignalingRoutes(mux, sessionSvc, instanceSvc, transportSvc, svc)
@@ -108,7 +110,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("resolve own executable path: %w", err)
 		}
-		workerBinaryPath = filepath.Join(filepath.Dir(selfPath), "mako-worker")
+		workerBinaryPath = filepath.Join(filepath.Dir(selfPath), workerBinaryName())
 	}
 	placementSelector := placement.NewSelector(workerproc.OSExecer{}, workerBinaryPath)
 	instanceSvc := instance.NewService(db, placementSelector)
@@ -242,6 +244,16 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// workerBinaryName returns the sibling mako-worker executable's filename.
+// Windows requires the .exe suffix when resolving the default path; callers
+// that set MAKO_WORKER_BINARY_PATH explicitly are unaffected.
+func workerBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "mako-worker.exe"
+	}
+	return "mako-worker"
 }
 
 // envOrDefaultDuration parses key as a positive integer count of

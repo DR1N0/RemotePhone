@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"syscall"
 )
 
 const bootstrapSecretBytes = 32
@@ -109,18 +108,19 @@ func (b *BootstrapSecret) create() (string, error) {
 // returned as an error — callers must not treat a validation failure as
 // "doesn't exist" and silently regenerate.
 //
-// The file is opened once with O_NOFOLLOW, and every subsequent check
-// (regular-file, exact-permission) plus the actual read is performed
-// against that same open file descriptor rather than by re-resolving
-// b.path a second time. This closes the TOCTOU window that a separate
+// The file is opened through openSecretFile (O_NOFOLLOW on Unix; a
+// reparse-point check before open on Windows), and every subsequent check
+// (regular-file, security) plus the actual read is performed against that
+// same open file descriptor rather than by re-resolving b.path a second
+// time. On Unix this closes the TOCTOU window a separate
 // os.Lstat-then-os.ReadFile pair would leave open: a symlink swapped in
 // between the two path resolutions would otherwise be followed silently
 // by os.ReadFile despite an earlier Lstat rejecting it.
 func (b *BootstrapSecret) readExisting() (string, error) {
-	f, err := os.OpenFile(b.path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := openSecretFile(b.path)
 	if err != nil {
 		return "", err // preserves os.IsNotExist-detectability for ENOENT;
-		// a symlink at the final component fails with ELOOP here, which is
+		// a symlink at the final component fails during the open, which is
 		// NOT os.IsNotExist, so it correctly propagates as a real error
 		// rather than triggering regeneration
 	}
@@ -133,8 +133,8 @@ func (b *BootstrapSecret) readExisting() (string, error) {
 	if !info.Mode().IsRegular() {
 		return "", errors.New("bootstrap secret path is not a regular file")
 	}
-	if info.Mode().Perm() != 0600 {
-		return "", fmt.Errorf("bootstrap secret file has permissions %o, want exactly 0600", info.Mode().Perm())
+	if err := validateSecretFileSecurity(info); err != nil {
+		return "", err
 	}
 	content, err := io.ReadAll(f)
 	if err != nil {

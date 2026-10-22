@@ -87,3 +87,13 @@ type ManagedInstance struct {
 	CreatedAt       string                  `json:"createdAt"`
 	UpdatedAt       string                  `json:"updatedAt"`
 }
+
+// TemplateInfo is the client-facing subset of a worker-discovered template.
+// Deliberately excludes runtime.Template.Metadata, which carries host-local
+// paths (AVD directory, emulator binary) that have no business crossing the
+// client API boundary.
+type TemplateInfo struct {
+	TemplateID   string `json:"templateId"`
+	DisplayName  string `json:"displayName"`
+	RuntimeClass string `json:"runtimeClass"`
+}

@@ -67,7 +67,7 @@ func TestDiscoverTemplatesFromAvdDirectory(t *testing.T) {
 	}
 
 	template := templates[0]
-	if template.TemplateID != "macos-android-studio:Medium_Phone" {
+	if template.TemplateID != "android-studio:Medium_Phone" {
 		t.Fatalf("unexpected template id %q", template.TemplateID)
 	}
 	if template.RuntimeClass != "android-studio-emulator" {

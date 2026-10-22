@@ -81,7 +81,7 @@ func TestStartClonesTemplateIntoANewIndependentlyRegisteredInstanceAVD(t *testin
 	handle, err := adapter.Start(runtime.StartRequest{
 		InstanceID:   "instance-1",
 		RuntimeClass: RuntimeClass,
-		TemplateID:   "macos-android-studio:" + avdName,
+		TemplateID:   "android-studio:" + avdName,
 	})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -128,7 +128,7 @@ func TestStartUsesDistinctAVDsForDifferentInstancesOfSameTemplate(t *testing.T) 
 	dataRoot := t.TempDir()
 	adapter := newTestAdapter(homeDir, dataRoot)
 
-	templateID := "macos-android-studio:" + avdName
+	templateID := "android-studio:" + avdName
 	handleA, err := adapter.Start(runtime.StartRequest{InstanceID: "instance-a", RuntimeClass: RuntimeClass, TemplateID: templateID})
 	if err != nil {
 		t.Fatalf("Start instance-a: %v", err)
@@ -159,7 +159,7 @@ func TestStartReusesExistingInstanceAVDWithoutReseedingOnRespawn(t *testing.T) {
 	dataRoot := t.TempDir()
 	adapter := newTestAdapter(homeDir, dataRoot)
 
-	req := runtime.StartRequest{InstanceID: "instance-1", RuntimeClass: RuntimeClass, TemplateID: "macos-android-studio:" + avdName}
+	req := runtime.StartRequest{InstanceID: "instance-1", RuntimeClass: RuntimeClass, TemplateID: "android-studio:" + avdName}
 	first, err := adapter.Start(req)
 	if err != nil {
 		t.Fatalf("first Start: %v", err)
@@ -212,7 +212,7 @@ func TestCleanupInstanceDataRemovesClonedAVDAndRegistration(t *testing.T) {
 	handle, err := adapter.Start(runtime.StartRequest{
 		InstanceID:   "instance-1",
 		RuntimeClass: RuntimeClass,
-		TemplateID:   "macos-android-studio:" + avdName,
+		TemplateID:   "android-studio:" + avdName,
 	})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -249,7 +249,7 @@ func TestCleanupInstanceDataIsIdempotent(t *testing.T) {
 	homeDir, _ := setupFakeAVD(t, avdName, true)
 	adapter := newTestAdapter(homeDir, t.TempDir())
 
-	req := runtime.StartRequest{InstanceID: "instance-1", RuntimeClass: RuntimeClass, TemplateID: "macos-android-studio:" + avdName}
+	req := runtime.StartRequest{InstanceID: "instance-1", RuntimeClass: RuntimeClass, TemplateID: "android-studio:" + avdName}
 	if _, err := adapter.Start(req); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestStartSeedsFromBaseImageArtifactWhenProvided(t *testing.T) {
 	handle, err := adapter.Start(runtime.StartRequest{
 		InstanceID:            "instance-1",
 		RuntimeClass:          RuntimeClass,
-		TemplateID:            "macos-android-studio:" + avdName,
+		TemplateID:            "android-studio:" + avdName,
 		BaseImageArtifactPath: artifactDir,
 	})
 	if err != nil {

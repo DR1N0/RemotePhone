@@ -38,7 +38,7 @@ type Adapter struct {
 	forwardInput   func(string, transport.InputEvent, string, int, int) error
 	newFrameSource func(addr string, width, height int) emugrpc.FrameSource
 	startEncoder   func(ffmpegPath, codec string, opts EncodeOptions) (encoderProcess, error)
-	selectEncoder  func(ctx context.Context, explicitFFmpegPath string) (ffmpegPath, codec string, err error)
+	selectEncoder  func(ctx context.Context, explicitFFmpegPath string, width, height int) (ffmpegPath, codec string, err error)
 
 	mu      sync.Mutex
 	pc      *webrtc.PeerConnection
@@ -126,11 +126,12 @@ func (a *Adapter) startVideoCapture(pc *webrtc.PeerConnection, videoTrack *webrt
 		return nil, fmt.Errorf("video capture unavailable: emulator gRPC unreachable at %s: %w", a.grpcAddr, err)
 	}
 
-	ffmpegPath, codec, err := a.selectEncoder(ctx, a.ffmpegPath)
+	ffmpegPath, codec, err := a.selectEncoder(ctx, a.ffmpegPath, captureW, captureH)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("video capture unavailable: no working H264 encoder found: %w", err)
 	}
+	log.Printf("capture: selected encoder %s for instance=%s at %dx%d", codec, a.instanceID, captureW, captureH)
 
 	encoder, err := a.startEncoder(ffmpegPath, codec, EncodeOptions{
 		Width:   captureW,
@@ -402,6 +403,11 @@ func (a *Adapter) Stop() error {
 // pion/rtp/codecs/h264_packet.go) is explicitly built to accept a
 // multi-NAL Annex-B buffer per Sample and split it correctly — that's the
 // API this should have been using all along.
+//
+// Multi-slice encoders add a second boundary problem: one picture can be
+// spread over many slice NALs (libx264 with -tune zerolatency emits one per
+// CPU core), and all of them must share one timestamp. See addNAL's
+// first_mb_in_slice grouping.
 // sampleWriter is the one method pipeH264 needs from a video track —
 // satisfied by *webrtc.TrackLocalStaticSample; a fake in tests captures
 // WriteSample calls without a real PeerConnection.
@@ -412,6 +418,7 @@ type sampleWriter interface {
 func pipeH264(r io.Reader, track sampleWriter, tag string) {
 	var buf []byte     // raw bytes read but not yet scanned for a start code
 	var pending []byte // NALs (with start codes restored) for the access unit not yet emitted
+	pendingHasSlice := false
 	tmp := make([]byte, 4096)
 	var totalBytes, totalNALs, totalAccessUnits int64
 
@@ -427,24 +434,60 @@ func pipeH264(r io.Reader, track sampleWriter, tag string) {
 			log.Printf("capture[%s]: WriteSample failed: %v", tag, werr)
 		}
 		pending = nil
+		pendingHasSlice = false
 	}
 
 	// addNAL appends nal (header byte + payload, start code already
 	// stripped by the caller) to the pending access unit, restoring a
 	// start code so pion's payloader can split multi-NAL samples back
-	// apart. A slice NAL (type 1 or 5 — the only types Baseline profile
-	// emits) carries the actual picture data and always comes last in its
-	// access unit, so seeing one ends the current unit.
+	// apart.
+	//
+	// A slice NAL (type 1 or 5) does NOT necessarily end the access unit.
+	// ffmpeg's libx264 under -tune zerolatency emits one slice per CPU core
+	// (16 slices per picture on this machine's 9700X), and every slice of
+	// one picture must share one RTP timestamp — writing each slice as its
+	// own sample made pion advance the timestamp 16× faster than the real
+	// frame rate. Slice headers carry first_mb_in_slice; a slice starting at
+	// macroblock 0 begins a new picture, so only that one flushes the
+	// pending access unit. AUD NALs (type 9) are an explicit boundary when a
+	// given encoder emits them; parameter sets (SPS/PPS/SEI) belong to the
+	// picture that follows them, so they are kept in the pending buffer
+	// rather than flushed on their own.
 	addNAL := func(nal []byte) {
 		if len(nal) == 0 {
 			return
 		}
 		totalNALs++
 		nalType := nal[0] & 0x1F
-		pending = append(pending, 0x00, 0x00, 0x00, 0x01)
-		pending = append(pending, nal...)
-		if nalType == 1 || nalType == 5 {
-			emitAccessUnit()
+		appendNAL := func() {
+			pending = append(pending, 0x00, 0x00, 0x00, 0x01)
+			pending = append(pending, nal...)
+		}
+
+		switch nalType {
+		case 9: // access unit delimiter
+			if pendingHasSlice {
+				emitAccessUnit()
+			}
+			appendNAL()
+		case 1, 5: // slice (non-IDR / IDR)
+			firstMB, ok := firstMBInSlice(nal)
+			if ok && firstMB == 0 && pendingHasSlice {
+				emitAccessUnit()
+			}
+			appendNAL()
+			pendingHasSlice = true
+			if !ok {
+				// Unparseable slice header: fall back to the old
+				// one-NAL-per-sample behavior instead of risking merging
+				// two pictures into one timestamp.
+				emitAccessUnit()
+			}
+		default: // SPS, PPS, SEI, ...
+			if pendingHasSlice {
+				emitAccessUnit()
+			}
+			appendNAL()
 		}
 	}
 
@@ -499,4 +542,49 @@ func findStartCode(b []byte) int {
 		}
 	}
 	return -1
+}
+
+// firstMBInSlice decodes first_mb_in_slice (the first ue(v) field of an
+// H.264 slice header, immediately after the one-byte NAL header). 0 means
+// this slice starts a new picture; any other value is a continuation slice
+// of the picture already being assembled. Returns ok=false when the NAL is
+// too short or malformed, so callers can fall back conservatively.
+func firstMBInSlice(nal []byte) (uint64, bool) {
+	if len(nal) < 2 {
+		return 0, false
+	}
+	bitPos := 8 // skip nal_unit_header (forbidden_zero_bit + nal_ref_idc + type)
+	readBit := func() (uint64, bool) {
+		if bitPos/8 >= len(nal) {
+			return 0, false
+		}
+		b := (nal[bitPos/8] >> (7 - uint(bitPos%8))) & 1
+		bitPos++
+		return uint64(b), true
+	}
+
+	zeros := 0
+	for {
+		b, ok := readBit()
+		if !ok {
+			return 0, false
+		}
+		if b == 1 {
+			break
+		}
+		zeros++
+		if zeros > 31 {
+			return 0, false
+		}
+	}
+
+	var suffix uint64
+	for i := 0; i < zeros; i++ {
+		b, ok := readBit()
+		if !ok {
+			return 0, false
+		}
+		suffix = (suffix << 1) | b
+	}
+	return (1 << uint(zeros)) - 1 + suffix, true
 }

@@ -144,19 +144,15 @@ func (p *pidProcess) PID() int    { return p.proc.Pid }
 func (p *pidProcess) Kill() error { return p.proc.Kill() }
 func (p *pidProcess) Wait() error { _, _ = p.proc.Wait(); return nil }
 
-// FromPID reconstructs a Process from a bare PID — for releasing a worker
-// this process didn't itself Spawn (e.g. after a control-plane restart,
-// where only the PID survives, persisted in instances.runtime_handle_json).
-// Always succeeds on POSIX (os.FindProcess does no liveness check); a
-// stale/already-dead PID surfaces as a harmless no-op from Kill, not an
-// error here.
-func FromPID(pid int) (Process, error) {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return nil, err
-	}
-	return &pidProcess{proc: proc}, nil
-}
+// deadProcess stands in for a PID that no longer exists. Windows' FromPID
+// can prove that up front (OpenProcess fails), whereas POSIX FindProcess
+// always succeeds and defers the "already gone" discovery to Kill; both
+// paths converge on the same "releasing a dead worker is a no-op" contract.
+type deadProcess struct{ pid int }
+
+func (p *deadProcess) PID() int    { return p.pid }
+func (p *deadProcess) Kill() error { return nil }
+func (p *deadProcess) Wait() error { return nil }
 
 // Kill sends a kill signal and waits (briefly) for exit. Best-effort: a
 // process that's already gone is a success, not an error — every caller of
