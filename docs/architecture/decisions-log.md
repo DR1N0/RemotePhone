@@ -12,7 +12,7 @@ Entries are reverse-chronological.
 
 An earlier attempt at the same date restricted ICE to one detected `192.168/10/172` address to stop an Android emulator client from selecting a Tailscale candidate through a Windows NAT hairpin. That fixed a test-environment symptom by breaking a real deployment: a phone on Tailscale only saw an unreachable LAN candidate, and the worker's UDP socket also only listened on that address. Special-casing Tailscale would repeat the same mistake one layer up.
 
-The policy is now: IPv4/UDP only, advertise every routable IPv4 interface (LAN, Tailscale `100.64/10`, other VPNs), exclude only loopback/link-local/multicast/IPv6, and let ICE choose. `MAKO_WEBRTC_HOST_IP` remains as a debug override for a specific interface, not as a Tailscale prerequisite. `host.IsAdvertisableIPv4` owns the predicate and is unit-tested for LAN, Tailscale, link-local, multicast and IPv6.
+The policy is now: IPv4/UDP only, advertise every routable IPv4 interface (LAN, Tailscale `100.64/10`, other VPNs), exclude link-local/multicast/IPv6 (loopback stays for local probes), and let ICE choose. `MAKO_WEBRTC_HOST_IP` remains as a debug override for a specific interface, not as a Tailscale prerequisite. `host.IsAdvertisableIPv4` owns the predicate and is unit-tested for LAN, Tailscale, link-local, multicast and IPv6.
 
 Verified on a real phone (Xiaomi 23127PN0CC, Wi-Fi `192.168.1.4`): ICE selected `192.168.1.4 -> 192.168.1.7`, video ran at ~30fps with `framesDecoded` tracking `framesReceived` and no freeze over the test window. The emulator-as-client hairpin remains a test-environment artifact and is not a reason to restrict candidates.
 
