@@ -13,6 +13,35 @@ class AuthService extends ChangeNotifier {
   static const _storage = FlutterSecureStorage();
   static const _keyBaseUrl = 'mako_base_url';
   static const _keyToken = 'mako_token';
+  static const _keyPinPrefix = 'mako_pin_';
+
+  String _pinKey(String baseUrl) => '$_keyPinPrefix$baseUrl';
+
+  Future<String?> pinnedFingerprint(String baseUrl) =>
+      _storage.read(key: _pinKey(baseUrl));
+
+  Future<void> savePinnedFingerprint(String baseUrl, String fingerprint) =>
+      _storage.write(key: _pinKey(baseUrl), value: fingerprint);
+
+  Future<void> clearPinnedFingerprint(String baseUrl) =>
+      _storage.delete(key: _pinKey(baseUrl));
+
+  /// PIN-pairs [baseUrl] and persists the certificate fingerprint. The
+  /// temporary client trusts the self-signed certificate only for this call;
+  /// the returned fingerprint is what all later clients pin.
+  Future<String> pair({
+    required String baseUrl,
+    required String pin,
+  }) async {
+    final temp = ApiClient(baseUrl: baseUrl, allowAnyCertificate: true);
+    try {
+      final fingerprint = await temp.verifyPairing(pin);
+      await savePinnedFingerprint(baseUrl, fingerprint);
+      return fingerprint;
+    } finally {
+      temp.close();
+    }
+  }
 
   String? baseUrl;
   User? currentUser;
@@ -38,18 +67,33 @@ class AuthService extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final client = ApiClient(baseUrl: storedUrl, token: storedToken);
-    final user = await client.me();
-    if (user == null) {
-      client.close();
-      await logout();
+    final pin = await pinnedFingerprint(storedUrl);
+    if (pin == null) {
+      status = AuthStatus.unauthenticated;
+      notifyListeners();
       return;
     }
-    baseUrl = storedUrl;
-    _client = client;
-    currentUser = user;
-    status = AuthStatus.authenticated;
-    notifyListeners();
+    final client = ApiClient(
+      baseUrl: storedUrl,
+      token: storedToken,
+      pinnedCertSha256: pin,
+    );
+    try {
+      final user = await client.me();
+      if (user == null) {
+        client.close();
+        await logout();
+        return;
+      }
+      baseUrl = storedUrl;
+      _client = client;
+      currentUser = user;
+      status = AuthStatus.authenticated;
+      notifyListeners();
+    } catch (_) {
+      client.close();
+      await logout();
+    }
   }
 
   Future<void> login({
@@ -57,14 +101,18 @@ class AuthService extends ChangeNotifier {
     required String username,
     required String password,
   }) async {
-    final temp = ApiClient(baseUrl: baseUrl);
+    final pin = await pinnedFingerprint(baseUrl);
+    if (pin == null) {
+      throw StateError('pair this server before logging in');
+    }
+    final temp = ApiClient(baseUrl: baseUrl, pinnedCertSha256: pin);
     final (token, user) = await temp.login(
       username: username,
       password: password,
       deviceLabel: _deviceLabel(),
     );
     temp.close();
-    await _activate(baseUrl: baseUrl, token: token, user: user);
+    await _activate(baseUrl: baseUrl, token: token, user: user, pin: pin);
   }
 
   Future<void> register({
@@ -73,7 +121,11 @@ class AuthService extends ChangeNotifier {
     required String username,
     required String password,
   }) async {
-    final temp = ApiClient(baseUrl: baseUrl);
+    final pin = await pinnedFingerprint(baseUrl);
+    if (pin == null) {
+      throw StateError('pair this server before registering');
+    }
+    final temp = ApiClient(baseUrl: baseUrl, pinnedCertSha256: pin);
     final (token, user) = await temp.register(
       inviteToken: inviteToken,
       username: username,
@@ -81,19 +133,24 @@ class AuthService extends ChangeNotifier {
       deviceLabel: _deviceLabel(),
     );
     temp.close();
-    await _activate(baseUrl: baseUrl, token: token, user: user);
+    await _activate(baseUrl: baseUrl, token: token, user: user, pin: pin);
   }
 
   Future<void> _activate({
     required String baseUrl,
     required String token,
     required User user,
+    required String pin,
   }) async {
     await _storage.write(key: _keyBaseUrl, value: baseUrl);
     await _storage.write(key: _keyToken, value: token);
     _client?.close();
     this.baseUrl = baseUrl;
-    _client = ApiClient(baseUrl: baseUrl, token: token);
+    _client = ApiClient(
+      baseUrl: baseUrl,
+      token: token,
+      pinnedCertSha256: pin,
+    );
     currentUser = user;
     status = AuthStatus.authenticated;
     notifyListeners();

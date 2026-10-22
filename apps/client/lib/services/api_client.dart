@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
@@ -12,7 +13,7 @@ import '../models/user.dart';
 class ApiException implements Exception {
   final int statusCode;
   final String message;
-  ApiException(this.statusCode, this.message);
+  const ApiException(this.statusCode, this.message);
 
   @override
   String toString() => 'ApiException($statusCode): $message';
@@ -24,23 +25,56 @@ class ApiException implements Exception {
 class ApiClient {
   final String baseUrl;
   final String? token;
-  final http.Client _client;
 
-  ApiClient({required this.baseUrl, this.token})
-      : _client = IOClient(_insecureHttpClient());
+  /// SHA-256 (lowercase hex) of the server certificate DER, established by
+  /// PIN pairing. Null is only valid for the temporary pairing client.
+  final String? pinnedCertSha256;
+  final bool allowAnyCertificate;
 
-  /// INSECURE: accepts any TLS certificate presented by the configured
-  /// host, with no verification at all. This matches the server's own
-  /// documented gap (docs/architecture/security-model.md): PIN-pairing /
-  /// SPKI-fingerprint trust-on-first-use doesn't exist yet, so there is no
-  /// safe way to verify a self-signed certificate today. Centralized here
-  /// — the one place in this app that trusts network input unconditionally
-  /// — instead of scattered per-call-site. Replace with real pinning once
-  /// the server's pairing phase exists.
-  static HttpClient _insecureHttpClient() {
+  late final http.Client _client;
+  String? _observedCertSha256;
+
+  ApiClient({
+    required this.baseUrl,
+    this.token,
+    this.pinnedCertSha256,
+    this.allowAnyCertificate = false,
+  }) {
+    _client = IOClient(_httpClient());
+  }
+
+  String? get observedCertSha256 => _observedCertSha256;
+
+  HttpClient _httpClient() {
     final client = HttpClient();
-    client.badCertificateCallback = (cert, host, port) => true;
+    client.badCertificateCallback = (cert, host, port) {
+      final fingerprint = sha256.convert(cert.der).toString();
+      _observedCertSha256 = fingerprint;
+      if (allowAnyCertificate) return true;
+      return pinnedCertSha256 != null && fingerprint == pinnedCertSha256;
+    };
     return client;
+  }
+
+  /// Pairs against this server using the PIN shown by the control plane and
+  /// returns the certificate fingerprint to persist. The temporary client
+  /// accepts the self-signed certificate only long enough to verify that the
+  /// fingerprint reported by the server matches the certificate actually
+  /// presented on this connection.
+  Future<String> verifyPairing(String pin) async {
+    if (!allowAnyCertificate) {
+      throw StateError('verifyPairing requires allowAnyCertificate');
+    }
+    final json = await _post('/api/v1/pairing/verify', {'pin': pin});
+    final reported = json['certSha256']?.toString();
+    final observed = _observedCertSha256;
+    if (reported == null || observed == null || reported != observed) {
+      throw const ApiException(
+        0,
+        'server certificate fingerprint mismatch during pairing',
+      );
+    }
+    return observed;
   }
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');

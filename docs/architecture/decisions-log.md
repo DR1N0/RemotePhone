@@ -8,6 +8,16 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-22 — PIN-gated certificate pinning for the Android client
+
+The client API now has a working pairing flow. The control plane generates a six-digit PIN (or uses `MAKO_PAIRING_PIN`), logs it with the server certificate SHA-256, and serves `GET /api/v1/pairing/info` plus `POST /api/v1/pairing/verify`. Verification is constant-time and rate-limited to five failures/minute. The Android login screen has a **Pair server** action; it uses a temporary unpinned client, submits the PIN, checks that the fingerprint returned by the server matches the certificate presented on that TLS connection, and stores the fingerprint in `flutter_secure_storage`. All later API clients pin that fingerprint and reject a different certificate.
+
+This is PIN-gated TOFU, not a PAKE: an active MITM during the very first pairing could still substitute its certificate. It removes blind trust-on-first-use and passive interception; a PAKE/SAS is future work. Authorization remains bearer-token based — pairing establishes TLS trust, not user identity.
+
+Also added `FLAG_KEEP_SCREEN_ON` for the full-screen stream (cleared on exit), and the test Tone process was stopped. Hardware volume keys now control the client's media stream (AndroidAudioConfiguration.media), which is the intended behavior since the guest has no convenient volume UI.
+
+---
+
 ### 2026-10-22 — One worker per instance; headless is the worker deployment default
 
 The product topology is **one worker process per instance** (the control plane spawns a worker per instance and each worker owns one emulator). That makes headless a deployment policy rather than a per-client choice: `MAKO_HEADLESS` defaults to `1`, and `androidstudio.Adapter.Start` overrides `LaunchRequest.Headless` from config. `MAKO_HEADLESS=0` exists only for local debugging with a visible emulator.

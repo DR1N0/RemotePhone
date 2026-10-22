@@ -32,6 +32,7 @@ class MainActivity : FlutterActivity() {
     // so drive the window insets directly. This also lets the transient
     // swipe reveal system bars without permanently changing the layout.
     private fun enterFullscreen() {
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.setDecorFitsSystemWindows(false)
             window.insetsController?.let {
@@ -60,5 +61,6 @@ class MainActivity : FlutterActivity() {
             window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
         }
         window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 }

@@ -72,7 +72,7 @@ func TestAdminMuxHealthz(t *testing.T) {
 
 func TestClientMuxHealthz(t *testing.T) {
 	svc, instanceSvc, sessionSvc, transportSvc, _, imageSvc, _ := newTestServiceForMain(t)
-	srv := httptest.NewServer(newClientMux(svc, instanceSvc, sessionSvc, transportSvc, imageSvc))
+	srv := httptest.NewServer(newClientMux(svc, instanceSvc, sessionSvc, transportSvc, imageSvc, nil))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/healthz")
@@ -87,7 +87,7 @@ func TestClientMuxHealthz(t *testing.T) {
 
 func TestClientMuxHasNoAdminRoute(t *testing.T) {
 	svc, instanceSvc, sessionSvc, transportSvc, _, imageSvc, _ := newTestServiceForMain(t)
-	srv := httptest.NewServer(newClientMux(svc, instanceSvc, sessionSvc, transportSvc, imageSvc))
+	srv := httptest.NewServer(newClientMux(svc, instanceSvc, sessionSvc, transportSvc, imageSvc, nil))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/admin/anything")

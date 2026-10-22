@@ -36,6 +36,44 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  Future<void> _pair() async {
+    final pin = await showDialog<String>(
+      context: context,
+      builder: (_) => const _PairDialog(),
+    );
+    if (pin == null || pin.trim().isEmpty) return;
+    if (!mounted) return;
+
+    setState(() => _submitting = true);
+    try {
+      final fingerprint = await context.read<AuthService>().pair(
+            baseUrl: _baseUrlController.text.trim(),
+            pin: pin.trim(),
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Paired. Certificate SHA-256: ${fingerprint.substring(0, 16)}…',
+            ),
+          ),
+        );
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Pairing failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _submitting = true);
@@ -51,6 +89,16 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } on StateError catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Login failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -77,6 +125,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 validator: (v) =>
                     (v == null || v.isEmpty) ? 'Server URL is required' : null,
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: _submitting ? null : _pair,
+                  icon: const Icon(Icons.link),
+                  label: const Text('Pair server'),
+                ),
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -123,10 +180,60 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-/// Mako's client surface has no PIN-pairing/certificate-pinning yet
-/// (docs/architecture/security-model.md) — this app trusts whatever
-/// certificate the configured server presents. Surfaced here, not just in
-/// a code comment, so a user connecting over an untrusted network knows.
+class _PairDialog extends StatefulWidget {
+  const _PairDialog();
+
+  @override
+  State<_PairDialog> createState() => _PairDialogState();
+}
+
+class _PairDialogState extends State<_PairDialog> {
+  final _pinController = TextEditingController();
+
+  @override
+  void dispose() {
+    _pinController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Pair this server'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Enter the PIN printed by mako-controlplane on the host. '
+            'This also pins the server certificate for later connections.',
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _pinController,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Pairing PIN'),
+            onSubmitted: (value) => Navigator.of(context).pop(value),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_pinController.text),
+          child: const Text('Pair'),
+        ),
+      ],
+    );
+  }
+}
+
+/// The client surface uses a self-signed certificate, so a new device must
+/// PIN-pair before it can trust the server. Surfaced here, not just in a code
+/// comment, so a user connecting over an untrusted network knows.
 class _InsecureTlsBanner extends StatelessWidget {
   const _InsecureTlsBanner();
 
@@ -145,8 +252,8 @@ class _InsecureTlsBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Connects without verifying the server certificate '
-              '(no pairing yet) — only use this on a trusted network.',
+              'Pair this server first using the PIN shown by '
+              'mako-controlplane. The certificate is pinned after pairing.',
               style: TextStyle(
                   color: Theme.of(context).colorScheme.onErrorContainer),
             ),

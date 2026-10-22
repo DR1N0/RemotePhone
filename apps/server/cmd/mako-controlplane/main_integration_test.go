@@ -11,7 +11,7 @@ func TestAdminAndClientMuxesServeRealAuthRoutes(t *testing.T) {
 
 	adminSrv := httptest.NewServer(newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc))
 	defer adminSrv.Close()
-	clientSrv := httptest.NewServer(newClientMux(svc, instanceSvc, sessionSvc, transportSvc, imageSvc))
+	clientSrv := httptest.NewServer(newClientMux(svc, instanceSvc, sessionSvc, transportSvc, imageSvc, nil))
 	defer clientSrv.Close()
 
 	// /auth/status exists on the admin surface...
