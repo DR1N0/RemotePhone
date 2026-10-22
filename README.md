@@ -55,6 +55,8 @@ Set these before starting the control plane (the spawned worker inherits its env
 | `STUN_URL` | `none` | `none` disables STUN; use it on a LAN |
 | `MAKO_CLIENT_ADDR` | `0.0.0.0:3000` | Bind the client API on the LAN for phones |
 | `MAKO_TLS_CERT_PATH` / `MAKO_TLS_KEY_PATH` | defaults beside the DB | Self-signed cert/key |
+| `MAKO_STREAM_BITRATE` | `2000000` | H.264 bitrate (bits/s); lower it for weak WiFi |
+| `MAKO_WEBRTC_HOST_IP` | `192.168.1.7` | Advertise this one LAN IP for WebRTC; auto-detected (192.168/10/172) when unset |
 
 ### 3. Build and run
 
@@ -74,6 +76,9 @@ $env:MAKO_ANDROID_SDK_ROOT = "$env:LOCALAPPDATA\Android\Sdk"
 $env:MAKO_FFMPEG_PATH = "C:\ffmpeg\bin\ffmpeg.exe"
 $env:STUN_URL = "none"
 $env:MAKO_CLIENT_ADDR = "0.0.0.0:3000"
+$env:MAKO_STREAM_BITRATE = "2000000"
+# Optional: force one LAN interface for WebRTC (auto-detected otherwise)
+# $env:MAKO_WEBRTC_HOST_IP = "192.168.1.7"
 .\mako-controlplane.exe
 ```
 
@@ -101,7 +106,11 @@ Log in, tap **+**, pick a template from the server's discovered AVDs, and create
 
 ### Firewall
 
-The first time `mako-worker.exe` or `mako-controlplane.exe` listens, Windows Defender Firewall may prompt. Allow private networks. The client API (TCP 3000) and WebRTC UDP ports must be reachable from the phone.
+The first time `mako-worker.exe`, `emulator.exe`, or `qemu-system-x86_64.exe` listens, Windows Defender Firewall may prompt. Allow private networks. Running test tools with `go run` creates a new temporary executable each time and therefore re-prompts every run — build them to a fixed path instead.
+
+For a one-time setup, run [scripts/windows/firewall-allow.ps1](scripts/windows/firewall-allow.ps1) from an elevated PowerShell. It adds inbound allow-rules for the fixed binaries and, with `-DisableNotifications`, also silences the "blocked app" popup for unknown programs.
+
+The client API (TCP 3000) and WebRTC UDP ports must be reachable from the phone.
 
 ## Testing
 
@@ -117,9 +126,11 @@ flutter analyze
 
 ## Limitations (current)
 
-- **No audio yet.** Only video + touch input are carried over WebRTC.
-- **Touch is single-pointer and injected through `adb shell input`.** Fine for tapping/light use; multi-touch and low-latency drags via the emulator's gRPC `sendTouch` are the next transport work.
+- **Audio is 8 kHz mono μ-law (PCMU), not Opus.** It is carried over WebRTC and playable on the Android client, but it is telephone-quality; Opus is the next quality step.
+- **Multi-touch is implemented through the emulator's gRPC `sendTouch`** (pointer IDs are carried from the client), with an adb single-touch fallback if gRPC input fails. Keyboard events still use adb.
 - **Trusted LAN only.** The client API uses a self-signed certificate and the client accepts any certificate; PIN pairing/SPKI pinning is still deferred. Do not expose it to the public internet without a VPN or reverse proxy.
+- **WebRTC advertises one LAN IPv4 interface.** `MAKO_WEBRTC_HOST_IP` (or auto-detection) prevents Tailscale/VPN/link-local candidates from being selected. If auto-detection picks wrong, set it explicitly.
+- **An Android emulator is a poor test client on the same Windows host.** Its NAT hairpin to the host's own LAN IP loses packets under video load; a real phone on the LAN is the trustworthy end-to-end test. The host-side WebRTC probe is unaffected.
 - **No capacity enforcement.** Each instance costs a full emulator (RAM/CPU/disk); start only what the host can carry.
 - Base-image capture/promote is unit-tested, but its live boot verification is still open (see [`docs/windows-migration-handoff.md`](docs/windows-migration-handoff.md) and the decisions log).
 

@@ -37,5 +37,5 @@ Authorization after pairing stays bearer-token based (unchanged from what's impl
 Three distinct traffic paths are planned:
 
 1. **Control-plane client API** — HTTPS as of this phase (self-signed, no client trust verification yet); target is PIN-paired + LAN-reachable, see above.
-2. **Worker media/data ports** — the worker's pion WebRTC stack binds the host's interfaces (no interface filter or ephemeral-port range is configured yet), so a phone on the LAN can reach its ICE candidates directly. Only the control plane's client API is authenticated by bearer tokens; the media channel is protected by SDP/ICE secrecy, not application auth.
+2. **Worker media/data ports** — the worker's pion WebRTC stack is restricted to IPv4/UDP and one LAN IP (`MAKO_WEBRTC_HOST_IP`, auto-detected as a 192.168/10/172 address, excluding Tailscale/link-local candidates), so a phone reaches a predictable ICE candidate and a multi-adapter host cannot lure the client onto a lossy VPN path. There is still no ephemeral UDP port range. Only the control plane's client API is authenticated by bearer tokens; the media channel is protected by SDP/ICE secrecy, not application auth.
 3. **Worker internal control API** — strictly `127.0.0.1`-bound, never LAN-reachable; unaffected by this phase.
