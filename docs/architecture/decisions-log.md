@@ -8,6 +8,16 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-22 — Silent audio was a stale emulator quickboot state, not WebRTC port muxing
+
+A real phone received audio packets but `audioLevel` stayed 0. A host-side probe decoded the worker's PCMU output as digital silence (`rms=0`, `peak=0`), and the phone's own WebRTC `AudioTrack` was active but writing zeros. So the fault was upstream of ICE/RTP, not "audio and video share one UDP port".
+
+Added `MAKO_AUDIO_DEBUG=1`, which logs each `streamAudio` packet's size and S16 RMS/peak plus `WriteSample` stalls. Against the broken instance, `streamAudio` delivered **136-byte packets at ~93/s with RMS ≈1.5 and peak 2** (near-silence dither), so the PCMU encoder produced only ~3 frames/s. After a guest `adb reboot` (cold boot, not an emulator stop/start that restores the quickboot snapshot) and a fresh Tone `AudioTrack`, the same worker logged **1920-byte packets at ~95/s, RMS ≈192, peak 271**, i.e. ~50 PCMU frames/s. The real phone then went from ~3 to ~50 audio packets/s and `audioLevel=0.0084`.
+
+Root cause: the emulator's quickboot snapshot restored a wedged guest audio state (stale `AudioTrack`/AudioFlinger output), so the emulator produced tiny silence fragments. WebRTC BUNDLE, the single UDP port, and headless mode were all irrelevant. Product follow-up: instances should cold-boot (disable snapshot load) or detect this state before restarting, because a stop/start can re-restore the same broken snapshot.
+
+---
+
 ### 2026-10-22 — ICE advertises all routable IPv4; no Tailscale-specific config
 
 An earlier attempt at the same date restricted ICE to one detected `192.168/10/172` address to stop an Android emulator client from selecting a Tailscale candidate through a Windows NAT hairpin. That fixed a test-environment symptom by breaking a real deployment: a phone on Tailscale only saw an unreachable LAN candidate, and the worker's UDP socket also only listened on that address. Special-casing Tailscale would repeat the same mistake one layer up.

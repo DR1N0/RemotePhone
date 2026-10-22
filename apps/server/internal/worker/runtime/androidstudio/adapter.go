@@ -23,6 +23,7 @@ type Adapter struct {
 	ffmpegPath     string
 	streamBitRate  int
 	webRTCHostIP   string
+	audioDebug     bool
 	dataRoot       string
 	baseImageRoot  string
 	launchFn       func(string, LaunchRequest) (ProcessHandle, error)
@@ -66,6 +67,7 @@ func NewAdapter(cfg config.Config, store runtime.HandleStore, transportStore *tr
 		ffmpegPath:     cfg.FFmpegPath,
 		streamBitRate:  cfg.StreamBitRate,
 		webRTCHostIP:   cfg.WebRTCHostIP,
+		audioDebug:     cfg.AudioDebug,
 		dataRoot:       cfg.InstanceDataRoot,
 		baseImageRoot:  cfg.BaseImageRoot,
 		stopFn:         StopProcess,

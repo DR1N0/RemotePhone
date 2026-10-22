@@ -70,10 +70,9 @@ func (s *GRPCAudioSource) Packets(ctx context.Context) (<-chan AudioFrame, error
 		SamplingRate: uint64(requestedRate),
 		Channels:     channels,
 		Format:       emupb.AudioFormat_AUD_FMT_S16,
-		// REAL_TIME is what makes the emulator deliver small, prompt chunks
-		// instead of buffering audio into large bursts; without it the
-		// observed WebRTC audio rate was ~3 packets/s instead of 50.
-		Mode: emupb.AudioFormat_MODE_REAL_TIME,
+		// Leave Mode at MODE_UNSPECIFIED. MODE_REAL_TIME is documented as
+		// experimental for audio injection; no evidence showed it helps
+		// streamAudio, so don't opt into an experimental delivery mode.
 	})
 	if err != nil {
 		_ = conn.Close()

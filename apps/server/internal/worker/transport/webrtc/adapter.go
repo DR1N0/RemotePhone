@@ -2,6 +2,7 @@ package webrtc
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -40,6 +41,7 @@ type Adapter struct {
 	ffmpegPath   string
 	bitRate      int
 	hostIP       string
+	audioDebug   bool
 
 	forwardInput   func(string, transport.InputEvent, string, int, int) error
 	newFrameSource func(addr string, width, height int) emugrpc.FrameSource
@@ -64,6 +66,30 @@ func (a *Adapter) SetBitRate(bitRate int) {
 	if bitRate > 0 {
 		a.bitRate = bitRate
 	}
+}
+
+// pcm16Stats returns RMS and peak for little-endian S16 PCM, used only for
+// the audio diagnostics log (silence vs. actual samples).
+func pcm16Stats(data []byte) (rms float64, peak float64) {
+	samples := len(data) / 2
+	if samples == 0 {
+		return 0, 0
+	}
+	var sumSquares float64
+	for i := 0; i < samples; i++ {
+		sample := float64(int16(binary.LittleEndian.Uint16(data[i*2:])))
+		sumSquares += sample * sample
+		if abs := math.Abs(sample); abs > peak {
+			peak = abs
+		}
+	}
+	return math.Sqrt(sumSquares / float64(samples)), peak
+}
+
+// SetAudioDebug enables periodic audio packet diagnostics (RMS/peak and
+// WriteSample blocking) in the worker log.
+func (a *Adapter) SetAudioDebug(enabled bool) {
+	a.audioDebug = enabled
 }
 
 // SetHostIP is an optional debugging override: when set, ICE host candidates
@@ -173,10 +199,29 @@ func (a *Adapter) startAudioCapture(track *webrtc.TrackLocalStaticSample) (conte
 	go func() {
 		defer close(done)
 		encoder := newPCMUEncoder()
-		var frames, bytes int64
+		var frames, bytes, packetCount int64
+		started := time.Now()
+		lastDebug := time.Time{}
 		for packet := range packets {
+			packetCount++
+			// Always sample the first few packets (one line per session),
+			// then only when audio debug is enabled: RMS/peak tell us whether
+			// the emulator sent real samples or digital silence, which is a
+			// different problem from "WriteSample/network stalled".
+			if packetCount <= 3 || (a.audioDebug && time.Since(lastDebug) >= 2*time.Second) {
+				rms, peak := pcm16Stats(packet.Data)
+				log.Printf("audio[%s]: pkt #%d bytes=%d rate=%d ch=%d rms=%.4f peak=%.0f frames=%d avg_interval=%.1fms",
+					a.instanceID, packetCount, len(packet.Data), packet.SampleRate, packet.Channels,
+					rms, peak, frames, time.Since(started).Seconds()*1000/float64(packetCount))
+				lastDebug = time.Now()
+			}
 			for _, payload := range encoder.Write(packet.Data, packet.SampleRate, packet.Channels) {
-				if err := track.WriteSample(media.Sample{Data: payload, Duration: 20 * time.Millisecond}); err != nil {
+				writeStart := time.Now()
+				err := track.WriteSample(media.Sample{Data: payload, Duration: 20 * time.Millisecond})
+				if elapsed := time.Since(writeStart); a.audioDebug && elapsed > 100*time.Millisecond {
+					log.Printf("audio[%s]: WriteSample blocked %s", a.instanceID, elapsed)
+				}
+				if err != nil {
 					log.Printf("audio[%s]: WriteSample failed: %v", a.instanceID, err)
 					return
 				}

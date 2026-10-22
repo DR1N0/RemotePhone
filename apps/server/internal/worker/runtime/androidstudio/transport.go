@@ -33,6 +33,7 @@ func (a *Adapter) CreateTransportSession(req runtime.TransportSessionRequest) (r
 	)
 	candidate.SetBitRate(a.streamBitRate)
 	candidate.SetHostIP(a.webRTCHostIP)
+	candidate.SetAudioDebug(a.audioDebug)
 	if a.transportStore != nil {
 		key := req.InstanceID + ":" + req.AttachmentID
 		adapter, inserted := a.transportStore.GetOrPut(key, candidate)

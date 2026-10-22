@@ -44,6 +44,17 @@ func TestLoadWebRTCHostIPOverride(t *testing.T) {
 	}
 }
 
+func TestLoadAudioDebug(t *testing.T) {
+	t.Setenv("MAKO_AUDIO_DEBUG", "1")
+	if cfg := Load(); !cfg.AudioDebug {
+		t.Error("AudioDebug = false, want true for MAKO_AUDIO_DEBUG=1")
+	}
+	t.Setenv("MAKO_AUDIO_DEBUG", "0")
+	if cfg := Load(); cfg.AudioDebug {
+		t.Error("AudioDebug = true, want false otherwise")
+	}
+}
+
 func TestLoadStunNoneDisablesSTUN(t *testing.T) {
 	t.Setenv("STUN_URL", "none")
 	if cfg := Load(); cfg.StunURL != "" {

@@ -19,6 +19,7 @@ type Config struct {
 	BaseImageRoot       string
 	StreamBitRate       int
 	WebRTCHostIP        string
+	AudioDebug          bool
 }
 
 func Load() Config {
@@ -42,6 +43,7 @@ func Load() Config {
 		BaseImageRoot:       getenv("MAKO_BASE_IMAGE_ROOT", filepath.Join(homeDir, ".mako", "base-images")),
 		StreamBitRate:       getenvInt("MAKO_STREAM_BITRATE", 2_000_000),
 		WebRTCHostIP:        os.Getenv("MAKO_WEBRTC_HOST_IP"),
+		AudioDebug:          os.Getenv("MAKO_AUDIO_DEBUG") == "1",
 	}
 }
 
