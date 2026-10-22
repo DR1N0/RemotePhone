@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/managed_instance.dart';
+import '../models/template_info.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import 'stream_screen.dart';
@@ -60,54 +61,84 @@ class _InstanceListScreenState extends State<InstanceListScreen> {
   }
 
   Future<void> _createInstance() async {
+    List<TemplateInfo> templates;
+    try {
+      templates = await _api.listTemplates();
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+      return;
+    }
+    if (!mounted) return;
+    if (templates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('No Android AVDs found on the server host. Create one '
+            'in Android Studio (or avdmanager), then retry.'),
+      ));
+      return;
+    }
+
     final nameController = TextEditingController();
-    final templateController = TextEditingController(
-      text: 'macos-android-studio:Medium_Phone_API_36.1',
-    );
+    var selectedTemplate = templates.first.templateId;
     final created = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('New instance'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(labelText: 'Name'),
-              autofocus: true,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: templateController,
-              decoration: const InputDecoration(
-                labelText: 'Template ID',
-                helperText: 'No template picker yet — enter one you know '
-                    'is installed on the worker host.',
-                helperMaxLines: 2,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('New instance'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: InputDecoration(
+                  labelText: 'Name',
+                  hintText: templates.first.label,
+                ),
+                autofocus: true,
               ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: selectedTemplate,
+                decoration: const InputDecoration(labelText: 'Template'),
+                items: templates
+                    .map((t) => DropdownMenuItem(
+                          value: t.templateId,
+                          child: Text(t.label),
+                        ))
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    setDialogState(() => selectedTemplate = value);
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Create'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Create'),
-          ),
-        ],
       ),
     );
     if (created != true) return;
+    final selected = templates.firstWhere(
+      (t) => t.templateId == selectedTemplate,
+      orElse: () => templates.first,
+    );
+    final name = nameController.text.trim().isEmpty
+        ? selected.label
+        : nameController.text.trim();
     try {
-      await _api.createInstance(
-        name: nameController.text.trim().isEmpty
-            ? 'instance'
-            : nameController.text.trim(),
-        templateId: templateController.text.trim(),
-      );
+      await _api.createInstance(name: name, templateId: selectedTemplate);
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -166,10 +197,11 @@ class _InstanceListScreenState extends State<InstanceListScreen> {
         itemBuilder: (context, index) {
           final instance = _instances[index];
           final busy = _busyIds.contains(instance.id);
+          final templateLabel = instance.templateId.split(':').last;
           return ListTile(
             title: Text(instance.name),
             subtitle: Text(
-              'desired: ${instance.desiredState} · observed: '
+              '$templateLabel · desired: ${instance.desiredState} · observed: '
               '${instance.observedState}'
               '${instance.lastError != null ? ' · error: ${instance.lastError}' : ''}',
             ),

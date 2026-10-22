@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -12,16 +10,7 @@ enum AuthStatus { unknown, authenticated, unauthenticated }
 /// one ApiClient exists at a time, rebuilt whenever the server URL or
 /// token changes — screens read it via `context.read<AuthService>().client`.
 class AuthService extends ChangeNotifier {
-  // usesDataProtectionKeychain: false — the modern "data protection"
-  // Keychain API macOS defaults to requires a keychain-access-groups
-  // entitlement under App Sandbox, which in turn requires signing with a
-  // real Apple Developer Team (errSecMissingEntitlement / -34018 without
-  // one). This is an unsigned local dev/MVP build with App Sandbox off
-  // (see macos/Runner/DebugProfile.entitlements), so the legacy Keychain
-  // API is used instead — it has no such requirement.
-  static const _storage = FlutterSecureStorage(
-    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
-  );
+  static const _storage = FlutterSecureStorage();
   static const _keyBaseUrl = 'mako_base_url';
   static const _keyToken = 'mako_token';
 
@@ -121,5 +110,5 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  String _deviceLabel() => 'mako-client (${Platform.operatingSystem})';
+  String _deviceLabel() => 'mako-client-android';
 }

@@ -6,6 +6,7 @@ import 'package:http/io_client.dart';
 
 import '../models/managed_instance.dart';
 import '../models/session_record.dart';
+import '../models/template_info.dart';
 import '../models/user.dart';
 
 class ApiException implements Exception {
@@ -140,6 +141,16 @@ class ApiClient {
         .toList();
   }
 
+  /// Lists the AVDs available on the server host, for the "new instance"
+  /// template picker. The server discovers these by spawning a short-lived
+  /// worker, so this call can take a second or two on a cold host.
+  Future<List<TemplateInfo>> listTemplates() async {
+    final json = await _get('/api/v1/templates');
+    return (json['templates'] as List<dynamic>)
+        .map((e) => TemplateInfo.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   /// resourceProfile/launchConfig are fixed MVP defaults — no UI for them
   /// yet, matching the "lightweight MVP" scope (see docs/plans in the Go
   /// backend repo for the full field set this mirrors).
@@ -158,13 +169,12 @@ class ApiClient {
         'accelerationMode': 'auto',
         'streamProfile': 'balanced',
       },
-      // headless: false — on macOS a headless (no-window) Android emulator
-      // can't get real GPU acceleration (no window surface to attach to)
-      // and falls back to software rendering, which made screenrecord's
-      // H264 encode measured ~27x slower during active interaction (~1.9
-      // fps headless/software vs. ~51 fps windowed/GPU-accelerated in a
-      // side-by-side test). A visible emulator window is a fine trade for
-      // a usable local MVP; revisit for an actual headless server target.
+      // headless: false — a headless (no-window) emulator can fall back to
+      // software rendering when it has no window surface/GPU context, which
+      // makes screen capture and H.264 encoding dramatically slower. Keep a
+      // visible emulator window for local use; revisit for a true headless
+      // server target (where GPU passthrough/software rendering can be
+      // configured explicitly).
       'launchConfig': {'headless': false},
     });
     return ManagedInstance.fromJson(json['instance'] as Map<String, dynamic>);
