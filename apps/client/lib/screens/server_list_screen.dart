@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/server_profile.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
+import '../services/server_discovery.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import 'instance_list_screen.dart';
@@ -22,6 +25,72 @@ class ServerListScreen extends StatefulWidget {
 
 class _ServerListScreenState extends State<ServerListScreen> {
   String? _busyKey;
+  final _discovery = ServerDiscovery();
+  final _nearby = <String, DiscoveredServer>{};
+  StreamSubscription<DiscoveredServer>? _foundSub;
+  StreamSubscription<String>? _lostSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _foundSub = _discovery.servers.listen(_onDiscovered);
+    _lostSub = _discovery.lost.listen((service) {
+      if (!mounted) return;
+      setState(() {
+        _nearby.removeWhere((_, server) => server.serviceName == service);
+      });
+    });
+    _discovery.start();
+  }
+
+  @override
+  void dispose() {
+    _foundSub?.cancel();
+    _lostSub?.cancel();
+    unawaited(_discovery.dispose());
+    super.dispose();
+  }
+
+  Future<void> _onDiscovered(DiscoveredServer discovered) async {
+    debugPrint('[discovery] ${discovered.name} ${discovered.serverId} '
+        '${discovered.baseUrl}');
+    final auth = context.read<AuthService>();
+    final known = auth.servers
+        .where((p) => p.serverId == discovered.serverId)
+        .toList();
+    if (known.isEmpty) {
+      if (mounted) {
+        setState(() => _nearby[discovered.serverId] = discovered);
+      }
+      return;
+    }
+    if (known.first.baseUrl == discovered.baseUrl &&
+        known.first.name == discovered.name) {
+      if (mounted) setState(() => _nearby.remove(discovered.serverId));
+      return;
+    }
+    // Never trust mDNS alone: verify the server ID and pinned certificate
+    // before moving a saved profile to the advertised address.
+    final client = ApiClient(
+      baseUrl: discovered.baseUrl,
+      token: known.first.token,
+      pinnedCertSha256: known.first.certSha256,
+    );
+    try {
+      final info = await client.serverInfo();
+      if (info.serverId != discovered.serverId) return;
+      await auth.updateDiscoveredServer(
+        discovered.serverId,
+        discovered.baseUrl,
+        info.name,
+      );
+      if (mounted) setState(() => _nearby.remove(discovered.serverId));
+    } on ApiException {
+      // Keep the old address; discovery is only a hint.
+    } finally {
+      client.close();
+    }
+  }
 
   Future<void> _open(ServerProfile profile) async {
     final auth = context.read<AuthService>();
@@ -51,6 +120,18 @@ class _ServerListScreenState extends State<ServerListScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
     );
+  }
+
+  Future<void> _pairDiscovered(DiscoveredServer server) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => LoginScreen(
+          initialBaseUrl: server.baseUrl,
+          title: 'Pair nearby server',
+        ),
+      ),
+    );
+    if (mounted) setState(() => _nearby.remove(server.serverId));
   }
 
   Future<void> _addAccount(ServerProfile profile) async {
@@ -133,6 +214,11 @@ class _ServerListScreenState extends State<ServerListScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
         children: [
+          if (_nearby.isNotEmpty)
+            _NearbySection(
+              servers: _nearby.values.toList(),
+              onPair: _pairDiscovered,
+            ),
           if (pinned.isNotEmpty)
             _groupSection(
               context,
@@ -181,6 +267,68 @@ class _ServerListScreenState extends State<ServerListScreen> {
               onAddAccount: _addAccount,
               onEditAddress: _editAddress,
               onRemoveServer: _removeServer,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _NearbySection extends StatelessWidget {
+  final List<DiscoveredServer> servers;
+  final Future<void> Function(DiscoveredServer) onPair;
+
+  const _NearbySection({required this.servers, required this.onPair});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader(
+          title: 'Nearby',
+          subtitle: 'Discovered on this LAN',
+          icon: Icons.radar,
+        ),
+        for (final server in servers)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                child: Row(
+                  children: [
+                    const Icon(Icons.wifi_tethering, size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            server.name,
+                            style: Theme.of(context).textTheme.titleMedium,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            server.baseUrl,
+                            style: Theme.of(context).textTheme.bodySmall,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    OutlinedButton(
+                      onPressed: () => onPair(server),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(72, 36),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                      child: const Text('Pair'),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
       ],

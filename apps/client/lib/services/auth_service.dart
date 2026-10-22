@@ -222,6 +222,36 @@ class AuthService extends ChangeNotifier {
   Future<void> _saveServers() =>
       _storage.write(key: _keyServers, value: ServerProfile.listToJson(servers));
 
+  /// Updates a LAN profile's cached address and display name after mDNS
+  /// discovery, without changing tokens or certificate pins. All accounts for
+  /// the same server move together.
+  Future<void> updateDiscoveredServer(
+    String serverId,
+    String newBaseUrl,
+    String newName,
+  ) async {
+    var changed = false;
+    for (var i = 0; i < servers.length; i++) {
+      if (servers[i].serverId != serverId) continue;
+      final updated = servers[i].copyWith(baseUrl: newBaseUrl, name: newName);
+      if (updated.baseUrl != servers[i].baseUrl ||
+          updated.name != servers[i].name) {
+        servers[i] = updated;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    await _saveServers();
+    if (activeProfile?.serverId == serverId) {
+      activeProfile = activeProfile!.copyWith(
+        baseUrl: newBaseUrl,
+        name: newName,
+      );
+      baseUrl = newBaseUrl;
+    }
+    notifyListeners();
+  }
+
   /// Updates a LAN profile's cached address without changing its identity,
   /// token, or certificate pin. This is the manual fallback until mDNS
   /// discovery can rewrite the address by server ID.

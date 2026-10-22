@@ -30,7 +30,7 @@ The Android client used to hold exactly one server URL/token, so switching hosts
 
 The control plane now owns a stable identity: `MAKO_SERVER_ID_PATH` (default `<db>.server-id`) persists a UUID across restarts, `MAKO_SERVER_NAME` is the configurable display name (default hostname), and unauthenticated `GET /api/v1/server/info` returns `{serverId,name,version}`. The client records that identity when adding a server and refreshes the display name on selection.
 
-LAN discovery is specified in [`mdns-discovery.md`](mdns-discovery.md): advertise `_mako._tcp.local` with TXT `id`, `name`, `v`, and `path`; the client browses via Android NSD, deduplicates by server ID, and updates a known profile's address when DHCP moves it. mDNS is only an address hint — the server ID is verified via `/server/info`, and certificate pinning/PIN pairing remain mandatory. Implementation is future work; manual URL entry remains the fallback.
+LAN discovery is implemented for both sides, following [`mdns-discovery.md`](mdns-discovery.md): the control plane advertises `_mako._tcp.local` with TXT `id`, `name`, `v`, and `path` on private LAN interfaces; the Android server picker browses it via `NsdManager`, deduplicates by server ID, shows unknown servers under "Nearby", and updates a known server's address/name only after verifying `/server/info` over the pinned certificate. mDNS remains only an address hint — certificate pinning/PIN pairing are still mandatory. Manual URL entry remains the fallback. `MAKO_DISABLE_MDNS=1` turns advertisement off.
 
 ---
 

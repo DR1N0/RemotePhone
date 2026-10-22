@@ -62,6 +62,7 @@ Set these before starting the control plane (the spawned worker inherits its env
 | `MAKO_PAIRING_PIN` | random 6 digits | PIN printed at control-plane startup and entered once in the Android client; set a stable value for automation. |
 | `MAKO_SERVER_NAME` | host name | Display name shown in the client's server picker. The stable server ID is independent of it. |
 | `MAKO_SERVER_ID_PATH` | `<db>.server-id` | Persisted UUID identifying this server across restarts/IP changes. |
+| `MAKO_DISABLE_MDNS` | unset | Set `1` to disable LAN mDNS advertisement (`_mako._tcp`). |
 | `MAKO_WEBRTC_HOST_IP` | unset | Optional debug override: restrict ICE to one IPv4 address. By default every routable IPv4 interface (LAN, Tailscale, other VPNs) is advertised and ICE chooses. |
 
 ### 3. Build and run

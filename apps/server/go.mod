@@ -15,9 +15,12 @@ require (
 )
 
 require (
+	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
+	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/miekg/dns v1.1.27 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pion/datachannel v1.5.8 // indirect
 	github.com/pion/dtls/v2 v2.2.12 // indirect

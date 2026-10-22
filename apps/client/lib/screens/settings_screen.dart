@@ -13,20 +13,38 @@ class SettingsScreen extends StatelessWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Forget all servers?'),
-        content: const Text(
-          'This removes every paired server, saved session, and certificate '
-          'pin from this phone.',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'This removes every paired server, saved session, and '
+              'certificate pin from this phone.',
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.danger,
+                      foregroundColor: Colors.black,
+                    ),
+                    child: const Text('Forget all'),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Forget all'),
-          ),
-        ],
       ),
     );
     if (confirmed != true || !context.mounted) return;
@@ -53,10 +71,11 @@ class SettingsScreen extends StatelessWidget {
             child: SwitchListTile(
               title: const Text('LAN discovery (mDNS)'),
               subtitle: const Text(
-                'Planned. Lists nearby servers automatically while keeping '
-                'PIN pairing and certificate pinning.',
+                'Automatic while the server picker is open. Discovery is '
+                'only an address hint; PIN pairing and certificate pinning '
+                'still apply.',
               ),
-              value: false,
+              value: true,
               onChanged: null,
             ),
           ),

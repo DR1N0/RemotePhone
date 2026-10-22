@@ -7,6 +7,7 @@ import android.view.WindowInsetsController
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
@@ -26,6 +27,10 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "mako/discovery/events",
+        ).setStreamHandler(MdnsDiscovery(this))
     }
 
     // Flutter's immersiveSticky was leaving the status bar visible on MIUI,

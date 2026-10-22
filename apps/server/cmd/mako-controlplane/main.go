@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,6 +22,7 @@ import (
 	"mako/internal/controlplane/controller"
 	"mako/internal/controlplane/image"
 	"mako/internal/controlplane/instance"
+	"mako/internal/controlplane/mdns"
 	"mako/internal/controlplane/pairing"
 	"mako/internal/controlplane/persistence"
 	"mako/internal/controlplane/placement"
@@ -179,10 +181,25 @@ func run() error {
 	log.Printf("pairing PIN: %s (certificate SHA-256: %s)", pairingSvc.PIN(), pairingSvc.CertSHA256())
 
 	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc)}
+	clientAddr := envOrDefault("MAKO_CLIENT_ADDR", "127.0.0.1:3000")
 	clientSrv := &http.Server{
-		Addr:      envOrDefault("MAKO_CLIENT_ADDR", "127.0.0.1:3000"),
+		Addr:      clientAddr,
 		Handler:   newClientMux(svc, instanceSvc, sessionSvc, transportSvc, imageSvc, pairingSvc, serverInfo),
 		TLSConfig: &tls.Config{Certificates: []tls.Certificate{tlsCert}},
+	}
+
+	clientPort := 3000
+	if _, portText, err := net.SplitHostPort(clientAddr); err == nil {
+		if parsed, err := strconv.Atoi(portText); err == nil {
+			clientPort = parsed
+		}
+	}
+	advertiser, err := mdns.Start(serverInfo, clientPort, os.Getenv("MAKO_DISABLE_MDNS") == "1")
+	if err != nil {
+		log.Printf("mDNS discovery disabled: %v", err)
+	} else if advertiser != nil {
+		defer advertiser.Shutdown()
+		log.Printf("mDNS: advertising _mako._tcp on port %d", clientPort)
 	}
 
 	errCh := make(chan error, 2)
