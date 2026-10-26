@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../models/server_profile.dart';
@@ -154,6 +155,69 @@ class _ServerListScreenState extends State<ServerListScreen> {
     );
   }
 
+  Future<void> _createAccessCode(ServerProfile profile) async {
+    setState(() => _busyKey = '${profile.serverId}:${profile.accountKey}');
+    try {
+      final code = await context
+          .read<AuthService>()
+          .createAccessCodeFor(profile);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Access code'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SelectableText(
+                code.code,
+                style: Theme.of(context).textTheme.headlineMedium,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                code.scope == 'new-or-existing'
+                    ? 'Share this with someone who needs to create an account '
+                        'or connect a new device. It expires '
+                        '${_formatExpiry(code.expiresAt)}.'
+                    : 'Use this on your new device to add it to this account. '
+                        'It expires ${_formatExpiry(code.expiresAt)}.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: code.code));
+                Navigator.of(context).pop();
+              },
+              child: const Text('Copy'),
+            ),
+          ],
+        ),
+      );
+    } on ApiException catch (e) {
+      _show(e.message);
+    } finally {
+      if (mounted) setState(() => _busyKey = null);
+    }
+  }
+
+  String _formatExpiry(DateTime expiresAt) {
+    final local = expiresAt.toLocal();
+    final minutes = local.difference(DateTime.now()).inMinutes;
+    if (minutes < 1) return 'in less than a minute';
+    if (minutes < 60) return 'in $minutes min';
+    return 'at ${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
+  }
+
   Future<void> _editAddress(ServerProfile profile) async {
     final address = await showDialog<String>(
       context: context,
@@ -280,6 +344,7 @@ class _ServerListScreenState extends State<ServerListScreen> {
               busyKey: _busyKey,
               onOpen: _open,
               onAddAccount: _addAccount,
+              onCreateAccessCode: _createAccessCode,
               onEditAddress: _editAddress,
               onRemoveServer: _removeServer,
             ),
@@ -356,6 +421,7 @@ class _ServerGroup extends StatelessWidget {
   final String? busyKey;
   final Future<void> Function(ServerProfile) onOpen;
   final Future<void> Function(ServerProfile) onAddAccount;
+  final Future<void> Function(ServerProfile) onCreateAccessCode;
   final Future<void> Function(ServerProfile) onEditAddress;
   final Future<void> Function(ServerProfile) onRemoveServer;
 
@@ -364,6 +430,7 @@ class _ServerGroup extends StatelessWidget {
     required this.busyKey,
     required this.onOpen,
     required this.onAddAccount,
+    required this.onCreateAccessCode,
     required this.onEditAddress,
     required this.onRemoveServer,
   });
@@ -403,6 +470,8 @@ class _ServerGroup extends StatelessWidget {
                     switch (value) {
                       case 'account':
                         onAddAccount(server);
+                      case 'code':
+                        onCreateAccessCode(server);
                       case 'edit':
                         onEditAddress(server);
                       case 'forget':
@@ -413,6 +482,10 @@ class _ServerGroup extends StatelessWidget {
                     PopupMenuItem(
                       value: 'account',
                       child: Text('Add account'),
+                    ),
+                    PopupMenuItem(
+                      value: 'code',
+                      child: Text('Create access code'),
                     ),
                     PopupMenuItem(
                       value: 'edit',

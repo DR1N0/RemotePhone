@@ -1,10 +1,10 @@
 # LAN server discovery over mDNS
 
 Status: **implemented** for the control-plane advertisement and the Android
-server picker. The client currently requires a manually entered server URL
-plus PIN pairing when discovery finds nothing. This document specifies the
-discovery layer and its security boundary; it never weakens the PIN/certificate
-trust model.
+server picker. The client still needs an access code when the server's
+certificate is not already pinned. This document specifies the discovery layer
+and its security boundary; it never weakens the access-code/certificate trust
+model.
 
 ## Service definition
 
@@ -40,7 +40,7 @@ third-party mDNS dependency). The flow:
    `GET /server/info` over the pinned certificate before updating that
    profile's `baseUrl`/name. The certificate pin is unchanged.
 5. For an unknown server, show it under "Nearby" with a **Pair** action;
-   selecting it opens the normal PIN-pair + login flow.
+   selecting it opens the normal access-code + login flow.
 6. If discovery and manual entry disagree, the server ID is authoritative;
    the address is only a hint.
 
@@ -55,10 +55,10 @@ mDNS is unauthenticated and spoofable. It is only an address hint:
 
 - The client must fetch `/api/v1/server/info` and confirm the advertised
   `id` matches before reusing/updating a profile.
-- TLS certificate pinning and PIN pairing remain mandatory; discovery never
-  bypasses them.
+- TLS certificate pinning and access-code trust bootstrap remain mandatory;
+  discovery never bypasses them.
 - A rogue advertiser with a different ID appears as an unknown server and still
-  requires the host's PIN.
+  requires an access code.
 - Advertise only on LAN interfaces. Tailscale/overlay clients use the
   configured/mDNS-free address.
 

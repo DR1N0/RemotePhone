@@ -46,6 +46,7 @@ func newAdminMux(svc *auth.Service, instanceSvc *instance.Service, adminSvc *adm
 	adminapi.RegisterAdminManagementRoutes(mux, adminSvc, svc, transportSvc)
 	adminapi.RegisterAdminAuditRoutes(mux, adminSvc, svc)
 	adminapi.RegisterImageRoutes(mux, imageSvc, svc)
+	adminapi.RegisterOwnerRoutes(mux, svc)
 	return mux
 }
 
@@ -59,8 +60,7 @@ func newClientMux(svc *auth.Service, instanceSvc *instance.Service, sessionSvc *
 		w.WriteHeader(http.StatusOK)
 	})
 	clientapi.RegisterAuthRoutes(mux, svc)
-	clientapi.RegisterPairingRoutes(mux, pairingSvc)
-	clientapi.RegisterPairingAdminRoutes(mux, pairingSvc, svc)
+	clientapi.RegisterAccessCodeRoutes(mux, svc, pairingSvc, serverInfo)
 	serverinfo.RegisterRoutes(mux, serverInfo)
 	clientapi.RegisterInstanceRoutes(mux, instanceSvc, svc)
 	clientapi.RegisterTemplateRoutes(mux, instanceSvc, svc)
@@ -179,7 +179,10 @@ func run() error {
 		return err
 	}
 	log.Printf("server identity: %s (%s)", serverInfo.Name, serverInfo.ServerID)
-	log.Printf("pairing PIN: %s (certificate SHA-256: %s)", pairingSvc.PIN(), pairingSvc.CertSHA256())
+	if err := svc.SeedBootstrapAccessCode(ctx, pairingSvc.PIN(), 24*time.Hour); err != nil {
+		return fmt.Errorf("seed bootstrap access code: %w", err)
+	}
+	log.Printf("bootstrap access code: %s (certificate SHA-256: %s)", pairingSvc.PIN(), pairingSvc.CertSHA256())
 
 	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc)}
 	clientAddr := envOrDefault("MAKO_CLIENT_ADDR", "127.0.0.1:3000")

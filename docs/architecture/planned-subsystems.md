@@ -38,7 +38,7 @@ This matches the skeleton already in `internal/controlplane/controller/controlle
 
 ## Networking: three distinct traffic paths
 
-1. **Control-plane client API** — signaling only (login, session management, SDP offer/answer, ICE candidate exchange as JSON). The only port carrying auth material. Target: HTTPS, PIN-paired (see `security-model.md`).
+1. **Control-plane client API** — signaling only (login, session management, SDP offer/answer, ICE candidate exchange as JSON). The only port carrying auth material. HTTPS, trusted through a single-use access code and certificate pinning (see `security-model.md`).
 2. **Worker media/data ports** — a separate port from the worker's own internal control API. The worker's pion WebRTC stack should bind to the host's real LAN interface (not loopback) so a different-device client can reach it, and should call `SetEphemeralUDPPortRange(min, max)` so ports are bounded instead of fully arbitrary (matters once a host firewall or future NAT/TURN work needs predictable ranges). This is the mechanism that makes "control-plane restart doesn't drop active streams" true — the client connects directly to the worker's negotiated ICE candidates, never through the control plane.
 3. **Worker internal control API** (control-plane → worker instance/transport calls) — bind strictly to `127.0.0.1`. Nothing outside the host, including any client, ever needs to reach it.
 

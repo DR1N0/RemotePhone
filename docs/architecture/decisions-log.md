@@ -8,7 +8,26 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-26 — Unified access codes; owner console needs no token
+
+Pairing codes and enrollment codes were merged into one **access code** with a nullable `target_user_id`:
+
+- `target_user_id = NULL`: an admin-issued code. Redemption decides from the username: if the account exists, verify its password and add this device; if not, create a new ordinary account. It can never create an admin.
+- `target_user_id = <user>`: an ordinary user's self code, usable only for that account.
+- Ordinary users can only create self codes; admins create unbound codes; the owner console can target any account or leave it unbound. The generator does not choose a target in the client UI; the server derives it from the caller's role.
+- Codes are single-use, hashed at rest, TTL-bounded, and rate-limited by failed-password attempts. Client-side redemption still requires the username/password (or the new password when creating), so a leaked code alone cannot take over an existing account.
+
+The client now treats `3000` as the **client-available API** (ordinary and admin users, access-code creation/redeem) and `3001` as the **owner console**. `3001` is loopback-only; reaching it is the owner proof, so owner routes do not require a bearer token, but they reject browser Origins and non-JSON POSTs to prevent CSRF/DNS rebinding. Existing token-protected admin routes remain for the admin UI until they are migrated; owner recovery endpoints (`/api/v1/owner/access-codes`, `/api/v1/owner/users/reset-password`) work without a token.
+
+The client trusts a server by `serverId` + certificate pin, not by URL alone. `GET /server/info` is fetched with an unpinned temporary client, but trust is only granted if the certificate observed on that connection matches the pin stored for that server ID. Known servers skip the code entirely; forget-server keeps pins; clearing app data is the explicit trust reset. Certificates are pinned by both URL (fast path) and server ID (survives IP changes).
+
+The startup `MAKO_PAIRING_PIN`/generated PIN is now seeded as a one-use unbound access code and logged as `bootstrap access code`. The old `/api/v1/pairing/verify` and `/api/v1/admin/pairing-codes` routes were removed.
+
+---
+
 ### 2026-10-23 — Client design language and connection/account model
+
+This entry's pairing-code details were superseded by the 2026-10-26 access-code model; the visual/account structure remains.
 
 The client screens were visually inconsistent (teal seed theme, mixed app bars, cards, FABs, banners). They now share one theme: black/white surfaces, a single Sri Lankan cat's-eye gold accent, flat app bars, 14px cards, and no colored decorative blocks. Login, register, server picker, instance list, and settings use the same spacing, type scale, inputs, and buttons.
 
@@ -24,7 +43,7 @@ The separate "Pair server" button and the standalone Register screen are gone. T
 
 Cancelling the add flow no longer removes a Nearby entry: it is only removed after a profile for that server ID actually exists. "Forget server" and "Forget all servers" remove profiles/tokens but deliberately **keep certificate pins**, so forgetting an account (including the admin's own account) is not the same as distrusting the host; re-adding the same URL only needs credentials. A certificate change is still rejected by the retained pin. Clearing pins requires clearing app data (or a future explicit reset action).
 
-For users who cannot touch the host, an authenticated admin can mint a short-lived single-use pairing code:
+For users who cannot touch the host, an authenticated admin could mint a short-lived single-use pairing code (this mechanism was superseded by the unified access-code model on 2026-10-26).
 
 ```
 POST /api/v1/admin/pairing-codes
@@ -32,7 +51,7 @@ Authorization: Bearer <admin token>
 {"ttlSeconds": 600}
 ```
 
-The code is entered as the client's pairing code. The startup `MAKO_PAIRING_PIN` remains available for local bootstrap, but is no longer the only way to pair.
+The code is entered as the client's pairing code. The startup `MAKO_PAIRING_PIN` remained available for local bootstrap. (Superseded by the 2026-10-26 unified access-code model.)
 
 ---
 
@@ -42,11 +61,13 @@ The Android client used to hold exactly one server URL/token, so switching hosts
 
 The control plane now owns a stable identity: `MAKO_SERVER_ID_PATH` (default `<db>.server-id`) persists a UUID across restarts, `MAKO_SERVER_NAME` is the configurable display name (default hostname), and unauthenticated `GET /api/v1/server/info` returns `{serverId,name,version}`. The client records that identity when adding a server and refreshes the display name on selection.
 
-LAN discovery is implemented for both sides, following [`mdns-discovery.md`](mdns-discovery.md): the control plane advertises `_mako._tcp.local` with TXT `id`, `name`, `v`, and `path` on private LAN interfaces; the Android server picker browses it via `NsdManager`, deduplicates by server ID, shows unknown servers under "Nearby", and updates a known server's address/name only after verifying `/server/info` over the pinned certificate. mDNS remains only an address hint — certificate pinning/PIN pairing are still mandatory. Manual URL entry remains the fallback. `MAKO_DISABLE_MDNS=1` turns advertisement off.
+LAN discovery is implemented for both sides, following [`mdns-discovery.md`](mdns-discovery.md): the control plane advertises `_mako._tcp.local` with TXT `id`, `name`, `v`, and `path` on private LAN interfaces; the Android server picker browses it via `NsdManager`, deduplicates by server ID, shows unknown servers under "Nearby", and updates a known server's address/name only after verifying `/server/info` over the pinned certificate. mDNS remains only an address hint — certificate pinning/access-code trust bootstrap are still mandatory. Manual URL entry remains the fallback. `MAKO_DISABLE_MDNS=1` turns advertisement off.
 
 ---
 
 ### 2026-10-22 — PIN-gated certificate pinning for the Android client
+
+This entry is historical; the pairing endpoints described here were replaced by the unified access-code model on 2026-10-26. The certificate-pinning principle remains.
 
 The client API now has a working pairing flow. The control plane generates a six-digit startup PIN (or uses `MAKO_PAIRING_PIN`) and an authenticated admin can mint short-lived single-use pairing codes via `POST /api/v1/admin/pairing-codes`. Both are printed/returned with the server certificate SHA-256, and `POST /api/v1/pairing/verify` is constant-time and rate-limited to five failures/minute. The Android add-server page shows a pairing-code field only until the URL's certificate is pinned; it submits the code together with the first login, checks that the fingerprint returned by the server matches the certificate presented on that TLS connection, and stores the fingerprint in `flutter_secure_storage`. All later API clients pin that fingerprint and reject a different certificate.
 
@@ -179,7 +200,7 @@ The project's origin: using Artemis+Apollo (a Moonlight/Sunshine-family streamin
 
 An Android emulator is touch-first by construction, and running several independent emulator instances on one host is already an ordinary capability (Android Studio runs multiple AVDs in parallel routinely, each with its own isolated input/output). Wrapping each instance's full audio/video/touch I/O in WebRTC sidesteps the multi-seat problem at the root instead of patching around it at the desktop-streaming layer.
 
-**Consequence for how to evaluate this project:** mako is not a general remote-desktop or cloud-gaming competitor. A comparison against things like 网易UU远程 (NetEase-backed, general remote-control + cloud-GPU-rental platform with years of infrastructure investment) or `cloudplayplus_stone`-style Flutter/WebRTC desktop-streaming clients is the wrong lens — both of those are still desktop-streaming-paradigm tools, subject to the same two limits above. Nothing surveyed (Apollo/Sunshine/Moonlight/Artemis, 网易UU远程, `cloudplayplus_stone`, `jacobbo/remote-android`, Google's own `android-emulator-webrtc`/Cuttlefish WebRTC) combines mako's actual scope: self-hosted, Android-*emulator*-specific (not phone mirroring, not desktop streaming), native touch I/O, true per-instance isolation for concurrent multi-user access, versioned base images, and a native-client PIN-pairing trust model (`security-model.md`) instead of an account+relay-server model. This doesn't make mako's engineering easier or guarantee it's worth continuing on its own — it just means the right question is "does it solve the touch-semantics + multi-instance-concurrency problem well for its actual users," not "can it beat a funded cloud-gaming incumbent at streaming quality."
+**Consequence for how to evaluate this project:** mako is not a general remote-desktop or cloud-gaming competitor. A comparison against things like 网易UU远程 (NetEase-backed, general remote-control + cloud-GPU-rental platform with years of infrastructure investment) or `cloudplayplus_stone`-style Flutter/WebRTC desktop-streaming clients is the wrong lens — both of those are still desktop-streaming-paradigm tools, subject to the same two limits above. Nothing surveyed (Apollo/Sunshine/Moonlight/Artemis, 网易UU远程, `cloudplayplus_stone`, `jacobbo/remote-android`, Google's own `android-emulator-webrtc`/Cuttlefish WebRTC) combines mako's actual scope: self-hosted, Android-*emulator*-specific (not phone mirroring, not desktop streaming), native touch I/O, true per-instance isolation for concurrent multi-user access, versioned base images, and a native-client access-code/certificate-pinning trust model (`security-model.md`) instead of an account+relay-server model. This doesn't make mako's engineering easier or guarantee it's worth continuing on its own — it just means the right question is "does it solve the touch-semantics + multi-instance-concurrency problem well for its actual users," not "can it beat a funded cloud-gaming incumbent at streaming quality."
 
 ### 2026-10-14 — Session invites redeem by 6-digit PIN, not an opaque token
 

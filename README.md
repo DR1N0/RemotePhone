@@ -59,7 +59,7 @@ Set these before starting the control plane (the spawned worker inherits its env
 | `MAKO_AUDIO_DEBUG` | `1` | Log audio packet RMS/peak and `WriteSample` stalls (diagnostics only) |
 | `MAKO_HEADLESS` | `1` | One worker owns one instance; default `-no-window`. Set `0` only to debug with a visible emulator window. |
 | `MAKO_EMULATOR_AUDIO` | `none` | Emulator `-audio` backend. `none` keeps guest audio for `streamAudio` but plays nothing on the host; use `auto` for local debugging with host sound. |
-| `MAKO_PAIRING_PIN` | random 6 digits | PIN printed at control-plane startup and entered once in the Android client; set a stable value for automation. |
+| `MAKO_PAIRING_PIN` | random 6 digits | Local bootstrap access code printed at control-plane startup and seeded as a one-use code; set a stable value for automation. |
 | `MAKO_SERVER_NAME` | host name | Display name shown in the client's server picker. The stable server ID is independent of it. |
 | `MAKO_SERVER_ID_PATH` | `<db>.server-id` | Persisted UUID identifying this server across restarts/IP changes. |
 | `MAKO_DISABLE_MDNS` | unset | Set `1` to disable LAN mDNS advertisement (`_mako._tcp`). |
@@ -99,6 +99,17 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3001/api/v1/auth/setup `
   -Body (@{ username="admin"; password="change-me"; deviceLabel="pc"; bootstrapSecret=$secret } | ConvertTo-Json)
 ```
 
+After creating the first admin, pair the Android client with either the startup bootstrap access code or an owner-generated code:
+
+```powershell
+Set-Content -NoNewline $env:TEMP\code.json '{}'
+curl.exe -H "Content-Type: application/json" `
+  --data-binary "@$env:TEMP\code.json" `
+  http://127.0.0.1:3001/api/v1/owner/access-codes
+```
+
+Use the returned code with the admin username/password in the client.
+
 ### 4. Build and run the Android client
 
 ```powershell
@@ -109,20 +120,35 @@ flutter build apk --debug --dart-define=MAKO_DEFAULT_SERVER=https://192.168.1.7:
 adb install -r build\app\outputs\flutter-apk\app-debug.apk
 ```
 
-The login screen takes a server URL. Use `https://10.0.2.2:3000` from an emulator client (the emulator's alias for the host) or `https://<host-lan-ip>:3000` from a real phone. The client currently trusts any TLS certificate (no PIN pairing yet), so only do this on a trusted network.
+The app opens on **Servers**, even with no saved account. Servers discovered by mDNS appear under **Nearby**; **+** opens manual entry. The add-server flow is URL → access code (only when the certificate is not already trusted) → username/password. Access codes are unified:
 
-Log in, tap **+**, pick a template from the server's discovered AVDs, and create as many instances as you want. Each running instance has its own **Connect** button.
+- A **self code** is created by any logged-in user for their own account. Use it on a new phone to add that device.
+- An **admin code** is created by an `admin` user. It is not bound to an account: the server decides at redemption whether to create a new ordinary user or add a device to an existing account, based on whether the username already exists. It never creates an admin.
+- A known server is matched by stable server ID and certificate pin; the client then skips the code entirely. Pins survive "Forget server", so forgetting an account (including the admin's own) does not require a new code. Clearing app data removes the pins.
 
-Tap **+** (or **Pair** next to a server discovered under Nearby), enter the server URL and, on the first visit only, a pairing code. The local bootstrap PIN is printed by `mako-controlplane` at startup (`pairing PIN: …`) or set with `MAKO_PAIRING_PIN`. For a remote user who cannot touch the host, an admin can mint a short-lived code with:
+Create an admin code on the client API:
 
 ```powershell
-Set-Content -NoNewline $env:TEMP\pair.json '{"ttlSeconds":600}'
+Set-Content -NoNewline $env:TEMP\code.json '{}'
 curl.exe -k -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" `
-  --data-binary "@$env:TEMP\pair.json" `
-  https://192.168.1.7:3000/api/v1/admin/pairing-codes
+  --data-binary "@$env:TEMP\code.json" `
+  https://192.168.1.7:3000/api/v1/access-codes
 ```
 
-Send the returned `code` to the user. Accounts are created by the admin; the client only signs in (the server still exposes registration-invite endpoints for future use). After pairing, that URL's certificate is pinned and the pairing-code field disappears.
+An ordinary user's self code uses the same endpoint. The server returns `scope: "self"` or `scope: "new-or-existing"` and an expiry. Redeem with `POST /api/v1/access-codes/redeem` (`code`, `username`, `password`); the response includes `created`, the token, and `certSha256` for pinning.
+
+The loopback owner console on `127.0.0.1:3001` has no bearer-token requirement because reaching it already requires host access; it is protected against browser CSRF/DNS rebinding. It can create a code for any target (or unbound) and reset a password:
+
+```powershell
+Set-Content -NoNewline $env:TEMP\code.json '{}'
+curl.exe -H "Content-Type: application/json" `
+  --data-binary "@$env:TEMP\code.json" `
+  http://127.0.0.1:3001/api/v1/owner/access-codes
+```
+
+If the only admin loses both the certificate pin and the password, recovery happens on the server: reset the password at `POST /api/v1/owner/users/reset-password` and mint an owner access code. This is the unavoidable out-of-band trust recovery path.
+
+After redemption, the URL and server ID both retain the certificate pin; later logins verify the pin and hide the code field.
 
 ### Firewall
 
@@ -157,7 +183,7 @@ flutter analyze
 - **Audio is 8 kHz mono μ-law (PCMU), not Opus.** It is carried over WebRTC and playable on the Android client, but it is telephone-quality; Opus is the next quality step.
 - **Multi-touch is implemented through the emulator's gRPC `sendTouch`** (pointer IDs are carried from the client), with an adb single-touch fallback if gRPC input fails. Keyboard events still use adb.
 - **Full-screen phone UI; the guest owns navigation.** The client hides the phone's system bars, the worker switches the emulated device to three-button navigation, and the guest's Back/Home/Recents buttons are tapped inside the video. The phone's Back gesture exits the stream and disconnects.
-- **Trusted LAN only.** The client API uses a self-signed certificate and the client accepts any certificate; PIN pairing/SPKI pinning is still deferred. Do not expose it to the public internet without a VPN or reverse proxy.
+- **Trusted LAN only.** The server uses a self-signed certificate; first contact is bootstrapped with an access code and the client pins the certificate afterwards. Do not expose it to the public internet without a VPN or reverse proxy.
 - **ICE advertises every routable IPv4 interface** (LAN, Tailscale, other VPNs), excluding only link-local, multicast and IPv6; loopback is kept for local probes. ICE chooses. `MAKO_WEBRTC_HOST_IP` is only a debug override. There is no Tailscale-specific configuration.
 - **An Android emulator is a poor test client on the same Windows host.** Its NAT hairpin to the host's own LAN IP loses packets under video load; a real phone on the LAN is the trustworthy end-to-end test. The host-side WebRTC probe is unaffected.
 - **No capacity enforcement.** Each instance costs a full emulator (RAM/CPU/disk); start only what the host can carry.

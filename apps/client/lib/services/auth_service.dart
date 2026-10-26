@@ -7,6 +7,22 @@ import 'api_client.dart';
 
 enum AuthStatus { unknown, unauthenticated, serverSelection, authenticated }
 
+class TrustedServer {
+  final String baseUrl;
+  final String? certSha256;
+  final String? serverId;
+  final String? name;
+  final bool trusted;
+
+  const TrustedServer({
+    required this.baseUrl,
+    required this.trusted,
+    this.certSha256,
+    this.serverId,
+    this.name,
+  });
+}
+
 /// Holds the paired servers remembered by this client, plus the currently
 /// selected server's API client. A client can pair with several control
 /// planes; each profile keeps its own certificate pin and bearer token.
@@ -14,6 +30,7 @@ class AuthService extends ChangeNotifier {
   static const _storage = FlutterSecureStorage();
   static const _keyServers = 'mako_servers';
   static const _keyPinPrefix = 'mako_pin_';
+  static const _keyServerPinPrefix = 'mako_server_pin_';
 
   List<ServerProfile> servers = [];
   ServerProfile? activeProfile;
@@ -31,28 +48,74 @@ class AuthService extends ChangeNotifier {
   }
 
   String _pinKey(String baseUrl) => '$_keyPinPrefix$baseUrl';
+  String _serverPinKey(String serverId) => '$_keyServerPinPrefix$serverId';
 
   Future<String?> pinnedFingerprint(String baseUrl) =>
       _storage.read(key: _pinKey(baseUrl));
 
+  Future<String?> serverPinnedFingerprint(String serverId) =>
+      _storage.read(key: _serverPinKey(serverId));
+
   Future<void> savePinnedFingerprint(String baseUrl, String fingerprint) =>
       _storage.write(key: _pinKey(baseUrl), value: fingerprint);
+
+  Future<void> saveServerPinnedFingerprint(
+    String serverId,
+    String fingerprint,
+  ) async {
+    if (serverId.isEmpty) return;
+    await _storage.write(key: _serverPinKey(serverId), value: fingerprint);
+  }
 
   Future<void> clearPinnedFingerprint(String baseUrl) =>
       _storage.delete(key: _pinKey(baseUrl));
 
-  /// PIN-pairs [baseUrl] and persists the certificate fingerprint. The
-  /// temporary client trusts the self-signed certificate only for this call;
-  /// the returned fingerprint is what all later clients pin.
-  Future<String> pair({
-    required String baseUrl,
-    required String pin,
-  }) async {
+  /// Resolves whether [baseUrl] is already trusted. An exact URL pin is the
+  /// fast path. Otherwise the server is identified by its unauthenticated
+  /// server ID, but trust only succeeds if the certificate observed on THIS
+  /// connection matches a pin stored for that server ID. An attacker can
+  /// spoof the server ID, but cannot present the pinned certificate.
+  Future<TrustedServer> detectTrust(String baseUrl) async {
+    final exact = await pinnedFingerprint(baseUrl);
+    if (exact != null) {
+      return TrustedServer(baseUrl: baseUrl, trusted: true, certSha256: exact);
+    }
     final temp = ApiClient(baseUrl: baseUrl, allowAnyCertificate: true);
     try {
-      final fingerprint = await temp.verifyPairing(pin);
-      await savePinnedFingerprint(baseUrl, fingerprint);
-      return fingerprint;
+      final info = await temp.serverInfo();
+      final observed = temp.observedCertSha256;
+      if (observed != null) {
+        final stored = await serverPinnedFingerprint(info.serverId);
+        final known = servers
+            .where((s) => s.serverId == info.serverId)
+            .toList();
+        final match = stored ?? (known.isEmpty ? null : known.first.certSha256);
+        if (match != null && match == observed) {
+          await savePinnedFingerprint(baseUrl, observed);
+          await saveServerPinnedFingerprint(info.serverId, observed);
+          if (known.isNotEmpty) {
+            await updateDiscoveredServer(info.serverId, baseUrl, info.name);
+          }
+          return TrustedServer(
+            baseUrl: baseUrl,
+            trusted: true,
+            certSha256: observed,
+            serverId: info.serverId,
+            name: info.name,
+          );
+        }
+      }
+      return TrustedServer(
+        baseUrl: baseUrl,
+        trusted: false,
+        certSha256: observed,
+        serverId: info.serverId,
+        name: info.name,
+      );
+    } on ApiException {
+      return TrustedServer(baseUrl: baseUrl, trusted: false);
+    } catch (_) {
+      return TrustedServer(baseUrl: baseUrl, trusted: false);
     } finally {
       temp.close();
     }
@@ -91,6 +154,7 @@ class AuthService extends ChangeNotifier {
         deviceLabel: _deviceLabel(),
       );
       final info = await _readServerInfo(temp, baseUrl);
+      await saveServerPinnedFingerprint(info.serverId, pin);
       final profile = ServerProfile(
         serverId: info.serverId,
         name: info.name,
@@ -108,37 +172,59 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  Future<void> register({
+  /// Redeems an access code. The server decides whether this creates a new
+  /// ordinary account or pairs this device to an existing account.
+  Future<bool> redeemAccessCode({
     required String baseUrl,
-    required String inviteToken,
+    required String code,
     required String username,
     required String password,
   }) async {
-    final pin = await pinnedFingerprint(baseUrl);
-    if (pin == null) {
-      throw StateError('pair this server before registering');
-    }
-    final temp = ApiClient(baseUrl: baseUrl, pinnedCertSha256: pin);
+    final temp = ApiClient(baseUrl: baseUrl, allowAnyCertificate: true);
     try {
-      final (token, user) = await temp.register(
-        inviteToken: inviteToken,
+      final result = await temp.redeemAccessCode(
+        code: code,
         username: username,
         password: password,
         deviceLabel: _deviceLabel(),
       );
-      final info = await _readServerInfo(temp, baseUrl);
+      await savePinnedFingerprint(baseUrl, result.certSha256);
+      var serverId = result.serverId;
+      var serverName = result.serverName;
+      if (serverId.isEmpty) {
+        final info = await _readServerInfo(temp, baseUrl);
+        serverId = info.serverId;
+        serverName = info.name;
+      }
+      await saveServerPinnedFingerprint(serverId, result.certSha256);
       final profile = ServerProfile(
-        serverId: info.serverId,
-        name: info.name,
+        serverId: serverId,
+        name: serverName.isEmpty ? Uri.parse(baseUrl).host : serverName,
         baseUrl: baseUrl,
-        certSha256: pin,
-        token: token,
-        userId: user.id,
+        certSha256: result.certSha256,
+        token: result.token,
+        userId: result.user.id,
         username: username,
         kind: ServerProfile.kindForUrl(baseUrl),
       );
       await _upsert(profile);
-      await _activate(profile, user);
+      await _activate(profile, result.user);
+      return result.created;
+    } finally {
+      temp.close();
+    }
+  }
+
+  Future<AccessCode> createAccessCode() => client.createAccessCode();
+
+  Future<AccessCode> createAccessCodeFor(ServerProfile profile) async {
+    final temp = ApiClient(
+      baseUrl: profile.baseUrl,
+      token: profile.token,
+      pinnedCertSha256: profile.certSha256,
+    );
+    try {
+      return await temp.createAccessCode();
     } finally {
       temp.close();
     }
@@ -269,7 +355,6 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  /// Forgets every server and certificate pin. Used by Settings.
   /// Forgets every server and session, but deliberately keeps certificate
   /// pins: forgetting an account is not the same as distrusting the host.
   /// Re-adding the same URL therefore only needs credentials, not a new

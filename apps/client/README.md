@@ -8,7 +8,7 @@ Android is the only supported platform (iOS distribution was deliberately ruled 
 
 ```powershell
 flutter pub get
-# Optional: bake in the server URL (otherwise the login screen defaults to 10.0.2.2:3000)
+# Optional: bake in the server URL (otherwise the add-server screen defaults to 10.0.2.2:3000)
 flutter build apk --debug --dart-define=MAKO_DEFAULT_SERVER=https://192.168.1.7:3000
 adb install -r build\app\outputs\flutter-apk\app-debug.apk
 ```
@@ -24,13 +24,15 @@ flutter run
 - Android emulator client: `https://10.0.2.2:3000` (the emulator's alias for the host)
 - Real phone: `https://<host-lan-ip>:3000`, with `MAKO_CLIENT_ADDR=0.0.0.0:3000` on the control plane and the Windows firewall allowing TCP 3000
 
-The app currently trusts any TLS certificate because the server uses a self-signed certificate and PIN pairing/SPKI pinning is not implemented yet. Use it only on a trusted LAN.
+The app pins the server certificate after a successful access-code redemption or login. A known server is matched by stable server ID and certificate pin; the code field is skipped. Use it only on a trusted network for the first contact.
 
 ## What works
 
-- Login with admin-created accounts, and PIN/code pairing with server-certificate pinning
+- Unified access-code login (self code or admin code), with account creation and certificate pinning in one step
 - Multiple paired servers remembered on the phone, grouped by server with one row per account; a server can have several accounts
-- One "Add server" flow: URL → pairing code only on the first visit → sign in. Pairing happens inline; there is no separate Pair button or client-side registration.
+- One "Add server" flow: URL → access code only when the certificate is not already trusted → username/password. Known servers skip the code; there is no separate Pair button or client-side registration.
+- A server menu action creates a self code for the current account, or an admin code that can create a new user or pair an existing account
+- mDNS Nearby discovery, plus manual URL entry
 - Template picker backed by the server's discovered AVDs
 - Multiple instances per user: create, start, stop, delete, connect
 - WebRTC video (hardware H.264 when available) and audio (PCMU), with Android routing it as media (speaker + media volume, not the call earpiece)
@@ -41,4 +43,3 @@ The app currently trusts any TLS certificate because the server uses a self-sign
 
 - Opus audio (currently 8 kHz mono PCMU)
 - PIN-based session invites in the UI (server endpoints exist)
-- Certificate pairing/pinning

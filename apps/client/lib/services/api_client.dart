@@ -39,6 +39,36 @@ class ServerInfo {
   }
 }
 
+class AccessCodeResult {
+  final bool created;
+  final String token;
+  final User user;
+  final String certSha256;
+  final String serverId;
+  final String serverName;
+
+  const AccessCodeResult({
+    required this.created,
+    required this.token,
+    required this.user,
+    required this.certSha256,
+    required this.serverId,
+    required this.serverName,
+  });
+}
+
+class AccessCode {
+  final String code;
+  final DateTime expiresAt;
+  final String scope;
+
+  const AccessCode({
+    required this.code,
+    required this.expiresAt,
+    required this.scope,
+  });
+}
+
 /// Talks to mako-controlplane's client HTTP surface. One client per
 /// configured server; construct a fresh one whenever the server URL or
 /// bearer token changes (see AuthService).
@@ -74,27 +104,6 @@ class ApiClient {
       return pinnedCertSha256 != null && fingerprint == pinnedCertSha256;
     };
     return client;
-  }
-
-  /// Pairs against this server using the PIN shown by the control plane and
-  /// returns the certificate fingerprint to persist. The temporary client
-  /// accepts the self-signed certificate only long enough to verify that the
-  /// fingerprint reported by the server matches the certificate actually
-  /// presented on this connection.
-  Future<String> verifyPairing(String pin) async {
-    if (!allowAnyCertificate) {
-      throw StateError('verifyPairing requires allowAnyCertificate');
-    }
-    final json = await _post('/api/v1/pairing/verify', {'pin': pin});
-    final reported = json['certSha256']?.toString();
-    final observed = _observedCertSha256;
-    if (reported == null || observed == null || reported != observed) {
-      throw const ApiException(
-        0,
-        'server certificate fingerprint mismatch during pairing',
-      );
-    }
-    return observed;
   }
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
@@ -140,6 +149,52 @@ class ApiClient {
 
   // --- Auth ---
 
+  /// Redeems a unified access code. A code can create a new ordinary account
+  /// or add this device to an existing account; the server decides which.
+  Future<AccessCodeResult> redeemAccessCode({
+    required String code,
+    required String username,
+    required String password,
+    required String deviceLabel,
+  }) async {
+    if (!allowAnyCertificate) {
+      throw StateError('redeemAccessCode requires allowAnyCertificate');
+    }
+    final json = await _post('/api/v1/access-codes/redeem', {
+      'code': code,
+      'username': username,
+      'password': password,
+      'deviceLabel': deviceLabel,
+    });
+    final reported = json['certSha256']?.toString();
+    final observed = _observedCertSha256;
+    if (reported == null || observed == null || reported != observed) {
+      throw const ApiException(
+        0,
+        'server certificate fingerprint mismatch during access-code redemption',
+      );
+    }
+    return AccessCodeResult(
+      created: json['created'] == true,
+      token: json['token'] as String,
+      user: User.fromJson(json['user'] as Map<String, dynamic>),
+      certSha256: observed,
+      serverId: json['serverId']?.toString() ?? '',
+      serverName: json['serverName']?.toString() ?? '',
+    );
+  }
+
+  /// Creates a self code for an ordinary user, or an unbound invitation code
+  /// for an admin. The server decides from the caller's role.
+  Future<AccessCode> createAccessCode() async {
+    final json = await _post('/api/v1/access-codes', {});
+    return AccessCode(
+      code: json['code'] as String,
+      expiresAt: DateTime.parse(json['expiresAt'] as String),
+      scope: json['scope']?.toString() ?? 'self',
+    );
+  }
+
   Future<ServerInfo> serverInfo() async {
     final json = await _get('/api/v1/server/info');
     return ServerInfo.fromJson(json);
@@ -151,24 +206,6 @@ class ApiClient {
     required String deviceLabel,
   }) async {
     final json = await _post('/api/v1/auth/login', {
-      'username': username,
-      'password': password,
-      'deviceLabel': deviceLabel,
-    });
-    return (
-      json['token'] as String,
-      User.fromJson(json['user'] as Map<String, dynamic>),
-    );
-  }
-
-  Future<(String, User)> register({
-    required String inviteToken,
-    required String username,
-    required String password,
-    required String deviceLabel,
-  }) async {
-    final json = await _post('/api/v1/auth/register', {
-      'inviteToken': inviteToken,
       'username': username,
       'password': password,
       'deviceLabel': deviceLabel,

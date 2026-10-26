@@ -152,6 +152,19 @@ func (s *Service) GetUser(ctx context.Context, userID string) (UserDTO, error) {
 	return s.GetUserTx(ctx, s.q, userID)
 }
 
+// GetUserByUsername resolves a username for the loopback owner console and
+// admin code creation.
+func (s *Service) GetUserByUsername(ctx context.Context, username string) (UserDTO, error) {
+	user, err := s.q.GetUserByUsername(ctx, strings.ToLower(strings.TrimSpace(username)))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return UserDTO{}, ErrUserNotFound
+		}
+		return UserDTO{}, fmt.Errorf("get user by username: %w", err)
+	}
+	return ToUserDTO(user), nil
+}
+
 // GetUserTx is GetUser against an explicit q — for callers (session.Service's
 // invite redemption) that must read a user row created earlier in the SAME
 // still-open transaction (e.g. a just-created guest user), for the same

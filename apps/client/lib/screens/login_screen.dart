@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
+import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 
 const _defaultBaseUrl = String.fromEnvironment(
@@ -12,11 +13,15 @@ const _defaultBaseUrl = String.fromEnvironment(
   defaultValue: 'https://10.0.2.2:3000',
 );
 
-/// One flow for "add a server/account":
+enum _TrustState { checking, trusted, needsCode }
+
+/// One client-available flow:
 ///
-/// URL -> (PIN only on the first visit) -> sign in or create an account.
-/// Pairing is not a separate button or page; it happens inline before the
-/// first login and is skipped afterward because the certificate is pinned.
+/// URL -> (access code only when the certificate is not already trusted) ->
+/// username/password. A code may create a new ordinary account or pair this
+/// device to an existing account; the server decides. When the server is
+/// already known by server ID and the pinned certificate matches, the code is
+/// optional and can be revealed only when the user has one.
 class LoginScreen extends StatefulWidget {
   final String? initialBaseUrl;
   final String? title;
@@ -30,72 +35,98 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _baseUrlController;
-  final _pinController = TextEditingController();
+  final _codeController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
 
   bool _submitting = false;
-  bool? _paired;
-  Timer? _pairCheck;
+  bool _showCodeWhenTrusted = false;
+  _TrustState _trust = _TrustState.checking;
+  TrustedServer? _detected;
+  Timer? _trustCheck;
 
   @override
   void initState() {
     super.initState();
     _baseUrlController =
         TextEditingController(text: widget.initialBaseUrl ?? _defaultBaseUrl);
-    _refreshPairingState();
+    _refreshTrust();
   }
 
   @override
   void dispose() {
-    _pairCheck?.cancel();
+    _trustCheck?.cancel();
     _baseUrlController.dispose();
-    _pinController.dispose();
+    _codeController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
   void _onUrlChanged(String _) {
-    _pairCheck?.cancel();
-    setState(() => _paired = null);
-    _pairCheck = Timer(const Duration(milliseconds: 350), _refreshPairingState);
+    _trustCheck?.cancel();
+    setState(() {
+      _trust = _TrustState.checking;
+      _detected = null;
+      _showCodeWhenTrusted = false;
+    });
+    _trustCheck = Timer(const Duration(milliseconds: 350), _refreshTrust);
   }
 
-  Future<void> _refreshPairingState() async {
+  Future<void> _refreshTrust() async {
     final url = _baseUrlController.text.trim();
     if (url.isEmpty) {
-      if (mounted) setState(() => _paired = false);
+      if (mounted) setState(() => _trust = _TrustState.needsCode);
       return;
     }
-    final pin = await context.read<AuthService>().pinnedFingerprint(url);
-    if (!mounted || _baseUrlController.text.trim() != url) return;
-    setState(() => _paired = pin != null);
+    if (mounted) setState(() => _trust = _TrustState.checking);
+    try {
+      final detected = await context.read<AuthService>().detectTrust(url);
+      if (!mounted || _baseUrlController.text.trim() != url) return;
+      setState(() {
+        _detected = detected;
+        _trust =
+            detected.trusted ? _TrustState.trusted : _TrustState.needsCode;
+      });
+    } catch (_) {
+      if (!mounted || _baseUrlController.text.trim() != url) return;
+      setState(() => _trust = _TrustState.needsCode);
+    }
   }
+
+  bool get _codeRequired => _trust == _TrustState.needsCode;
+  bool get _showCode => _codeRequired || _showCodeWhenTrusted;
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final url = _baseUrlController.text.trim();
     final auth = context.read<AuthService>();
+    final code = _codeController.text.trim();
 
     setState(() => _submitting = true);
     try {
-      var paired = await auth.pinnedFingerprint(url) != null;
-      if (!paired) {
-        final pin = _pinController.text.trim();
-        if (pin.isEmpty) {
-          throw const ApiException(0, 'Enter the PIN shown on the server');
+      if (code.isEmpty) {
+        if (_trust != _TrustState.trusted) {
+          throw const ApiException(
+            0,
+            'This server is not trusted yet. Enter an access code from its admin.',
+          );
         }
-        await auth.pair(baseUrl: url, pin: pin);
-        paired = true;
-        if (mounted) setState(() => _paired = true);
+        await auth.login(
+          baseUrl: url,
+          username: _usernameController.text.trim(),
+          password: _passwordController.text,
+        );
+      } else {
+        // One code path for both "create account" and "pair existing account".
+        await auth.redeemAccessCode(
+          baseUrl: url,
+          code: code,
+          username: _usernameController.text.trim(),
+          password: _passwordController.text,
+        );
       }
-
-      await auth.login(
-        baseUrl: url,
-        username: _usernameController.text.trim(),
-        password: _passwordController.text,
-      );      if (mounted) {
+      if (mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } on ApiException catch (e) {
@@ -118,7 +149,6 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final canPop = Navigator.of(context).canPop();
-    final needsPin = _paired != true;
     return Scaffold(
       appBar: canPop
           ? AppBar(title: Text(widget.title ?? 'Add server'))
@@ -162,41 +192,39 @@ class _LoginScreenState extends State<LoginScreen> {
                         : null,
                   ),
                   const SizedBox(height: 12),
-                  if (needsPin)
+                  _TrustRow(state: _trust, detected: _detected),
+                  if (_showCode) ...[
+                    const SizedBox(height: 12),
                     TextFormField(
-                      controller: _pinController,
-                      keyboardType: TextInputType.number,
-                      maxLength: 12,
-                      decoration: const InputDecoration(
-                        labelText: 'Pairing code',
-                        helperText: 'Ask the server admin for a one-time code.',
-                        prefixIcon: Icon(Icons.lock_outline),
+                      controller: _codeController,
+                      keyboardType: TextInputType.text,
+                      autocorrect: false,
+                      textCapitalization: TextCapitalization.characters,
+                      maxLength: 24,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        labelText: 'Access code',
+                        helperText: _codeRequired
+                            ? 'Ask the server admin for a one-time access code.'
+                            : 'Optional: use a code to create another account.',
+                        prefixIcon: const Icon(Icons.key_outlined),
                         counterText: '',
                       ),
                       validator: (v) {
-                        if (!needsPin) return null;
-                        if (v == null || v.trim().isEmpty) {
-                          return 'Pairing code is required';
+                        if (_codeRequired && (v == null || v.trim().isEmpty)) {
+                          return 'Access code is required for a new server';
                         }
                         return null;
                       },
-                    )
-                  else
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        children: [
-                          Icon(Icons.verified_outlined,
-                              size: 18, color: Color(0xFFD9B45B)),
-                          SizedBox(width: 8),
-                          Text(
-                            'Certificate pinned',
-                            style: TextStyle(
-                              color: Color(0xFFD9B45B),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
+                    ),
+                  ] else
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: _submitting
+                            ? null
+                            : () => setState(() => _showCodeWhenTrusted = true),
+                        child: const Text('Have an access code?'),
                       ),
                     ),
                   const SizedBox(height: 14),
@@ -227,13 +255,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 22),
                   FilledButton(
-                    onPressed: _submitting ? null : _submit,
+                    onPressed: _submitting || _trust == _TrustState.checking
+                        ? null
+                        : _submit,
                     child: _submitting
                         ? const SizedBox(
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('Log in'),
+                        : Text(_codeController.text.trim().isEmpty
+                            ? 'Log in'
+                            : 'Continue'),
                   ),
                 ],
               ),
@@ -244,3 +276,57 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
+
+class _TrustRow extends StatelessWidget {
+  final _TrustState state;
+  final TrustedServer? detected;
+
+  const _TrustRow({required this.state, this.detected});
+
+  @override
+  Widget build(BuildContext context) {
+    if (state == _TrustState.checking) {
+      return const Row(
+        children: [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          SizedBox(width: 8),
+          Text('Checking certificate...', style: TextStyle(fontSize: 12)),
+        ],
+      );
+    }
+    if (state == _TrustState.trusted) {
+      final name = detected?.name;
+      return Row(
+        children: [
+          const Icon(Icons.verified_outlined, size: 18, color: AppColors.accent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              name == null || name.isEmpty
+                  ? 'Certificate pinned'
+                  : 'Known server: $name',
+              style: const TextStyle(color: AppColors.accent, fontSize: 12),
+            ),
+          ),
+        ],
+      );
+    }
+    return const Row(
+      children: [
+        Icon(Icons.key_outlined, size: 18, color: AppColors.textMuted),
+        SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            'This server is not trusted yet; an access code is required.',
+            style: TextStyle(fontSize: 12),
+          ),
+        ),
+      ],
+    );
+  }
+}
+

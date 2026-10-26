@@ -33,6 +33,8 @@ Admin-only routes:
 | GET | `/api/v1/admin/audit` | cursor-paginated (`limit`, `cursor`), newest first, requires active admin |
 | GET | `/api/v1/admin/images` | `?templateId=` required; lists every captured base image for that template, newest first — how an admin discovers candidate ids to promote |
 | POST | `/api/v1/admin/images/{candidateId}/promote` | moves that candidate's template to point at it — the only base-image operation that changes what any instance resolves to; rollback is the same call with an older candidate's id |
+| POST | `/api/v1/owner/access-codes` | **owner console, no bearer token**; body `{username?,ttlSeconds?}`; unbound when username omitted. Rejects external `Origin` and non-JSON POSTs |
+| POST | `/api/v1/owner/users/reset-password` | **owner console, no bearer token**; `{username,password}`; revokes the user's account credentials |
 | GET | `/healthz` | |
 
 ## Client API — `127.0.0.1:3000` (HTTPS, self-signed — see `security-model.md`)
@@ -49,8 +51,10 @@ Client-only routes:
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/v1/auth/register` | self-registration via a registration-invite token |
+| POST | `/api/v1/auth/register` | legacy self-registration via a registration-invite token; the Android client uses access codes instead |
 | POST | `/api/v1/auth/credentials/{id}/revoke` | requires account-scoped credential, owner-checked |
+| POST | `/api/v1/access-codes` | requires account-scoped credential. Ordinary user -> self-bound code; admin -> unbound code that can create a normal user or pair an existing account. Returns `code`, `expiresAt`, `scope` |
+| POST | `/api/v1/access-codes/redeem` | **unauthenticated**. `{code,username,password,deviceLabel}`; creates a new ordinary account when the username is missing for an unbound code, otherwise verifies the password and pairs the device. Returns `{created,user,token,certSha256,serverId,serverName}` |
 | POST | `/api/v1/auth/pairing-invites` | **tombstone** — returns `410 Gone` |
 | POST | `/api/v1/auth/pairing-invites/redeem` | **tombstone** — returns `410 Gone` |
 | POST | `/api/v1/instances` | requires account-scoped credential; owner becomes the caller; may be called repeatedly (multi-instance per owner) |
@@ -78,4 +82,4 @@ Client-only routes:
 
 ## Not yet implemented (any surface)
 
-Pairing (PIN-confirmed client trust / SPKI pinning). `pairing/` exists as an empty stub package, deliberately deferred — see `security-model.md`. Audio capture and multi-touch input are also not implemented yet (video + single-pointer touch only).
+No remaining pairing surface: unified access codes and certificate pinning are implemented (see `security-model.md`). Audio and multi-touch are implemented in the Go worker and Android client; the legacy registration-invite endpoints remain for compatibility but the Android client uses access codes.

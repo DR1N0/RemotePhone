@@ -8,7 +8,8 @@ SQLite, migrations applied in order from `apps/server/internal/controlplane/pers
 |---|---|---|
 | `users` | Accounts (renamed from `principals` in `0008`). | `user_type` (`registered`/`admin`/`guest` — `guest` rows are created by session-invite redemption, see `decisions-log.md` 2026-10-14), `username` (unique, case-insensitive), `password_hash`, `status` (`active`/`banned`). `is_server_owner` and `enrollment_required` were dropped in `0010` — see below. |
 | `credentials` | Bearer-token-backed credentials, scoped to an account or a specific attachment. | `user_id`, `token_hash`, `scope` (`account`/`attachment`), `session_id`, `attachment_id`, `not_before`, `expires_at`, `revoked_at`. |
-| `registration_invites` | Single-use tokens an admin issues so a new user can self-register. Renamed from `pairing_invites` in `0010`. | `token_hash`, `created_by`, `expires_at`, `consumed_at`, `consumed_by_user_id`. |
+| `registration_invites` | Legacy single-use tokens an admin issues so a new user can self-register; the Android client now uses `access_codes`. Renamed from `pairing_invites` in `0010`. | `token_hash`, `created_by`, `expires_at`, `consumed_at`, `consumed_by_user_id`. |
+| `access_codes` | Unified device-pairing / account-creation codes (`0015`). | `code_hash` (unique), nullable `target_user_id` (NULL = admin/unbound code that may create an ordinary user or pair an existing account; set = self code bound to that user), nullable `created_by_user_id`, `expires_at`, `used_at`, `failed_attempts` (invalidates after five wrong passwords). |
 | `instances` | A managed runtime instance (an Android emulator session's durable record). | `runtime_class`, `template_id`, `placement_policy_json`, `resource_profile_json`, `launch_config_json`, `desired_state`/`observed_state`, `runtime_handle_json`, `state_data_ref`, `owner_id` (non-unique index as of `0014`; a user may own many instances). No `worker_id` column — the worker currently serving an instance is runtime status, tracked in `runtime_handle_json`/`observed_state`, not a separate column (see `decisions-log.md`, 2026-10-14). As of Phase 4 (worker lifecycle), `runtime_handle_json` (`runtime.InstanceHandle`) carries two more fields alongside the pre-existing emulator-process ones (`pid`/`consolePort`/`adbPort`/`grpcPort`): `workerPid` and `workerBaseUrl`, identifying the control-plane-spawned `mako-worker` OS process currently serving this instance — independent of the emulator fields, which survive a worker respawn unchanged. Still zero new schema: both live in the same JSON blob column. |
 | `sessions` | A live session against an instance. | `instance_id`, `status`, `owner_absence_deadline` (renamed from `idle_expires_at` in `0006`), `owner_absence_timeout_ms`, `reconnect_token`. |
 | `attachments` | One client's attachment to a session (a browser tab or future native client connection). | `session_id`, `client_id`, `role`, `status`, `user_id` (renamed from `principal_id`), `pending_target_role` (sole pending-role column as of `0012`, see below), `transport_teardown_pending`, `reconnect_token`. |
@@ -89,4 +90,21 @@ CREATE INDEX IF NOT EXISTS instances_owner_id ON instances(owner_id);
 The product model is now explicit multi-instance per user: one account may create any number of instances from any discovered template and start/connect them independently. The `0011` unique index was a leftover from the original one-seat-per-account MVP; it made a second `CreateManagedInstance` fail with `ErrOwnerConflict`. Migration `0014` drops that index and keeps a non-unique `(owner_id)` index for the owner-scoped listing query. `ErrOwnerConflict` and the 409 mapping were removed with it.
 
 Two related changes shipped alongside: `GET /api/v1/templates` lets a client discover the host's real AVDs (instead of typing a template id), and `androidstudio.DiscoverTemplates` now skips `mako_instance_*` clones so one instance's per-instance AVD never appears as a selectable template.
+
+## What `0015` did
+
+```sql
+CREATE TABLE access_codes (
+  id TEXT PRIMARY KEY NOT NULL,
+  code_hash TEXT NOT NULL UNIQUE,
+  target_user_id TEXT REFERENCES users(id),
+  created_by_user_id TEXT REFERENCES users(id),
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+A single code table replaces the two conceptual `pairing code` / `enrollment code` types. `target_user_id` NULL means an admin/owner-issued unbound code that may create a new ordinary user or pair an existing account; a set target means a self code bound to that account. Only hashes are stored; `failed_attempts` invalidates a code after five wrong-password attempts so a leaked unbound code cannot be used as an online password oracle.
 
