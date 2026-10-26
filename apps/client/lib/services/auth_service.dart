@@ -254,6 +254,10 @@ class AuthService extends ChangeNotifier {
     } on ApiException {
       // Older server without /server/info: keep the stored profile.
     }
+    await saveServerPinnedFingerprint(
+      refreshed.serverId,
+      refreshed.certSha256,
+    );
     _client?.close();
     _client = client;
     activeProfile = refreshed;
@@ -360,6 +364,9 @@ class AuthService extends ChangeNotifier {
   /// Re-adding the same URL therefore only needs credentials, not a new
   /// pairing code. Clearing all trust is an explicit app-data reset.
   Future<void> forgetAllServers() async {
+    for (final profile in servers) {
+      await saveServerPinnedFingerprint(profile.serverId, profile.certSha256);
+    }
     servers = [];
     await _storage.delete(key: _keyServers);
     await logout();
@@ -381,6 +388,9 @@ class AuthService extends ChangeNotifier {
   /// retained, so re-adding the same URL does not require another pairing
   /// code; a changed certificate will still be rejected by the pin.
   Future<void> removeServerGroup(String serverId) async {
+    for (final profile in servers.where((s) => s.serverId == serverId)) {
+      await saveServerPinnedFingerprint(profile.serverId, profile.certSha256);
+    }
     servers.removeWhere((s) => s.serverId == serverId);
     await _saveServers();
     if (activeProfile?.serverId == serverId) {
@@ -392,6 +402,7 @@ class AuthService extends ChangeNotifier {
 
   /// Forgets one account while keeping any other accounts for the same server.
   Future<void> removeServer(ServerProfile profile) async {
+    await saveServerPinnedFingerprint(profile.serverId, profile.certSha256);
     servers.removeWhere(
       (s) =>
           s.serverId == profile.serverId &&

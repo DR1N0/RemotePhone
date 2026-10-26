@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -129,6 +130,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
+    } on HandshakeException {
+      if (mounted) setState(() => _trust = _TrustState.needsCode);
+      _show('Server certificate changed. Enter a new access code from its admin.');
     } on ApiException catch (e) {
       _show(e.message);
     } on StateError catch (e) {
