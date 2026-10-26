@@ -16,8 +16,22 @@ import (
 // audit/foreign-key integrity. It refuses to remove _SYSTEM or the final
 // active admin.
 func (s *Service) RemoveUser(ctx context.Context, targetUserID, callerUserID string, actor audit.Context) ([]TeardownTarget, error) {
+	if _, err := s.authSvc.RequireActiveAdmin(ctx, s.q, callerUserID); err != nil {
+		return nil, err
+	}
+	target, err := requireTarget(ctx, s.q, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if target.ID == "_SYSTEM" {
+		return nil, ErrCannotRemoveSystem
+	}
+	if err := s.removeOwnedInstances(ctx, target.ID, callerUserID, actor); err != nil {
+		return nil, err
+	}
+
 	var teardownTargets []TeardownTarget
-	err := s.withTx(ctx, func(q *repo.Queries) error {
+	err = s.withTx(ctx, func(q *repo.Queries) error {
 		if _, err := s.authSvc.RequireActiveAdmin(ctx, q, callerUserID); err != nil {
 			return err
 		}
@@ -46,6 +60,29 @@ func (s *Service) RemoveUser(ctx context.Context, targetUserID, callerUserID str
 		return nil, err
 	}
 	return teardownTargets, nil
+}
+
+// removeOwnedInstances stops and deletes every instance owned by targetUserID
+// before the account tombstone is written. Instance stop/delete is
+// intentionally outside the account transaction because it may call workers
+// and clean up AVD data.
+func (s *Service) removeOwnedInstances(ctx context.Context, targetUserID, callerUserID string, actor audit.Context) error {
+	instances, err := s.instanceSvc.ListAllInstances(ctx)
+	if err != nil {
+		return fmt.Errorf("list owned instances: %w", err)
+	}
+	for _, managed := range instances {
+		if managed.OwnerID != targetUserID {
+			continue
+		}
+		if _, err := s.instanceSvc.StopAdminManagedInstance(ctx, managed.ID, callerUserID, actor); err != nil {
+			return fmt.Errorf("stop instance %s for account removal: %w", managed.ID, err)
+		}
+		if err := s.instanceSvc.DeleteAdminManagedInstance(ctx, managed.ID, callerUserID, actor); err != nil {
+			return fmt.Errorf("delete instance %s for account removal: %w", managed.ID, err)
+		}
+	}
+	return nil
 }
 
 // SetBanStatus sets targetUserID's status (refusing to ban the final active

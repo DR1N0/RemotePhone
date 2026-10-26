@@ -21,5 +21,6 @@ React/Vite UI embedded into `mako-controlplane` and served at
 
 Pages: Overview, Users, Instances, Audit. Access codes and account removal
 are actions in the Users page; server identity lives in Overview. Removing an
-account releases its username and revokes devices; issue a new access code with
-Invite user to let the person recreate the account.
+account stops and deletes its owned instances, revokes devices, and releases the
+username; issue a new access code with Invite user to let the person recreate
+the account.

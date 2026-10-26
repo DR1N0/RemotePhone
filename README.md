@@ -155,7 +155,7 @@ curl.exe -H "Content-Type: application/json" `
   http://127.0.0.1:3001/api/v1/admin/access-codes
 ```
 
-The owner never sets or reads a user password. If someone loses access, remove the account in Users; the console then issues a fresh unbound access code. The user creates a new account, and the owner can promote it to admin from the same page. If the only admin is removed, the owner console can promote the replacement account. This is the unavoidable out-of-band recovery path.
+The owner never sets or reads a user password. If someone loses access, remove the account in Users; owned instances are deleted, then use Invite user to issue a fresh unbound access code. The user creates a new account, and the owner can promote it to admin from the same page. If the only admin is removed, the owner console can promote the replacement account. This is the unavoidable out-of-band recovery path.
 
 After redemption, the saved profile stores the certificate pin; later known-server detection verifies it and hides the code field. Forget server removes the profile and its pin.
 

@@ -294,9 +294,9 @@ export default function Users() {
         onOk={() => void removeAccount()}
       >
         <p className="page-subtitle">
-          This deletes the account and revokes every device credential. The
-          username is released. Use Invite user afterwards to create a fresh
-          access code; owned instances are not deleted automatically.
+          This deletes the account, its owned instances, and every device
+          credential. The username is released. Use Invite user afterwards to
+          create a fresh access code.
         </p>
       </Modal>
     </section>

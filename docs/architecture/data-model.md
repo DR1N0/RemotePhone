@@ -123,5 +123,5 @@ Adds the hidden local-owner principal used as the audit actor for tokenless `/ap
 ALTER TABLE users ADD COLUMN deleted_at TEXT;
 ```
 
-Owner account removal is a soft delete: status becomes `banned`, username/password are cleared (releasing the name for a fresh account), device sessions/credentials are revoked, and the row remains for audit and instance foreign keys. `ListAccountUsers` filters `deleted_at IS NULL`; setup/admin counts intentionally still see the tombstone so deleting the last admin does not make the server look unclaimed. Owned instances are not deleted automatically.
+Owner account removal is a soft delete: status becomes `banned`, username/password are cleared (releasing the name for a fresh account), device sessions/credentials are revoked, owned instances are stopped/deleted first, and the row remains for audit. `ListAccountUsers` filters `deleted_at IS NULL`; setup/admin counts intentionally still see the tombstone so deleting the last admin does not make the server look unclaimed.
 

@@ -196,7 +196,7 @@ func (s *Service) assertCanAdminManageInstance(ctx context.Context, callerUserID
 		}
 		return fmt.Errorf("get caller: %w", err)
 	}
-	if caller.UserType != "admin" || caller.Status != "active" {
+	if (caller.UserType != "admin" && caller.UserType != "system") || caller.Status != "active" {
 		return fmt.Errorf("%w: user %s is not an active admin", ErrForbidden, callerUserID)
 	}
 	return nil
