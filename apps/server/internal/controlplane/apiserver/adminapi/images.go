@@ -34,12 +34,12 @@ func writeImageError(w http.ResponseWriter, err error) {
 }
 
 // RegisterImageRoutes mounts promote (the only operation in this package
-// that changes what any instance resolves to — hence admin-only, behind
+// that changes what any instance resolves to 鈥?hence admin-only, behind
 // adminapi's loopback/login barrier) and candidate listing, so an admin has
 // a way to discover candidate ids before promoting one.
 func RegisterImageRoutes(mux *http.ServeMux, svc *image.Service, authSvc *auth.Service) {
-	requireAuth := middleware.RequireAuth(authSvc)
-	requireAccount := middleware.RequireScope("account")
+	requireAuth := middleware.RequireOwner(authSvc)
+	requireAccount := func(next http.Handler) http.Handler { return next }
 
 	mux.Handle("GET /api/v1/admin/images", requireAuth(requireAccount(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		templateID := r.URL.Query().Get("templateId")

@@ -1,7 +1,7 @@
 // This file mounts admin's user-management routes: list, promote/demote,
 // ban/unban, and credential listing/revocation. Every handler delegates
 // straight to admin.Service, which itself enforces the active-admin check
-// (auth.RequireActiveAdmin) — there is no separate requireAdmin HTTP
+// (auth.RequireActiveAdmin) 鈥?there is no separate requireAdmin HTTP
 // middleware, matching the precedent instance.Service's own admin-managed
 // instance routes already set.
 package adminapi
@@ -48,7 +48,7 @@ func writeAdminError(w http.ResponseWriter, err error) {
 }
 
 // parsePaginationLimit reads the "limit" query param, defaulting to 20,
-// and reports whether it falls within [1, 100] — mirrors TS's
+// and reports whether it falls within [1, 100] 鈥?mirrors TS's
 // parsePaginationLimit used by both the users and audit list routes.
 func parsePaginationLimit(r *http.Request) (int, bool) {
 	raw := r.URL.Query().Get("limit")
@@ -77,8 +77,8 @@ type setUserTypeRequest struct {
 // RegisterAdminManagementRoutes mounts user/credential/ban routes, mirroring
 // routes/admin.ts's user-management half.
 func RegisterAdminManagementRoutes(mux *http.ServeMux, adminSvc *admin.Service, authSvc *auth.Service, transportSvc *transport.Service) {
-	requireAuth := middleware.RequireAuth(authSvc)
-	requireAccount := middleware.RequireScope("account")
+	requireAuth := middleware.RequireOwner(authSvc)
+	requireAccount := func(next http.Handler) http.Handler { return next }
 
 	mux.Handle("GET /api/v1/admin/users", requireAuth(requireAccount(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limit, ok := parsePaginationLimit(r)

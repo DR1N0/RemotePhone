@@ -8,6 +8,18 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-27 — Embedded, login-free owner console
+
+The former `apps/admin` React app moved to `apps/server/adminui` and is embedded into `mako-controlplane` with `go:embed`. It is served at `http://127.0.0.1:3001/admin/`; the built `dist` is committed so a clean `go build` does not require Node.
+
+The console has no login. Reaching the loopback listener is the owner proof. `/api/v1/admin/*` on 3001 now accepts requests without a bearer token and attributes them to the reserved `_SYSTEM` principal; a bearer token is still accepted for programmatic clients. Owner requests are guarded by loopback Host, same-origin/localhost Origin, and `application/json`. Native app client routes on 3000 are a separate `ServeMux` and are unchanged.
+
+`_SYSTEM` is a real hidden `users` row (`user_type=system`, no username/password) with a `_SYSTEM` credential so audit foreign keys remain valid. User listings and setup/admin counts exclude it. Usernames must start with a letter or digit; leading underscores are reserved for internal identities.
+
+The UI is redesigned into Overview / Users / Instances / Audit / Server. Access codes are actions inside Users (invite a new user or create a device code), not a separate page. Login, Invitations, and Session diagnostic pages were removed. The visual language follows the Android client: black/white surfaces with a single cat's-eye gold accent.
+
+---
+
 ### 2026-10-26 — Certificate pin lives only in the server profile
 
 Removed the pre-release `mako_pin_<url>` and `mako_server_pin_<serverId>` stores. The certificate pin is now only `ServerProfile.certSha256`, keyed by the stable server UUID.
@@ -25,7 +37,7 @@ This is a deliberate pre-release breaking change; old pin keys are ignored and c
 
 ### 2026-10-26 — Removed the legacy TypeScript control plane
 
-`apps/controlplane` was deleted. The Go implementation in `apps/server` is the only control plane: it has HTTPS client API, access-code pairing/certificate pinning, instance/session/admin/audit/transport, worker lifecycle, and image capture/promote. No build, runtime, or script path referenced the TypeScript tree; the only remaining references are historical decisions/plans. The Makefile now builds/runs `mako-controlplane`/`mako-worker` instead of the old `npm` targets. `apps/admin` remains a legacy browser UI and is not served by the Go control plane.
+`apps/controlplane` was deleted. The Go implementation in `apps/server` is the only control plane: it has HTTPS client API, access-code pairing/certificate pinning, instance/session/admin/audit/transport, worker lifecycle, and image capture/promote. No build, runtime, or script path referenced the TypeScript tree; the only remaining references are historical decisions/plans. The Makefile now builds/runs `mako-controlplane`/`mako-worker` instead of the old `npm` targets. The former `apps/admin` was moved to `apps/server/adminui`, redesigned, and embedded into the control plane at `/admin/`.
 
 ---
 
@@ -38,7 +50,7 @@ Pairing codes and enrollment codes were merged into one **access code** with a n
 - Ordinary users can only create self codes; admins create unbound codes; the owner console can target any account or leave it unbound. The generator does not choose a target in the client UI; the server derives it from the caller's role.
 - Codes are single-use, hashed at rest, TTL-bounded, and rate-limited by failed-password attempts. Client-side redemption still requires the username/password (or the new password when creating), so a leaked code alone cannot take over an existing account.
 
-The client now treats `3000` as the **client-available API** (ordinary and admin users, access-code creation/redeem) and `3001` as the **owner console**. `3001` is loopback-only; reaching it is the owner proof, so owner routes do not require a bearer token, but they reject browser Origins and non-JSON POSTs to prevent CSRF/DNS rebinding. Existing token-protected admin routes remain for the admin UI until they are migrated; owner recovery endpoints (`/api/v1/owner/access-codes`, `/api/v1/owner/users/reset-password`) work without a token.
+The client now treats `3000` as the **client-available API** (ordinary and admin users, access-code creation/redeem) and `3001` as the **owner console**. `3001` is loopback-only; reaching it is the owner proof, so `/api/v1/admin/*` accepts tokenless requests attributed to `_SYSTEM`, while a bearer token is still accepted for programmatic clients. This entry originally kept token-protected admin routes and `/api/v1/owner/*`; the later 2026-10-27 entry migrated all UI/admin routes to `/api/v1/admin/*` with no login.
 
 The client trusts a server by `serverId` + the certificate pin in that server's profile, not by URL. `GET /server/info` is fetched with an unpinned temporary client, but trust is only granted if the certificate observed on that connection matches a profile for the returned server ID. Known servers skip the code; forgetting a server removes the profile and its pin, so re-adding needs a fresh code. Clearing app data does the same. There is no URL pin or separate server-pin store.
 

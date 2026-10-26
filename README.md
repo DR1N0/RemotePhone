@@ -9,7 +9,7 @@ It is built for the case desktop-streaming tools cannot express: playing touch-n
 - **Server (Go)**: active implementation in [`apps/server`](apps/server). Auth, multi-tenant users/credentials, multi-instance-per-owner, template discovery, instance lifecycle, sessions/PIN invites, WebRTC transport, admin API, worker supervision, HTTPS on the client API, and base-image capture/promote are implemented and covered by tests.
 - **Client (Flutter, Android)**: [`apps/client`](apps/client) has access-code login/pairing, mDNS server discovery, a template picker, a multi-instance list (start/stop/connect/delete), and a WebRTC streaming screen with touch input. Android is the only supported client platform — iOS distribution was deliberately ruled out for a free/open-source project.
 - **Windows is a first-class host now**: the server builds and runs on Windows with WHPX-accelerated emulators and AMD `h264_amf` hardware encoding (see [Windows host](#windows-host)).
-- **Legacy**: `apps/admin` is a previous browser UI/reference and is not served by the Go control plane. The TypeScript control plane (`apps/controlplane`) was removed on 2026-10-26.
+- **Owner console**: served by `mako-controlplane` at `http://127.0.0.1:3001/admin/` from `apps/server/adminui`; no login, loopback-only. The legacy TypeScript control plane (`apps/controlplane`) was removed on 2026-10-26.
 
 ## Architecture
 
@@ -20,6 +20,7 @@ apps/server/
   internal/controlplane/  # auth, instance, session, transport, admin, image,
                           #   placement, workerproc, reconcile, tlsidentity
   internal/worker/        # emulator runtime, WebRTC transport, gRPC capture
+  adminui/                # React owner console, embedded at /admin/ on 3001
 apps/client/              # Flutter Android client
 ```
 
@@ -67,6 +68,14 @@ Set these before starting the control plane (the spawned worker inherits its env
 
 ### 3. Build and run
 
+The owner console is committed as built `apps/server/adminui/dist`; rebuild it after UI changes (Node 20+):
+
+```powershell
+cd apps/server/adminui
+npm ci
+npm run build
+```
+
 ```powershell
 cd apps/server
 go build -o ..\..\.bin\mako-worker.exe ./cmd/mako-worker
@@ -90,7 +99,7 @@ $env:MAKO_STREAM_BITRATE = "2000000"
 .\mako-controlplane.exe
 ```
 
-On first run, read the bootstrap secret from `<db>.bootstrap-secret` and create the first admin (admin API is loopback-only on `127.0.0.1:3001`):
+On first run, read the bootstrap secret from `<db>.bootstrap-secret` and create the first admin (admin API is loopback-only on `127.0.0.1:3001`). The owner console is at `http://127.0.0.1:3001/admin/` and needs no login:
 
 ```powershell
 $secret = (Get-Content .\mako.db.bootstrap-secret -Raw).Trim()
@@ -105,7 +114,7 @@ After creating the first admin, pair the Android client with either the startup 
 Set-Content -NoNewline $env:TEMP\code.json '{}'
 curl.exe -H "Content-Type: application/json" `
   --data-binary "@$env:TEMP\code.json" `
-  http://127.0.0.1:3001/api/v1/owner/access-codes
+  http://127.0.0.1:3001/api/v1/admin/access-codes
 ```
 
 Use the returned code with the admin username/password in the client.
@@ -143,12 +152,12 @@ The loopback owner console on `127.0.0.1:3001` has no bearer-token requirement b
 Set-Content -NoNewline $env:TEMP\code.json '{}'
 curl.exe -H "Content-Type: application/json" `
   --data-binary "@$env:TEMP\code.json" `
-  http://127.0.0.1:3001/api/v1/owner/access-codes
+  http://127.0.0.1:3001/api/v1/admin/access-codes
 ```
 
-If the only admin loses both the certificate pin and the password, recovery happens on the server: reset the password at `POST /api/v1/owner/users/reset-password` and mint an owner access code. This is the unavoidable out-of-band trust recovery path.
+If the only admin loses both the certificate pin and the password, recovery happens on the server: reset the password at `POST /api/v1/admin/users/reset-password` and mint an owner access code. This is the unavoidable out-of-band trust recovery path.
 
-After redemption, the URL and server ID both retain the certificate pin; later logins verify the pin and hide the code field.
+After redemption, the saved profile stores the certificate pin; later known-server detection verifies it and hides the code field. Forget server removes the profile and its pin.
 
 ### Firewall
 

@@ -10,14 +10,14 @@ SELECT * FROM users WHERE id = ?;
 SELECT * FROM users WHERE lower(trim(username)) = lower(trim(?));
 
 -- name: CountRegisteredOrAdminUsers :one
-SELECT count(*) FROM users WHERE user_type != 'guest';
+SELECT count(*) FROM users WHERE user_type NOT IN ('guest', 'system');
 
 -- name: CountActiveAdmins :one
 SELECT count(*) FROM users WHERE user_type = 'admin' AND status = 'active';
 
 -- name: ListAccountUsers :many
 SELECT * FROM users
-WHERE user_type != 'guest'
+WHERE user_type NOT IN ('guest', 'system')
   AND (sqlc.narg('cursor_id') IS NULL OR id > sqlc.narg('cursor_id'))
 ORDER BY id ASC
 LIMIT sqlc.arg('limit');

@@ -2,39 +2,43 @@
 
 Two HTTP listeners, registered in `apps/server/cmd/mako-controlplane/main.go`. Route lists below were read directly from the route-registration code (`apiserver/{adminapi,clientapi,commonauth}`), not inferred from any design doc.
 
-## Admin API — `127.0.0.1:3001`
+## Owner console — `127.0.0.1:3001`
+
+The owner console is embedded from `apps/server/adminui` and served at `/admin/` (SPA fallback). It has no login; the loopback listener is the owner boundary. `/api/v1/admin/*` accepts requests with no bearer token and attributes them to `_SYSTEM`; a bearer token is still accepted for programmatic clients. Tokenless requests require a loopback Host, a same-origin/localhost Origin (or no Origin), and JSON POST bodies.
 
 Shared routes (via `commonauth.RegisterRoutes`, address-based throttling enabled):
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/v1/auth/login` | |
+| POST | `/api/v1/auth/login` | optional programmatic login; the WebUI does not use it |
 | GET | `/api/v1/auth/me` | requires account-scoped credential |
 | POST | `/api/v1/auth/logout` | requires account-scoped credential |
 
-Admin-only routes:
+Owner/admin routes:
 
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v1/auth/status` | setup-claimed status, loopback-checked |
 | POST | `/api/v1/auth/setup` | first-admin bootstrap, requires bootstrap secret |
-| POST | `/api/v1/auth/registration-invites` | requires active admin; issues a token for `clientapi`'s `/auth/register` |
-| GET | `/api/v1/admin/instances` | cross-owner list, requires active admin |
-| POST | `/api/v1/admin/instances/{id}/start` | cross-owner, requires active admin |
-| POST | `/api/v1/admin/instances/{id}/stop` | cross-owner, requires active admin |
-| DELETE | `/api/v1/admin/instances/{id}` | cross-owner, requires active admin |
-| GET | `/api/v1/admin/users` | cursor-paginated (`limit`, `cursor`), excludes guests, requires active admin |
-| GET | `/api/v1/admin/users/{id}/credentials` | account-scoped credentials only, requires active admin |
-| POST | `/api/v1/admin/users/{id}/credentials/{credentialId}/revoke` | requires active admin |
+| POST | `/api/v1/auth/registration-invites` | legacy; owner or admin token |
+| GET | `/api/v1/admin/instances` | cross-owner list |
+| POST | `/api/v1/admin/instances/{id}/start` | cross-owner |
+| POST | `/api/v1/admin/instances/{id}/stop` | cross-owner |
+| DELETE | `/api/v1/admin/instances/{id}` | cross-owner |
+| GET | `/api/v1/admin/users` | cursor-paginated (`limit`, `cursor`), excludes guests and `_SYSTEM` |
+| GET | `/api/v1/admin/users/{id}/credentials` | account-scoped credentials only |
+| POST | `/api/v1/admin/users/{id}/credentials/{credentialId}/revoke` | |
 | POST | `/api/v1/admin/users/{id}/type` | promote/demote; refuses to demote the final active admin |
 | POST | `/api/v1/admin/users/{id}/ban` | closes every session the user owns, revokes its other attachments; refuses to ban the final active admin |
 | POST | `/api/v1/admin/users/{id}/unban` | |
 | POST | `/api/v1/admin/sessions/{id}/attachments/{attachmentId}/revoke` | revokes one guest's attachment without closing the session |
-| GET | `/api/v1/admin/audit` | cursor-paginated (`limit`, `cursor`), newest first, requires active admin |
-| GET | `/api/v1/admin/images` | `?templateId=` required; lists every captured base image for that template, newest first — how an admin discovers candidate ids to promote |
-| POST | `/api/v1/admin/images/{candidateId}/promote` | moves that candidate's template to point at it — the only base-image operation that changes what any instance resolves to; rollback is the same call with an older candidate's id |
-| POST | `/api/v1/owner/access-codes` | **owner console, no bearer token**; body `{username?,ttlSeconds?}`; unbound when username omitted. Rejects external `Origin` and non-JSON POSTs |
-| POST | `/api/v1/owner/users/reset-password` | **owner console, no bearer token**; `{username,password}`; revokes the user's account credentials |
+| GET | `/api/v1/admin/audit` | cursor-paginated (`limit`, `cursor`), newest first |
+| GET | `/api/v1/admin/images` | `?templateId=` required; lists captured base images |
+| POST | `/api/v1/admin/images/{candidateId}/promote` | moves the template's current base image |
+| POST | `/api/v1/admin/access-codes` | body `{username?,ttlSeconds?}`; unbound when username omitted |
+| POST | `/api/v1/admin/users/reset-password` | `{username,password}`; revokes the user's account credentials |
+| GET | `/api/v1/admin/server` | server ID, name, certificate SHA-256 |
+| GET | `/admin/` | embedded owner UI |
 | GET | `/healthz` | |
 
 ## Client API — `127.0.0.1:3000` (HTTPS, self-signed — see `security-model.md`)

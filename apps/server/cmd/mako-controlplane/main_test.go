@@ -57,7 +57,7 @@ func newTestServiceForMain(t *testing.T) (*auth.Service, *instance.Service, *ses
 
 func TestAdminMuxHealthz(t *testing.T) {
 	svc, instanceSvc, _, transportSvc, adminSvc, imageSvc, _ := newTestServiceForMain(t)
-	srv := httptest.NewServer(newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc))
+	srv := httptest.NewServer(newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc, nil, nil))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/healthz")

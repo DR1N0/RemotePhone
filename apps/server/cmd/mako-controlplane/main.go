@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"time"
 
+	"mako/adminui"
 	"mako/internal/controlplane/admin"
 	"mako/internal/controlplane/apiserver/adminapi"
 	"mako/internal/controlplane/apiserver/clientapi"
@@ -36,7 +37,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func newAdminMux(svc *auth.Service, instanceSvc *instance.Service, adminSvc *admin.Service, transportSvc *transport.Service, imageSvc *image.Service) *http.ServeMux {
+func newAdminMux(svc *auth.Service, instanceSvc *instance.Service, adminSvc *admin.Service, transportSvc *transport.Service, imageSvc *image.Service, pairingSvc *pairing.Service, serverInfo *serverinfo.Info) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -46,7 +47,9 @@ func newAdminMux(svc *auth.Service, instanceSvc *instance.Service, adminSvc *adm
 	adminapi.RegisterAdminManagementRoutes(mux, adminSvc, svc, transportSvc)
 	adminapi.RegisterAdminAuditRoutes(mux, adminSvc, svc)
 	adminapi.RegisterImageRoutes(mux, imageSvc, svc)
-	adminapi.RegisterOwnerRoutes(mux, svc)
+	adminapi.RegisterOwnerRoutes(mux, svc, pairingSvc, serverInfo)
+	mux.Handle("/admin", http.RedirectHandler("/admin/", http.StatusTemporaryRedirect))
+	mux.Handle("/admin/", adminui.Handler())
 	return mux
 }
 
@@ -184,7 +187,7 @@ func run() error {
 	}
 	log.Printf("bootstrap access code: %s (certificate SHA-256: %s)", pairingSvc.PIN(), pairingSvc.CertSHA256())
 
-	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc)}
+	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc, pairingSvc, serverInfo)}
 	clientAddr := envOrDefault("MAKO_CLIENT_ADDR", "127.0.0.1:3000")
 	clientSrv := &http.Server{
 		Addr:      clientAddr,

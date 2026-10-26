@@ -32,7 +32,7 @@ func isValidPassword(password string) bool {
 
 // localhostHostPattern, loopbackIPv4HostPattern, and loopbackIPv6HostPattern
 // mirror the TS route module's hasLocalSetupHost: the Host header (optional
-// ":port" suffix) must denote localhost, 127.0.0.1, or [::1] literally — no
+// ":port" suffix) must denote localhost, 127.0.0.1, or [::1] literally 鈥?no
 // wildcard/subdomain matching.
 var (
 	localhostHostPattern    = regexp.MustCompile(`(?i)^localhost(:\d+)?$`)
@@ -70,7 +70,7 @@ func RegisterAuthRoutes(mux *http.ServeMux, svc *auth.Service) {
 			panic(err)
 		}
 		// Never include anything about the bootstrap secret in this
-		// response — it reports only whether the server has been claimed.
+		// response 鈥?it reports only whether the server has been claimed.
 		middleware.WriteJSON(w, http.StatusOK, map[string]bool{"claimed": claimed})
 	})
 
@@ -131,7 +131,7 @@ func RegisterAuthRoutes(mux *http.ServeMux, svc *auth.Service) {
 	})
 
 	mux.Handle("POST /api/v1/auth/registration-invites",
-		middleware.RequireAuth(svc)(middleware.RequireScope("account")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		middleware.RequireOwner(svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			caller := middleware.GetAuthenticatedUser(r.Context())
 			requestID := uuid.NewString()
 			token, expiresAt, err := svc.CreateRegistrationInvite(r.Context(), caller.UserID, &caller.CredentialID, requestID)
@@ -144,6 +144,6 @@ func RegisterAuthRoutes(mux *http.ServeMux, svc *auth.Service) {
 			}
 
 			middleware.WriteJSON(w, http.StatusCreated, map[string]any{"token": token, "expiresAt": expiresAt})
-		}))),
+		})),
 	)
 }

@@ -25,6 +25,12 @@ import (
 const (
 	accountCredentialTTL       = 30 * 24 * time.Hour
 	attachmentCredentialMaxTTL = 24 * time.Hour
+
+	// SystemUserID is the reserved principal used by the loopback owner
+	// console for audit/actor FKs. It has no username or password and cannot
+	// authenticate.
+	SystemUserID       = "_SYSTEM"
+	SystemCredentialID = "_SYSTEM"
 )
 
 // registrationInviteTTL is fixed, not caller-configurable — same reasoning
@@ -34,8 +40,10 @@ const (
 const registrationInviteTTL = 5 * time.Minute
 
 // usernamePattern is the normalized-username validity pattern: lowercase
-// letters, digits, and underscores, 3-32 characters.
-var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,32}$`)
+// letters or digits first, then letters, digits, and underscores, 3-32
+// characters. Leading underscores are reserved for internal identities such
+// as _SYSTEM.
+var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{2,31}$`)
 
 // isValidUsername normalizes username (trim whitespace, lowercase) and
 // reports whether the normalized form satisfies usernamePattern. Used by
@@ -225,7 +233,7 @@ func (s *Service) RequireActiveAdmin(ctx context.Context, q *repo.Queries, actor
 		}
 		return repo.User{}, fmt.Errorf("get user: %w", err)
 	}
-	if user.UserType != "admin" || user.Status != "active" {
+	if (user.UserType != "admin" && user.UserType != "system") || user.Status != "active" {
 		return repo.User{}, fmt.Errorf("%w: %s", ErrNotAdmin, actorUserID)
 	}
 	return user, nil

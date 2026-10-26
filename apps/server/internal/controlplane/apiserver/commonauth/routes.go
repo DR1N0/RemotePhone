@@ -18,8 +18,10 @@ import (
 )
 
 // usernamePattern mirrors auth.Service's own (unexported) normalized-username
-// pattern: lowercase letters, digits, and underscores, 3-32 characters.
-var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,32}$`)
+// pattern: an alphanumeric first character, then lowercase letters, digits,
+// and underscores, 3-32 characters. Leading underscores are reserved for
+// internal identities.
+var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{2,31}$`)
 
 // isValidPassword reports whether password's byte length falls within
 // [8, 1024], matching the HTTP-layer validation the TS route schemas

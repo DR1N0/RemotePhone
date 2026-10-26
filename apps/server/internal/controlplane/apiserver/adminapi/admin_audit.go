@@ -11,8 +11,8 @@ import (
 // RegisterAdminAuditRoutes mounts the audit-log retrieval route, mirroring
 // routes/admin.ts's GET /api/v1/admin/audit.
 func RegisterAdminAuditRoutes(mux *http.ServeMux, adminSvc *admin.Service, authSvc *auth.Service) {
-	requireAuth := middleware.RequireAuth(authSvc)
-	requireAccount := middleware.RequireScope("account")
+	requireAuth := middleware.RequireOwner(authSvc)
+	requireAccount := func(next http.Handler) http.Handler { return next }
 
 	mux.Handle("GET /api/v1/admin/audit", requireAuth(requireAccount(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limit, ok := parsePaginationLimit(r)

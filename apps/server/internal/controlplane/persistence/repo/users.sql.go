@@ -22,7 +22,7 @@ func (q *Queries) CountActiveAdmins(ctx context.Context) (int64, error) {
 }
 
 const countRegisteredOrAdminUsers = `-- name: CountRegisteredOrAdminUsers :one
-SELECT count(*) FROM users WHERE user_type != 'guest'
+SELECT count(*) FROM users WHERE user_type != 'guest' AND user_type != 'system'
 `
 
 func (q *Queries) CountRegisteredOrAdminUsers(ctx context.Context) (int64, error) {
@@ -113,6 +113,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, trim string) (User, err
 const listAccountUsers = `-- name: ListAccountUsers :many
 SELECT id, display_name, status, created_at, updated_at, user_type, username, password_hash FROM users
 WHERE user_type != 'guest'
+  AND user_type != 'system'
   AND (?1 IS NULL OR id > ?1)
 ORDER BY id ASC
 LIMIT ?2

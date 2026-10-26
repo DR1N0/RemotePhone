@@ -20,7 +20,7 @@ import (
 
 // newTestServiceForAdminAPI constructs a *auth.Service backed by a real
 // temp-file DB (migrated) and a real temp-file bootstrap secret, following
-// the exact pattern established by middleware's newTestAuthService — no
+// the exact pattern established by middleware's newTestAuthService 鈥?no
 // in-memory shortcuts or test-only backdoors.
 func newTestServiceForAdminAPI(t *testing.T) (*auth.Service, string) {
 	t.Helper()
@@ -89,7 +89,7 @@ func TestSetupRejectsForwardedLoopbackSpoof(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 — a forwarded-header loopback claim must not bypass the real peer-address check", rec.Code)
+		t.Errorf("status = %d, want 403 鈥?a forwarded-header loopback claim must not bypass the real peer-address check", rec.Code)
 	}
 }
 
@@ -280,8 +280,8 @@ func TestRegistrationInviteRequiresAuth(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401 without a bearer token", rec.Code)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for a non-loopback owner request", rec.Code)
 	}
 }
 
@@ -319,7 +319,7 @@ func TestRegistrationInviteSucceedsForAdmin(t *testing.T) {
 // shape: ttlMs used to be a caller-configurable field here, but
 // auth.CreateRegistrationInvite now issues a fixed-TTL 4-digit code (see
 // auth.registrationInviteTTL) and the route no longer parses a request
-// body at all — any body, including a stale ttlMs client still sends, is
+// body at all 鈥?any body, including a stale ttlMs client still sends, is
 // simply ignored rather than rejected.
 func TestRegistrationInviteIgnoresRequestBody(t *testing.T) {
 	svc, secretPath := newTestServiceForAdminAPI(t)
@@ -352,6 +352,6 @@ func TestLoginAndMeRoutesAreRegisteredOnAdminAPI(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 — commonauth routes must be mounted by RegisterAuthRoutes, body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("status = %d, want 200 鈥?commonauth routes must be mounted by RegisterAuthRoutes, body=%s", rec.Code, rec.Body.String())
 	}
 }

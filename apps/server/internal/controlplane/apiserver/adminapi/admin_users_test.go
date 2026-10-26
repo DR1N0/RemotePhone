@@ -308,7 +308,7 @@ func TestAdminAuditRouteReturnsMutationEvents(t *testing.T) {
 	}
 	// registerUser's own invite-issue/redeem events are also in the log;
 	// SQLite's CURRENT_TIMESTAMP is second-resolution, so same-second events
-	// aren't guaranteed orderable by insertion order — assert presence, not
+	// aren't guaranteed orderable by insertion order 鈥?assert presence, not
 	// position.
 	var found bool
 	for _, item := range body.Items {

@@ -36,12 +36,12 @@ func writeInstanceError(w http.ResponseWriter, err error) {
 
 // RegisterInstanceRoutes mounts cross-owner instance list/start/stop/delete
 // on mux. Listing (routes/admin.ts's GET /api/v1/admin/instances) goes
-// through adminSvc.ListInstances, not svc directly — cross-owner listing is
+// through adminSvc.ListInstances, not svc directly 鈥?cross-owner listing is
 // the admin package's Phase 3 port (instance.Service only exposes the
 // underlying ListAllInstances it calls).
 func RegisterInstanceRoutes(mux *http.ServeMux, svc *instance.Service, adminSvc *admin.Service, authSvc *auth.Service) {
-	requireAuth := middleware.RequireAuth(authSvc)
-	requireAccount := middleware.RequireScope("account")
+	requireAuth := middleware.RequireOwner(authSvc)
+	requireAccount := func(next http.Handler) http.Handler { return next }
 
 	mux.Handle("GET /api/v1/admin/instances", requireAuth(requireAccount(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		caller := middleware.GetAuthenticatedUser(r.Context())

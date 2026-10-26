@@ -28,9 +28,9 @@ func ownerRequest(t *testing.T, mux *http.ServeMux, method, path, body, origin s
 func TestOwnerAccessCodeNeedsNoToken(t *testing.T) {
 	svc, _ := newTestServiceForAdminAPI(t)
 	mux := http.NewServeMux()
-	adminapi.RegisterOwnerRoutes(mux, svc)
+	adminapi.RegisterOwnerRoutes(mux, svc, nil, nil)
 
-	rec := ownerRequest(t, mux, http.MethodPost, "/api/v1/owner/access-codes", `{}`, "")
+	rec := ownerRequest(t, mux, http.MethodPost, "/api/v1/admin/access-codes", `{}`, "")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
@@ -45,11 +45,22 @@ func TestOwnerAccessCodeNeedsNoToken(t *testing.T) {
 func TestOwnerRejectsBrowserOrigin(t *testing.T) {
 	svc, _ := newTestServiceForAdminAPI(t)
 	mux := http.NewServeMux()
-	adminapi.RegisterOwnerRoutes(mux, svc)
+	adminapi.RegisterOwnerRoutes(mux, svc, nil, nil)
 
-	rec := ownerRequest(t, mux, http.MethodPost, "/api/v1/owner/access-codes", `{}`, "http://evil.example")
+	rec := ownerRequest(t, mux, http.MethodPost, "/api/v1/admin/access-codes", `{}`, "http://evil.example")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+}
+
+func TestOwnerAllowsSameOrigin(t *testing.T) {
+	svc, _ := newTestServiceForAdminAPI(t)
+	mux := http.NewServeMux()
+	adminapi.RegisterOwnerRoutes(mux, svc, nil, nil)
+
+	rec := ownerRequest(t, mux, http.MethodPost, "/api/v1/admin/access-codes", `{}`, "http://127.0.0.1:3001")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -57,9 +68,9 @@ func TestOwnerResetPasswordAndLogin(t *testing.T) {
 	svc, secretPath := newTestServiceForAdminAPI(t)
 	setupTestAdminForAdminAPI(t, svc, secretPath, "owner_admin", "initial-password")
 	mux := http.NewServeMux()
-	adminapi.RegisterOwnerRoutes(mux, svc)
+	adminapi.RegisterOwnerRoutes(mux, svc, nil, nil)
 
-	rec := ownerRequest(t, mux, http.MethodPost, "/api/v1/owner/users/reset-password",
+	rec := ownerRequest(t, mux, http.MethodPost, "/api/v1/admin/users/reset-password",
 		`{"username":"owner_admin","password":"recovered-password"}`, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reset status = %d; body=%s", rec.Code, rec.Body.String())

@@ -13,7 +13,7 @@ import (
 
 // teardownRevokedAttachments drives worker-side transport teardown for
 // every attachment a DB-only admin mutation (ban, guest-revoke) returned as
-// still needing it — the second half of the two-step pattern
+// still needing it 鈥?the second half of the two-step pattern
 // clientapi/sessions.go's disconnect handler already uses. A teardown
 // failure here is reported as the request's error, same as any other
 // transport call; the DB mutation has already committed either way.

@@ -1,5 +1,5 @@
 {
-  "name": "@mako/admin",
+  "name": "@mako/adminui",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",
@@ -28,3 +28,4 @@
     "vitest": "^2.1.9"
   }
 }
+

@@ -26,7 +26,7 @@ import (
 )
 
 // fakeWorkerClient backs an httptest.Server standing in for a worker's HTTP
-// API — instance.Service no longer takes a WorkerClient directly (every
+// API 鈥?instance.Service no longer takes a WorkerClient directly (every
 // worker interaction resolves a client from a spawned/persisted base URL),
 // so this package's tests operate at the HTTP boundary via
 // fakePlacementSelector below. Shared by every test file in this package.
@@ -78,7 +78,7 @@ func (s *fakePlacementSelector) AcquireWorker(ctx context.Context, instanceID st
 func (s *fakePlacementSelector) ReleaseWorker(ctx context.Context, pid int) error { return nil }
 
 // newTestAdminInstanceSetup builds one shared DB backing an *auth.Service,
-// an *instance.Service, and an *admin.Service — instance ownership checks
+// an *instance.Service, and an *admin.Service 鈥?instance ownership checks
 // (assertCanCreateInstance) look users up by ID, so all three must agree on
 // which database those users live in.
 func newTestAdminInstanceSetup(t *testing.T) (*auth.Service, *instance.Service, *admin.Service, string) {

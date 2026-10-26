@@ -68,12 +68,12 @@ run-client: ## Run the Flutter Android client on a connected device/emulator
 	@cd apps/client && flutter run
 
 .PHONY: build-admin
-build-admin: ## Build admin frontend to apps/admin/dist
-	cd apps/admin && npm run build
+build-admin: ## Build the embedded owner console
+	@cd apps/server/adminui && npm run build
 
 .PHONY: run-admin
-run-admin: ## Run admin frontend dev server with API proxy to :3000
-	cd apps/admin && npm run dev
+run-admin: ## Run the owner console Vite dev server (proxy to :3001)
+	@cd apps/server/adminui && npm run dev
 
 .PHONY: build
-build: build-controlplane build-worker ## Build the Go server binaries
+build: build-admin build-controlplane build-worker ## Build the owner console and Go server binaries
