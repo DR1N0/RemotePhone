@@ -8,6 +8,12 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-26 — Removed the legacy TypeScript control plane
+
+`apps/controlplane` was deleted. The Go implementation in `apps/server` is the only control plane: it has HTTPS client API, access-code pairing/certificate pinning, instance/session/admin/audit/transport, worker lifecycle, and image capture/promote. No build, runtime, or script path referenced the TypeScript tree; the only remaining references are historical decisions/plans. The Makefile now builds/runs `mako-controlplane`/`mako-worker` instead of the old `npm` targets. `apps/admin` remains a legacy browser UI and is not served by the Go control plane.
+
+---
+
 ### 2026-10-26 — Unified access codes; owner console needs no token
 
 Pairing codes and enrollment codes were merged into one **access code** with a nullable `target_user_id`:
@@ -224,7 +230,7 @@ While scoping the instance/placement phase, re-examined whether a persisted `wor
 
 Consequence: no `workers` table, no `instances.worker_id` column. Whichever process is currently serving an instance is runtime status, not durable config, and belongs in the already-existing `instances.observed_state`/`runtime_handle_json` fields (already a spec/status split) — zero new schema for worker tracking. A `workers` table would become justified again only if a pooled/remote worker legitimately serving multiple instances is introduced later; see `planned-subsystems.md`'s worker-lifecycle section for the current (revised) design target.
 
-Separately, confirmed `settings` (generic key/value table) has zero callers anywhere in `apps/controlplane` — `persistence/repositories/settings.ts`'s `putSetting`/`getSetting` are dead code, same speculative-and-unused pattern as `workers`. Dropping both.
+Separately, confirmed `settings` (generic key/value table) has zero callers anywhere in the (now removed) TypeScript tree — its `putSetting`/`getSetting` were dead code, same speculative-and-unused pattern as `workers`. Dropping both.
 
 Neither drop has been executed as a migration yet as of this writing — `data-model.md` still lists both tables as physically present (truthful to the migrated schema) with a pointer back to this entry. Update both files together once the removal migration lands.
 

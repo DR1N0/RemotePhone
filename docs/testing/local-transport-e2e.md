@@ -1,5 +1,7 @@
 # Local Transport End-to-End Acceptance Runbook
 
+> **Historical.** This runbook predates the Go port and the removal of the legacy TypeScript control plane (`apps/controlplane`, removed 2026-10-26). Its commands are no longer runnable; current verification is `go test ./...` in `apps/server` plus the Android client build. The design notes remain for context.
+
 This runbook records local Worker/transport acceptance and the supported browser development diagnostic. It is intentionally limited to macOS, Android Studio Emulator, and Google Chrome on the server host. The ordinary native client is a separate project; this admin WebUI is not its browser replacement.
 
 ## Prerequisites

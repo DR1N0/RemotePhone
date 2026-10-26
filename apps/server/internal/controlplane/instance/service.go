@@ -1,5 +1,5 @@
-// Package instance ports mako's TypeScript InstanceService
-// (apps/controlplane/src/services/instance-service.ts) to Go: ownership-
+// Package instance ports mako's pre-Go TypeScript InstanceService to Go:
+// ownership-
 // checked instance CRUD and start/stop/delete lifecycle against one
 // configured worker. Unlike the original TS port, a user may own more than
 // one instance (migration 0014 removed the one-per-owner unique index), so

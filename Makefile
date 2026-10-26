@@ -34,31 +34,33 @@ vendor: ## Update and tidy dependencies
 
 ##@ Build and Run
 
-.PHONY: run-frontend
-run-frontend: ## Run the frontend application
-	@echo "Running frontend..."
-	@cd apps/controlplane && npm run dev
+.PHONY: run-controlplane
+run-controlplane: ## Run the Go control plane (it spawns per-instance workers)
+	@echo "Running control plane..."
+	@cd apps/server && go run ./cmd/mako-controlplane
+
+.PHONY: build-controlplane
+build-controlplane: ## Build the Go control plane
+	@echo "Building control plane..."
+	@mkdir -p $(BUILD_DIR)
+	@cd apps/server && go build -o ../../$(BUILD_DIR)/mako-controlplane ./cmd/mako-controlplane
 
 .PHONY: build-worker
 build-worker: ## Build the worker application
 	@echo "Building worker..."
 	@mkdir -p $(BUILD_DIR)
-	@cd apps/server && go build -o ../../$(BUILD_DIR)/worker ./cmd/mako-worker
+	@cd apps/server && go build -o ../../$(BUILD_DIR)/mako-worker ./cmd/mako-worker
 
 .PHONY: run-worker
 run-worker: ## Run the worker application
-	@if [ ! -f $(BUILD_DIR)/worker ]; then \
+	@if [ ! -f $(BUILD_DIR)/mako-worker ]; then \
 		$(MAKE) build-worker; \
 	fi
 	@echo "Running worker..."
-	@cd $(BUILD_DIR) && ./worker
+	@cd $(BUILD_DIR) && ./mako-worker
 
 .PHONY: run
-run: ## Run both frontend and worker applications
-	@$(MAKE) run-worker & WORKER=$$!; \
-	$(MAKE) run-frontend & FRONTEND=$$!; \
-	trap 'echo "Stopping..."; kill $$WORKER $$FRONTEND 2>/dev/null' INT TERM; \
-	wait $$WORKER $$FRONTEND
+run: run-controlplane ## Run the control plane (workers spawn per instance)
 
 .PHONY: run-client
 run-client: ## Run the Flutter Android client on a connected device/emulator
@@ -74,6 +76,4 @@ run-admin: ## Run admin frontend dev server with API proxy to :3000
 	cd apps/admin && npm run dev
 
 .PHONY: build
-build: build-admin ## Build all artifacts
-	cd apps/controlplane && npm run build
-	cd apps/server && go build ./cmd/mako-worker/
+build: build-controlplane build-worker ## Build the Go server binaries

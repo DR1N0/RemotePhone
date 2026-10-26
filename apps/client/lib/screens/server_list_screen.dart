@@ -185,21 +185,29 @@ class _ServerListScreenState extends State<ServerListScreen> {
                         'It expires ${_formatExpiry(code.expiresAt)}.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: code.code));
+                        Navigator.of(context).pop();
+                      },
+                      child: const Text('Copy'),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: code.code));
-                Navigator.of(context).pop();
-              },
-              child: const Text('Copy'),
-            ),
-          ],
         ),
       );
     } on ApiException catch (e) {
@@ -232,20 +240,39 @@ class _ServerListScreenState extends State<ServerListScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Forget server?'),
-        content: Text(
-          'Remove ${profile.name} and every account saved for it from this '
-          'phone?',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Remove ${profile.name} and every account saved for it from '
+              'this phone? The certificate pin is kept, so re-adding the same '
+              'server only needs your password.',
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.danger,
+                      foregroundColor: Colors.black,
+                    ),
+                    child: const Text('Forget'),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Forget'),
-          ),
-        ],
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -586,26 +613,40 @@ class _EditAddressDialogState extends State<_EditAddressDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Edit address'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        decoration: const InputDecoration(
-          labelText: 'Server URL',
-          hintText: 'https://192.168.1.10:3000',
-        ),
-        onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Server URL',
+              hintText: 'https://192.168.1.10:3000',
+            ),
+            onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
+          ),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(_controller.text.trim()),
+                  child: const Text('Save'),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () =>
-              Navigator.of(context).pop(_controller.text.trim()),
-          child: const Text('Save'),
-        ),
-      ],
     );
   }
 }

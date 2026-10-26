@@ -1,5 +1,5 @@
-// Package auth ports the TypeScript AuthService (apps/controlplane/src/services/auth-service.ts)
-// to Go. Service is the central credential/identity authority: it issues and
+// Package auth ports the pre-Go TypeScript AuthService to Go. Service is the
+// central credential/identity authority: it issues and
 // validates bearer tokens, and is the only place password hashes, the
 // bootstrap secret, and raw tokens are ever handled together.
 package auth

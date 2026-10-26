@@ -1,8 +1,7 @@
 // Package auth implements mako's bearer-credential identity system: password
 // hashing, token generation, the bootstrap secret, and the AuthService that
 // ties them to persisted users and credentials. This is a faithful port of
-// the TypeScript implementation in apps/controlplane/src/services/{auth-service,
-// password,token,bootstrap-secret}.ts — exact parameters and boundary
+// the pre-Go TypeScript implementation; exact parameters and boundary
 // conditions are intentional, not incidental, and must not be "improved"
 // without discussing with a human first.
 package auth

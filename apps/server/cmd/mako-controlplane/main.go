@@ -125,7 +125,7 @@ func run() error {
 	instanceSvc.SetBaseImageResolver(imageSvc)
 
 	// Matches the TS config's MAKO_OWNER_ABSENCE_TIMEOUT_MS default (5
-	// minutes) — see apps/controlplane/src/config/env.ts.
+	// minutes) — see the pre-Go TypeScript implementation's env config.
 	ownerAbsenceTimeout := envOrDefaultDuration("MAKO_OWNER_ABSENCE_TIMEOUT_MS", 5*time.Minute)
 	// Shared with transport.Service: cross-package request-time
 	// serialization for the same attachment only works if both packages

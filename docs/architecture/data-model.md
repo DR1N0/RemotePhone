@@ -51,7 +51,7 @@ ALTER TABLE attachments DROP COLUMN restrictive_pending_role;
 ALTER TABLE attachments DROP COLUMN invite_token;
 ```
 
-`restrictive_pending_role` was pure derived redundancy: `apps/controlplane/src/persistence/repositories/attachments.ts`'s `setAttachmentPendingTransportRole` always wrote it as `pendingTargetRole == null ? null : "observer"`, and every read site OR'd the two columns together to the same effect. `attachments.pending_target_role` is now the sole source for `effective_transport_role` (non-null → `observer`, else → `role`) — see `session.EffectiveTransportRole`. `invite_token` (added `0001`) had zero references anywhere in the TS codebase, superseded by the `session_invites` table — same unused-column pattern as `workers`/`settings`. See `docs/plans/session-transport-redesign.md`.
+`restrictive_pending_role` was pure derived redundancy: the pre-Go TypeScript implementation's `setAttachmentPendingTransportRole` always wrote it as `pendingTargetRole == null ? null : "observer"`, and every read site OR'd the two columns together to the same effect. `attachments.pending_target_role` is now the sole source for `effective_transport_role` (non-null → `observer`, else → `role`) — see `session.EffectiveTransportRole`. `invite_token` (added `0001`) had zero references anywhere in the TS codebase, superseded by the `session_invites` table — same unused-column pattern as `workers`/`settings`. See `docs/plans/session-transport-redesign.md`.
 
 ## What `0013` did
 

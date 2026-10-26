@@ -7,9 +7,9 @@ It is built for the case desktop-streaming tools cannot express: playing touch-n
 ## Status
 
 - **Server (Go)**: active implementation in [`apps/server`](apps/server). Auth, multi-tenant users/credentials, multi-instance-per-owner, template discovery, instance lifecycle, sessions/PIN invites, WebRTC transport, admin API, worker supervision, HTTPS on the client API, and base-image capture/promote are implemented and covered by tests.
-- **Client (Flutter, Android)**: [`apps/client`](apps/client) has login/registration, a template picker, a multi-instance list (start/stop/connect/delete), and a WebRTC streaming screen with touch input. Android is the only supported client platform — iOS distribution was deliberately ruled out for a free/open-source project.
+- **Client (Flutter, Android)**: [`apps/client`](apps/client) has access-code login/pairing, mDNS server discovery, a template picker, a multi-instance list (start/stop/connect/delete), and a WebRTC streaming screen with touch input. Android is the only supported client platform — iOS distribution was deliberately ruled out for a free/open-source project.
 - **Windows is a first-class host now**: the server builds and runs on Windows with WHPX-accelerated emulators and AMD `h264_amf` hardware encoding (see [Windows host](#windows-host)).
-- **Legacy**: `apps/controlplane` (TypeScript) and `apps/admin` are the previous implementation/reference and are not part of the running Go system. `apps/admin` is not served by the Go control plane yet.
+- **Legacy**: `apps/admin` is a previous browser UI/reference and is not served by the Go control plane. The TypeScript control plane (`apps/controlplane`) was removed on 2026-10-26.
 
 ## Architecture
 

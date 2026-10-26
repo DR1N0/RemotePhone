@@ -1,6 +1,5 @@
-// Package transport ports mako's TypeScript TransportService and
-// SignalingService (apps/controlplane/src/services/transport-service.ts,
-// signaling-service.ts) to Go: establishing/tearing down an attachment's
+// Package transport ports mako's pre-Go TypeScript TransportService and
+// SignalingService to Go: establishing/tearing down an attachment's
 // worker-side WebRTC transport, relaying SDP offers/ICE candidates, and —
 // the one real redesign in this phase — owning attachment role transitions
 // end to end via TransitionAttachmentRole, replacing TS's four-times-patched,
