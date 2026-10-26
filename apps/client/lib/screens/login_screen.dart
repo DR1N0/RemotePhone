@@ -14,7 +14,7 @@ const _defaultBaseUrl = String.fromEnvironment(
   defaultValue: 'https://10.0.2.2:3000',
 );
 
-enum _TrustState { checking, trusted, needsCode }
+enum _TrustState { checking, trusted, needsCode, certMismatch }
 
 /// One client-available flow:
 ///
@@ -86,8 +86,11 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted || _baseUrlController.text.trim() != url) return;
       setState(() {
         _detected = detected;
-        _trust =
-            detected.trusted ? _TrustState.trusted : _TrustState.needsCode;
+        _trust = detected.certMismatch
+            ? _TrustState.certMismatch
+            : detected.trusted
+                ? _TrustState.trusted
+                : _TrustState.needsCode;
       });
     } catch (_) {
       if (!mounted || _baseUrlController.text.trim() != url) return;
@@ -96,7 +99,56 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   bool get _codeRequired => _trust == _TrustState.needsCode;
-  bool get _showCode => _codeRequired || _showCodeWhenTrusted;
+  bool get _showCode =>
+      _trust != _TrustState.certMismatch &&
+      (_codeRequired || _showCodeWhenTrusted);
+
+  Future<void> _forgetChangedServer() async {
+    final serverId = _detected?.serverId;
+    if (serverId == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Forget changed server?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'The certificate on this server no longer matches the one this '
+              'phone trusted. Remove the saved server and pair again with a '
+              'new access code.',
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.danger,
+                      foregroundColor: Colors.black,
+                    ),
+                    child: const Text('Forget'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await context.read<AuthService>().removeServerGroup(serverId);
+    if (mounted) await _refreshTrust();
+  }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
@@ -107,14 +159,26 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _submitting = true);
     try {
       if (code.isEmpty) {
+        if (_trust == _TrustState.certMismatch) {
+          throw const ApiException(
+            0,
+            'This server certificate changed. Forget the saved server and '
+            'pair again with a new access code.',
+          );
+        }
         if (_trust != _TrustState.trusted) {
           throw const ApiException(
             0,
             'This server is not trusted yet. Enter an access code from its admin.',
           );
         }
+        final cert = _detected?.certSha256;
+        if (cert == null) {
+          throw const ApiException(0, 'Could not verify the server certificate');
+        }
         await auth.login(
           baseUrl: url,
+          certSha256: cert,
           username: _usernameController.text.trim(),
           password: _passwordController.text,
         );
@@ -197,6 +261,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 12),
                   _TrustRow(state: _trust, detected: _detected),
+                  if (_trust == _TrustState.certMismatch)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: _submitting ? null : _forgetChangedServer,
+                        child: const Text('Forget changed server'),
+                      ),
+                    ),
                   if (_showCode) ...[
                     const SizedBox(height: 12),
                     TextFormField(
@@ -259,7 +331,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 22),
                   FilledButton(
-                    onPressed: _submitting || _trust == _TrustState.checking
+                    onPressed: _submitting ||
+                            _trust == _TrustState.checking ||
+                            _trust == _TrustState.certMismatch
                         ? null
                         : _submit,
                     child: _submitting
@@ -314,6 +388,21 @@ class _TrustRow extends StatelessWidget {
                   ? 'Certificate pinned'
                   : 'Known server: $name',
               style: const TextStyle(color: AppColors.accent, fontSize: 12),
+            ),
+          ),
+        ],
+      );
+    }
+    if (state == _TrustState.certMismatch) {
+      return const Row(
+        children: [
+          Icon(Icons.gpp_bad_outlined, size: 18, color: AppColors.danger),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'This server certificate changed. Forget the saved server and '
+              'pair again with a new access code.',
+              style: TextStyle(color: AppColors.danger, fontSize: 12),
             ),
           ),
         ],

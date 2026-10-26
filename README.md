@@ -124,7 +124,7 @@ The app opens on **Servers**, even with no saved account. Servers discovered by 
 
 - A **self code** is created by any logged-in user for their own account. Use it on a new phone to add that device.
 - An **admin code** is created by an `admin` user. It is not bound to an account: the server decides at redemption whether to create a new ordinary user or add a device to an existing account, based on whether the username already exists. It never creates an admin.
-- A known server is matched by stable server ID and certificate pin; the client then skips the code entirely. Same URL uses the URL pin. A new LAN IP uses `/server/info` to obtain the server ID, then requires the certificate observed on that connection to match the server-ID pin before skipping the code. If the certificate or server ID changed, a new code is required. Pins survive "Forget server", so forgetting an account (including the admin's own) does not require a new code. Clearing app data removes the pins.
+- The certificate pin is stored only in the saved server profile, keyed by the server's stable UUID. Adding/known-server detection always fetches `/server/info`, finds profiles for that server ID, and trusts the connection only if the certificate observed on that connection equals the profile's pinned hash. The same IP can therefore host two different servers: each server ID selects its own profile and pin. "Forget server" removes the profile and its pin, so re-adding requires a fresh access code. Clearing app data does the same.
 
 Create an admin code on the client API:
 

@@ -30,7 +30,8 @@ The app pins the server certificate after a successful access-code redemption or
 
 - Unified access-code login (self code or admin code), with account creation and certificate pinning in one step
 - Multiple paired servers remembered on the phone, grouped by server with one row per account; a server can have several accounts
-- One "Add server" flow: URL → access code only when the certificate is not already trusted → username/password. Known servers skip the code; there is no separate Pair button or client-side registration.
+- One "Add server" flow: URL → access code only when no saved profile matches the server ID and certificate → username/password. Known servers skip the code; there is no separate Pair button or client-side registration.
+- The certificate pin is stored in the server profile only; Forget server removes it, so re-adding requires a new access code. Two servers sharing an IP are distinguished by their server IDs and separate profiles.
 - A server menu action creates a self code for the current account, or an admin code that can create a new user or pair an existing account
 - mDNS Nearby discovery, plus manual URL entry
 - Template picker backed by the server's discovered AVDs

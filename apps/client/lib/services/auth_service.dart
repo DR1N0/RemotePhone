@@ -13,6 +13,7 @@ class TrustedServer {
   final String? serverId;
   final String? name;
   final bool trusted;
+  final bool certMismatch;
 
   const TrustedServer({
     required this.baseUrl,
@@ -20,17 +21,17 @@ class TrustedServer {
     this.certSha256,
     this.serverId,
     this.name,
+    this.certMismatch = false,
   });
 }
 
 /// Holds the paired servers remembered by this client, plus the currently
-/// selected server's API client. A client can pair with several control
-/// planes; each profile keeps its own certificate pin and bearer token.
+/// selected server's API client. The certificate pin lives in each
+/// ServerProfile, keyed by the server's stable UUID; there is no separate
+/// URL pin or server-pin store.
 class AuthService extends ChangeNotifier {
   static const _storage = FlutterSecureStorage();
   static const _keyServers = 'mako_servers';
-  static const _keyPinPrefix = 'mako_pin_';
-  static const _keyServerPinPrefix = 'mako_server_pin_';
 
   List<ServerProfile> servers = [];
   ServerProfile? activeProfile;
@@ -47,64 +48,37 @@ class AuthService extends ChangeNotifier {
     return c;
   }
 
-  String _pinKey(String baseUrl) => '$_keyPinPrefix$baseUrl';
-  String _serverPinKey(String serverId) => '$_keyServerPinPrefix$serverId';
-
-  Future<String?> pinnedFingerprint(String baseUrl) =>
-      _storage.read(key: _pinKey(baseUrl));
-
-  Future<String?> serverPinnedFingerprint(String serverId) =>
-      _storage.read(key: _serverPinKey(serverId));
-
-  Future<void> savePinnedFingerprint(String baseUrl, String fingerprint) =>
-      _storage.write(key: _pinKey(baseUrl), value: fingerprint);
-
-  Future<void> saveServerPinnedFingerprint(
-    String serverId,
-    String fingerprint,
-  ) async {
-    if (serverId.isEmpty) return;
-    await _storage.write(key: _serverPinKey(serverId), value: fingerprint);
-  }
-
-  Future<void> clearPinnedFingerprint(String baseUrl) =>
-      _storage.delete(key: _pinKey(baseUrl));
-
-  /// Resolves whether [baseUrl] is already trusted. An exact URL pin is the
-  /// fast path. Otherwise the server is identified by its unauthenticated
-  /// server ID, but trust only succeeds if the certificate observed on THIS
-  /// connection matches a pin stored for that server ID. An attacker can
-  /// spoof the server ID, but cannot present the pinned certificate.
+  /// Resolves whether [baseUrl] is already trusted. The URL is only an
+  /// address. The client fetches the unauthenticated server ID over the
+  /// connection, then looks up the profiles for that ID and trusts the
+  /// server only if the certificate observed on THIS connection equals the
+  /// certificate pinned in those profiles. A spoofed server ID cannot bypass
+  /// the certificate comparison.
   Future<TrustedServer> detectTrust(String baseUrl) async {
-    final exact = await pinnedFingerprint(baseUrl);
-    if (exact != null) {
-      return TrustedServer(baseUrl: baseUrl, trusted: true, certSha256: exact);
-    }
     final temp = ApiClient(baseUrl: baseUrl, allowAnyCertificate: true);
     try {
       final info = await temp.serverInfo();
       final observed = temp.observedCertSha256;
-      if (observed != null) {
-        final stored = await serverPinnedFingerprint(info.serverId);
-        final known = servers
-            .where((s) => s.serverId == info.serverId)
-            .toList();
-        final match = stored ?? (known.isEmpty ? null : known.first.certSha256);
-        if (match != null && match == observed) {
-          await savePinnedFingerprint(baseUrl, observed);
-          await saveServerPinnedFingerprint(info.serverId, observed);
-          return TrustedServer(
-            baseUrl: baseUrl,
-            trusted: true,
-            certSha256: observed,
-            serverId: info.serverId,
-            name: info.name,
-          );
-        }
+      if (observed == null) {
+        return TrustedServer(baseUrl: baseUrl, trusted: false);
       }
+      final known = servers
+          .where((s) => s.serverId == info.serverId)
+          .toList();
+      if (known.isEmpty) {
+        return TrustedServer(
+          baseUrl: baseUrl,
+          trusted: false,
+          certSha256: observed,
+          serverId: info.serverId,
+          name: info.name,
+        );
+      }
+      final matches = known.every((s) => s.certSha256 == observed);
       return TrustedServer(
         baseUrl: baseUrl,
-        trusted: false,
+        trusted: matches,
+        certMismatch: !matches,
         certSha256: observed,
         serverId: info.serverId,
         name: info.name,
@@ -118,9 +92,26 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  /// The pre-release URL-pin/server-pin stores are gone. Remove leftovers so
+  /// they cannot be mistaken for a second source of trust later.
+  Future<void> _removeLegacyPinStores() async {
+    try {
+      final all = await _storage.readAll();
+      for (final key in all.keys) {
+        if (key.startsWith('mako_pin_') ||
+            key.startsWith('mako_server_pin_')) {
+          await _storage.delete(key: key);
+        }
+      }
+    } catch (_) {
+      // Best-effort cleanup; trust no longer reads these keys.
+    }
+  }
+
   /// Loads remembered servers. The app deliberately lands on the server
   /// picker instead of silently reconnecting to the last-used server.
   Future<void> restore() async {
+    await _removeLegacyPinStores();
     final raw = await _storage.read(key: _keyServers);
     if (raw != null && raw.isNotEmpty) {
       try {
@@ -136,14 +127,11 @@ class AuthService extends ChangeNotifier {
 
   Future<void> login({
     required String baseUrl,
+    required String certSha256,
     required String username,
     required String password,
   }) async {
-    final pin = await pinnedFingerprint(baseUrl);
-    if (pin == null) {
-      throw StateError('pair this server before logging in');
-    }
-    final temp = ApiClient(baseUrl: baseUrl, pinnedCertSha256: pin);
+    final temp = ApiClient(baseUrl: baseUrl, pinnedCertSha256: certSha256);
     try {
       final (token, user) = await temp.login(
         username: username,
@@ -151,12 +139,11 @@ class AuthService extends ChangeNotifier {
         deviceLabel: _deviceLabel(),
       );
       final info = await _readServerInfo(temp, baseUrl);
-      await saveServerPinnedFingerprint(info.serverId, pin);
       final profile = ServerProfile(
         serverId: info.serverId,
         name: info.name,
         baseUrl: baseUrl,
-        certSha256: pin,
+        certSha256: certSha256,
         token: token,
         userId: user.id,
         username: username,
@@ -185,7 +172,6 @@ class AuthService extends ChangeNotifier {
         password: password,
         deviceLabel: _deviceLabel(),
       );
-      await savePinnedFingerprint(baseUrl, result.certSha256);
       var serverId = result.serverId;
       var serverName = result.serverName;
       if (serverId.isEmpty) {
@@ -193,7 +179,16 @@ class AuthService extends ChangeNotifier {
         serverId = info.serverId;
         serverName = info.name;
       }
-      await saveServerPinnedFingerprint(serverId, result.certSha256);
+      final existing = servers
+          .where((s) => s.serverId == serverId)
+          .toList();
+      if (existing.any((s) => s.certSha256 != result.certSha256)) {
+        throw const ApiException(
+          0,
+          'This server certificate changed. Forget the server first, then '
+          're-add it with a new access code.',
+        );
+      }
       final profile = ServerProfile(
         serverId: serverId,
         name: serverName.isEmpty ? Uri.parse(baseUrl).host : serverName,
@@ -251,10 +246,6 @@ class AuthService extends ChangeNotifier {
     } on ApiException {
       // Older server without /server/info: keep the stored profile.
     }
-    await saveServerPinnedFingerprint(
-      refreshed.serverId,
-      refreshed.certSha256,
-    );
     _client?.close();
     _client = client;
     activeProfile = refreshed;
@@ -356,14 +347,10 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  /// Forgets every server and session, but deliberately keeps certificate
-  /// pins: forgetting an account is not the same as distrusting the host.
-  /// Re-adding the same URL therefore only needs credentials, not a new
-  /// pairing code. Clearing all trust is an explicit app-data reset.
+  /// Forgets every server and session. The certificate pin lives only in the
+  /// profile, so this removes the pin too; re-adding any server needs a fresh
+  /// access code.
   Future<void> forgetAllServers() async {
-    for (final profile in servers) {
-      await saveServerPinnedFingerprint(profile.serverId, profile.certSha256);
-    }
     servers = [];
     await _storage.delete(key: _keyServers);
     await logout();
@@ -381,13 +368,9 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Forgets a server and every account saved for it. Certificate pins are
-  /// retained, so re-adding the same URL does not require another pairing
-  /// code; a changed certificate will still be rejected by the pin.
+  /// Forgets a server and every account saved for it. The certificate pin is
+  /// stored only in those profiles, so re-adding needs a fresh access code.
   Future<void> removeServerGroup(String serverId) async {
-    for (final profile in servers.where((s) => s.serverId == serverId)) {
-      await saveServerPinnedFingerprint(profile.serverId, profile.certSha256);
-    }
     servers.removeWhere((s) => s.serverId == serverId);
     await _saveServers();
     if (activeProfile?.serverId == serverId) {
@@ -399,7 +382,6 @@ class AuthService extends ChangeNotifier {
 
   /// Forgets one account while keeping any other accounts for the same server.
   Future<void> removeServer(ServerProfile profile) async {
-    await saveServerPinnedFingerprint(profile.serverId, profile.certSha256);
     servers.removeWhere(
       (s) =>
           s.serverId == profile.serverId &&

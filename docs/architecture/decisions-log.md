@@ -8,6 +8,21 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-26 — Certificate pin lives only in the server profile
+
+Removed the pre-release `mako_pin_<url>` and `mako_server_pin_<serverId>` stores. The certificate pin is now only `ServerProfile.certSha256`, keyed by the stable server UUID.
+
+- Trust always starts by fetching `/server/info` over an unpinned temporary connection and observing the actual certificate on that same connection.
+- The returned server ID selects the saved profiles; trust succeeds only if the observed certificate hash equals `profile.certSha256`.
+- URL is only an address. Two servers on different LANs that happen to use the same IP are distinguished by their server IDs and separate profiles.
+- `serverId` + certificate are generated once at server initialization and treated as immutable. A certificate change for the same server ID is an identity conflict, not an automatic update; it requires forgetting the profile and re-pairing.
+- Forget server / Forget all remove the pin by removing the profile: re-adding requires an access code. This intentionally replaces the earlier keep-pin-on-forget behavior.
+- Access-code redemption refuses to overwrite an existing profile whose certificate differs.
+
+This is a deliberate pre-release breaking change; old pin keys are ignored and cleaned up on restore.
+
+---
+
 ### 2026-10-26 — Removed the legacy TypeScript control plane
 
 `apps/controlplane` was deleted. The Go implementation in `apps/server` is the only control plane: it has HTTPS client API, access-code pairing/certificate pinning, instance/session/admin/audit/transport, worker lifecycle, and image capture/promote. No build, runtime, or script path referenced the TypeScript tree; the only remaining references are historical decisions/plans. The Makefile now builds/runs `mako-controlplane`/`mako-worker` instead of the old `npm` targets. `apps/admin` remains a legacy browser UI and is not served by the Go control plane.
@@ -25,7 +40,7 @@ Pairing codes and enrollment codes were merged into one **access code** with a n
 
 The client now treats `3000` as the **client-available API** (ordinary and admin users, access-code creation/redeem) and `3001` as the **owner console**. `3001` is loopback-only; reaching it is the owner proof, so owner routes do not require a bearer token, but they reject browser Origins and non-JSON POSTs to prevent CSRF/DNS rebinding. Existing token-protected admin routes remain for the admin UI until they are migrated; owner recovery endpoints (`/api/v1/owner/access-codes`, `/api/v1/owner/users/reset-password`) work without a token.
 
-The client trusts a server by `serverId` + certificate pin, not by URL alone. `GET /server/info` is fetched with an unpinned temporary client, but trust is only granted if the certificate observed on that connection matches the pin stored for that server ID. Known servers skip the code entirely; forget-server keeps pins; clearing app data is the explicit trust reset. Certificates are pinned by both URL (fast path) and server ID (survives IP changes).
+The client trusts a server by `serverId` + the certificate pin in that server's profile, not by URL. `GET /server/info` is fetched with an unpinned temporary client, but trust is only granted if the certificate observed on that connection matches a profile for the returned server ID. Known servers skip the code; forgetting a server removes the profile and its pin, so re-adding needs a fresh code. Clearing app data does the same. There is no URL pin or separate server-pin store.
 
 The startup `MAKO_PAIRING_PIN`/generated PIN is now seeded as a one-use unbound access code and logged as `bootstrap access code`. The old `/api/v1/pairing/verify` and `/api/v1/admin/pairing-codes` routes were removed.
 
@@ -47,7 +62,7 @@ The add-server flow was collapsed from four concepts (pair / invite / register /
 
 The separate "Pair server" button and the standalone Register screen are gone. The server picker is the root screen even with zero saved servers, so the initial page already runs mDNS discovery and shows Nearby servers; instance lists are pushed on top, so Back returns to the server picker. New Instance moved to the top `+` action, matching the server screen.
 
-Cancelling the add flow no longer removes a Nearby entry: it is only removed after a profile for that server ID actually exists. "Forget server" and "Forget all servers" remove profiles/tokens but deliberately **keep certificate pins**, so forgetting an account (including the admin's own account) is not the same as distrusting the host; re-adding the same URL only needs credentials. A certificate change is still rejected by the retained pin. Clearing pins requires clearing app data (or a future explicit reset action).
+Cancelling the add flow no longer removes a Nearby entry: it is only removed after a profile for that server ID actually exists. "Forget server" and "Forget all servers" remove profiles/tokens and their certificate pin; re-adding requires a fresh access code. (Superseded the earlier keep-pins-on-forget behavior.)
 
 For users who cannot touch the host, an authenticated admin could mint a short-lived single-use pairing code (this mechanism was superseded by the unified access-code model on 2026-10-26).
 
