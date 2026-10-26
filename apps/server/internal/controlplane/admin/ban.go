@@ -7,8 +7,46 @@ import (
 	"fmt"
 
 	"mako/internal/controlplane/audit"
+	"mako/internal/controlplane/auth"
 	"mako/internal/controlplane/persistence/repo"
 )
+
+// RemoveUser soft-deletes an account: it revokes/closes all access, clears the
+// username and password so the name can be reused, and leaves the row for
+// audit/foreign-key integrity. It refuses to remove _SYSTEM or the final
+// active admin.
+func (s *Service) RemoveUser(ctx context.Context, targetUserID, callerUserID string, actor audit.Context) ([]TeardownTarget, error) {
+	var teardownTargets []TeardownTarget
+	err := s.withTx(ctx, func(q *repo.Queries) error {
+		if _, err := s.authSvc.RequireActiveAdmin(ctx, q, callerUserID); err != nil {
+			return err
+		}
+		target, err := requireTarget(ctx, q, targetUserID)
+		if err != nil {
+			return err
+		}
+		if target.ID == "_SYSTEM" {
+			return ErrCannotRemoveSystem
+		}
+		if err := requireNotFinalActiveAdmin(ctx, q, target, "registered", "banned"); err != nil &&
+			callerUserID != auth.SystemUserID {
+			return err
+		}
+		targets, err := s.closeBannedUserAccessTx(ctx, q, target.ID, actor)
+		if err != nil {
+			return err
+		}
+		if err := q.SoftDeleteUser(ctx, target.ID); err != nil {
+			return fmt.Errorf("soft delete user: %w", err)
+		}
+		teardownTargets = targets
+		return audit.Record(ctx, q, actor, "user.remove", "user", target.ID, audit.OutcomeSuccess)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return teardownTargets, nil
+}
 
 // SetBanStatus sets targetUserID's status (refusing to ban the final active
 // admin, via requireNotFinalActiveAdmin). Banning closes every session

@@ -155,7 +155,7 @@ curl.exe -H "Content-Type: application/json" `
   http://127.0.0.1:3001/api/v1/admin/access-codes
 ```
 
-If the only admin loses both the certificate pin and the password, recovery happens on the server: reset the password at `POST /api/v1/admin/users/reset-password` and mint an owner access code. This is the unavoidable out-of-band trust recovery path.
+The owner never sets or reads a user password. If someone loses access, remove the account in Users; the console then issues a fresh unbound access code. The user creates a new account, and the owner can promote it to admin from the same page. If the only admin is removed, the owner console can promote the replacement account. This is the unavoidable out-of-band recovery path.
 
 After redemption, the saved profile stores the certificate pin; later known-server detection verifies it and hides the code field. Forget server removes the profile and its pin.
 

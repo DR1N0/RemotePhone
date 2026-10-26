@@ -114,8 +114,8 @@ export const api = {
     request<void>(`/api/v1/admin/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(credentialId)}/revoke`, { method: "POST" }),
   createAccessCode: (input: { username?: string; ttlSeconds?: number } = {}) =>
     request<AccessCode>("/api/v1/admin/access-codes", { method: "POST", body: JSON.stringify(input) }),
-  resetPassword: (input: { username: string; password: string }) =>
-    request<void>("/api/v1/admin/users/reset-password", { method: "POST", body: JSON.stringify(input) }),
+  deleteUser: (id: string) =>
+    request<void>(`/api/v1/admin/users/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   getServer: () => request<ServerIdentity>("/api/v1/admin/server"),
   listAdminInstances: () =>

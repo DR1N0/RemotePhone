@@ -1,7 +1,6 @@
 package adminapi_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +8,6 @@ import (
 	"testing"
 
 	"mako/internal/controlplane/apiserver/adminapi"
-	"mako/internal/controlplane/auth"
 )
 
 func ownerRequest(t *testing.T, mux *http.ServeMux, method, path, body, origin string) *httptest.ResponseRecorder {
@@ -61,23 +59,5 @@ func TestOwnerAllowsSameOrigin(t *testing.T) {
 	rec := ownerRequest(t, mux, http.MethodPost, "/api/v1/admin/access-codes", `{}`, "http://127.0.0.1:3001")
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestOwnerResetPasswordAndLogin(t *testing.T) {
-	svc, secretPath := newTestServiceForAdminAPI(t)
-	setupTestAdminForAdminAPI(t, svc, secretPath, "owner_admin", "initial-password")
-	mux := http.NewServeMux()
-	adminapi.RegisterOwnerRoutes(mux, svc, nil, nil)
-
-	rec := ownerRequest(t, mux, http.MethodPost, "/api/v1/admin/users/reset-password",
-		`{"username":"owner_admin","password":"recovered-password"}`, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("reset status = %d; body=%s", rec.Code, rec.Body.String())
-	}
-	if _, _, err := svc.Login(context.Background(), auth.LoginInput{
-		Username: "owner_admin", Password: "recovered-password", DeviceLabel: "test",
-	}); err != nil {
-		t.Fatalf("login with reset password: %v", err)
 	}
 }

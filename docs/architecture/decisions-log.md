@@ -16,7 +16,7 @@ The console has no login. Reaching the loopback listener is the owner proof. `/a
 
 `_SYSTEM` is a real hidden `users` row (`user_type=system`, no username/password) with a `_SYSTEM` credential so audit foreign keys remain valid. User listings and setup/admin counts exclude it. Usernames must start with a letter or digit; leading underscores are reserved for internal identities.
 
-The UI is redesigned into Overview / Users / Instances / Audit / Server. Access codes are actions inside Users (invite a new user or create a device code), not a separate page. Login, Invitations, and Session diagnostic pages were removed. The visual language follows the Android client: black/white surfaces with a single cat's-eye gold accent.
+The UI is redesigned into Overview / Users / Instances / Audit. Access codes and account removal are actions inside Users (invite a new user, create a user-specific code, or remove an account and immediately issue a fresh invite), not separate pages. The owner never sets or reads a user's password; a removed account's username is released and the user recreates the account. Login, Invitations, Session diagnostic, and a duplicated Server page were removed; server identity remains on Overview. The visual language follows the Android client: black/white surfaces with a single cat's-eye gold accent.
 
 ---
 

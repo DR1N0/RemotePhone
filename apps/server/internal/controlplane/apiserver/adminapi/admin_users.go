@@ -30,6 +30,7 @@ func adminErrorStatus(err error) int {
 		errors.Is(err, admin.ErrAccountCredentialNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, admin.ErrLastActiveAdmin),
+		errors.Is(err, admin.ErrCannotRemoveSystem),
 		errors.Is(err, audit.ErrInvalidCursor):
 		return http.StatusConflict
 	case errors.Is(err, audit.ErrInvalidLimit):
@@ -126,6 +127,21 @@ func RegisterAdminManagementRoutes(mux *http.ServeMux, adminSvc *admin.Service, 
 		caller := middleware.GetAuthenticatedUser(r.Context())
 		actor := audit.NewContext(&caller.UserID, &caller.CredentialID, uuid.NewString())
 		if err := adminSvc.SetUserType(r.Context(), r.PathValue("id"), req.Type, caller.UserID, actor); err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))))
+
+	mux.Handle("DELETE /api/v1/admin/users/{id}", requireAuth(requireAccount(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		caller := middleware.GetAuthenticatedUser(r.Context())
+		actor := audit.NewContext(&caller.UserID, &caller.CredentialID, uuid.NewString())
+		targets, err := adminSvc.RemoveUser(r.Context(), r.PathValue("id"), caller.UserID, actor)
+		if err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		if err := teardownRevokedAttachments(r, transportSvc, actor, targets); err != nil {
 			writeAdminError(w, err)
 			return
 		}

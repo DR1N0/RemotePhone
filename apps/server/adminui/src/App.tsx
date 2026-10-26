@@ -5,7 +5,6 @@ import { api } from "./api/client.js"
 import Audit from "./pages/Audit.js"
 import Instances from "./pages/Instances.js"
 import Overview from "./pages/Overview.js"
-import Server from "./pages/Server.js"
 import Setup from "./pages/Setup.js"
 import Users from "./pages/Users.js"
 
@@ -30,7 +29,6 @@ function Shell() {
           <NavLink to="/users">Users</NavLink>
           <NavLink to="/instances">Instances</NavLink>
           <NavLink to="/audit">Audit</NavLink>
-          <NavLink to="/server">Server</NavLink>
         </nav>
       </header>
       <main className="admin-content">
@@ -39,7 +37,6 @@ function Shell() {
           <Route path="/users" element={<Users />} />
           <Route path="/instances" element={<Instances />} />
           <Route path="/audit" element={<Audit />} />
-          <Route path="/server" element={<Server />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

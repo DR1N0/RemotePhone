@@ -6,7 +6,7 @@ SQLite, migrations applied in order from `apps/server/internal/controlplane/pers
 
 | Table | Purpose | Notable columns |
 |---|---|---|
-| `users` | Accounts (renamed from `principals` in `0008`). | `user_type` (`registered`/`admin`/`guest`/`system` — `system` is the hidden `_SYSTEM` owner actor added in `0016`, see below), `username` (unique, case-insensitive, may not start with `_`), `password_hash`, `status` (`active`/`banned`). `is_server_owner` and `enrollment_required` were dropped in `0010` — see below. |
+| `users` | Accounts (renamed from `principals` in `0008`). | `user_type` (`registered`/`admin`/`guest`/`system` — `system` is the hidden `_SYSTEM` owner actor added in `0016`, see below), `username` (unique, case-insensitive, may not start with `_`), `password_hash`, `status` (`active`/`banned`), `deleted_at` (soft-delete tombstone, `0017`). `is_server_owner` and `enrollment_required` were dropped in `0010` — see below. |
 | `credentials` | Bearer-token-backed credentials, scoped to an account or a specific attachment. | `user_id`, `token_hash`, `scope` (`account`/`attachment`), `session_id`, `attachment_id`, `not_before`, `expires_at`, `revoked_at`. |
 | `registration_invites` | Legacy single-use tokens an admin issues so a new user can self-register; the Android client now uses `access_codes`. Renamed from `pairing_invites` in `0010`. | `token_hash`, `created_by`, `expires_at`, `consumed_at`, `consumed_by_user_id`. |
 | `access_codes` | Unified device-pairing / account-creation codes (`0015`). | `code_hash` (unique), nullable `target_user_id` (NULL = admin/unbound code that may create an ordinary user or pair an existing account; set = self code bound to that user), nullable `created_by_user_id`, `expires_at`, `used_at`, `failed_attempts` (invalidates after five wrong passwords). |
@@ -116,4 +116,12 @@ INSERT OR IGNORE INTO credentials (id='_SYSTEM', user_id='_SYSTEM', token_hash='
 ```
 
 Adds the hidden local-owner principal used as the audit actor for tokenless `/api/v1/admin/*` operations. It cannot authenticate; its credential exists only to satisfy `audit_events.actor_credential_id`. `CountRegisteredOrAdminUsers` and `ListAccountUsers` exclude `system`, so the seeded row does not make the server look claimed or appear in Users. Usernames must now start with a letter or digit; leading underscores are reserved.
+
+## What `0017` did
+
+```sql
+ALTER TABLE users ADD COLUMN deleted_at TEXT;
+```
+
+Owner account removal is a soft delete: status becomes `banned`, username/password are cleared (releasing the name for a fresh account), device sessions/credentials are revoked, and the row remains for audit and instance foreign keys. `ListAccountUsers` filters `deleted_at IS NULL`; setup/admin counts intentionally still see the tombstone so deleting the last admin does not make the server look unclaimed. Owned instances are not deleted automatically.
 

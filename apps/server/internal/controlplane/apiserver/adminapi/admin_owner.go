@@ -16,15 +16,6 @@ type ownerAccessCodeRequest struct {
 	TTLSeconds int    `json:"ttlSeconds"`
 }
 
-type ownerResetPasswordRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-// RegisterOwnerRoutes mounts the loopback owner console operations under the
-// same /api/v1/admin namespace as the rest of the admin API. With no bearer
-// token the middleware attributes the request to _SYSTEM; a bearer token is
-// still accepted for programmatic clients.
 func RegisterOwnerRoutes(mux *http.ServeMux, authSvc *auth.Service, pairingSvc *pairing.Service, info *serverinfo.Info) {
 	if authSvc == nil {
 		return
@@ -61,19 +52,6 @@ func RegisterOwnerRoutes(mux *http.ServeMux, authSvc *auth.Service, pairingSvc *
 			"expiresAt": expiresAt.UTC().Format(time.RFC3339),
 			"target":    req.Username,
 		})
-	})))
-
-	mux.Handle("POST /api/v1/admin/users/reset-password", requireOwner(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req ownerResetPasswordRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			middleware.WriteJSONError(w, http.StatusBadRequest, "invalid owner request")
-			return
-		}
-		if err := authSvc.ResetPassword(r.Context(), req.Username, req.Password); err != nil {
-			middleware.WriteJSONError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		middleware.WriteJSON(w, http.StatusOK, map[string]string{"status": "password reset"})
 	})))
 
 	mux.Handle("GET /api/v1/admin/server", requireOwner(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

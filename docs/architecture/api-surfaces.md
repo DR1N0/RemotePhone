@@ -36,7 +36,7 @@ Owner/admin routes:
 | GET | `/api/v1/admin/images` | `?templateId=` required; lists captured base images |
 | POST | `/api/v1/admin/images/{candidateId}/promote` | moves the template's current base image |
 | POST | `/api/v1/admin/access-codes` | body `{username?,ttlSeconds?}`; unbound when username omitted |
-| POST | `/api/v1/admin/users/reset-password` | `{username,password}`; revokes the user's account credentials |
+| DELETE | `/api/v1/admin/users/{id}` | soft-deletes the account, revokes devices/sessions, releases the username; does not delete owned instances |
 | GET | `/api/v1/admin/server` | server ID, name, certificate SHA-256 |
 | GET | `/admin/` | embedded owner UI |
 | GET | `/healthz` | |

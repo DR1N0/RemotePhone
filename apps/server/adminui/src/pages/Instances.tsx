@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Button, Popconfirm, Space, Table, Tag, Typography, message } from "antd"
-import { api, type AdminInstance } from "../api/client.js"
+import { api, type AdminInstance, type User } from "../api/client.js"
 
 const { Text } = Typography
 const STATE_COLOR: Record<string, string> = {
@@ -13,13 +13,21 @@ const STATE_COLOR: Record<string, string> = {
 
 export default function Instances() {
   const [instances, setInstances] = useState<AdminInstance[]>([])
+  const [owners, setOwners] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [messageApi, contextHolder] = message.useMessage()
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setInstances(await api.listAdminInstances())
+      const [items, page] = await Promise.all([
+        api.listAdminInstances(),
+        api.listUsers({ limit: 100, cursor: null }),
+      ])
+      setInstances(items)
+      setOwners(Object.fromEntries(
+        page.items.map((user: User) => [user.id, user.username ?? user.displayName]),
+      ))
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : "Unable to load instances")
     } finally {
@@ -56,7 +64,11 @@ export default function Instances() {
         pagination={false}
         columns={[
           { title: "Name", dataIndex: "name" },
-          { title: "Owner", dataIndex: "ownerId", render: (ownerId: string) => <Text code>{ownerId}</Text> },
+          {
+            title: "Owner",
+            dataIndex: "ownerId",
+            render: (ownerId: string) => owners[ownerId] ?? <Text code>{ownerId}</Text>,
+          },
           {
             title: "State",
             key: "state",

@@ -19,5 +19,7 @@ React/Vite UI embedded into `mako-controlplane` and served at
 
 - **Dev server:** `npm run dev` proxies `/api` to `127.0.0.1:3001`.
 
-Pages: Overview, Users, Instances, Audit, Server. Access codes are issued from
-the Users page (invite user or device code).
+Pages: Overview, Users, Instances, Audit. Access codes and account removal
+are actions in the Users page; server identity lives in Overview. Removing an
+account releases its username and revokes devices; issue a new access code with
+Invite user to let the person recreate the account.

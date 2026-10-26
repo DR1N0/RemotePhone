@@ -326,34 +326,3 @@ func (s *Service) recordAccessCodeFailure(ctx context.Context, tx *sql.Tx, row a
 		WHERE id = ?`, attempts, usedAt, row.ID)
 	return err
 }
-
-// ResetPassword is an owner-only recovery operation. It also revokes every
-// existing account credential for that user.
-func (s *Service) ResetPassword(ctx context.Context, username, password string) error {
-	if !isValidPassword(password) {
-		return NewServiceError("password must be between 8 and 1024 bytes")
-	}
-	user, err := s.q.GetUserByUsername(ctx, strings.ToLower(strings.TrimSpace(username)))
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrUserNotFound
-		}
-		return fmt.Errorf("get user: %w", err)
-	}
-	hash, err := HashPassword(password)
-	if err != nil {
-		return fmt.Errorf("hash password: %w", err)
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin password reset: %w", err)
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, hash, user.ID); err != nil {
-		return fmt.Errorf("update password: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE credentials SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL`, user.ID); err != nil {
-		return fmt.Errorf("revoke credentials: %w", err)
-	}
-	return tx.Commit()
-}

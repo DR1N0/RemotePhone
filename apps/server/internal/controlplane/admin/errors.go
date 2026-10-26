@@ -7,6 +7,7 @@ import "errors"
 // instead of redefining equivalents here.
 var (
 	ErrLastActiveAdmin           = errors.New("cannot remove the final active admin")
+	ErrCannotRemoveSystem        = errors.New("cannot remove the system owner")
 	ErrGuestAttachmentNotFound   = errors.New("guest attachment not found")
 	ErrAccountCredentialNotFound = errors.New("account credential not found")
 )

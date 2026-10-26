@@ -1,8 +1,34 @@
-import { useCallback, useEffect, useState } from "react"
-import { Button, Drawer, Modal, Select, Space, Table, Tag, Typography, message } from "antd"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Button, Drawer, Dropdown, Modal, Select, Space, Table, Tag, Typography, message } from "antd"
 import { api, type AccessCode, type AdminCredential, type User } from "../api/client.js"
 
 const { Text } = Typography
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    const area = document.createElement("textarea")
+    area.value = text
+    area.setAttribute("readonly", "")
+    area.style.position = "fixed"
+    area.style.top = "0"
+    area.style.left = "0"
+    area.style.width = "1px"
+    area.style.height = "1px"
+    area.style.opacity = "0"
+    document.body.appendChild(area)
+    try {
+      area.focus()
+      area.select()
+      area.setSelectionRange(0, text.length)
+      return document.execCommand("copy")
+    } finally {
+      area.remove()
+    }
+  }
+}
 
 export default function Users() {
   const [users, setUsers] = useState<User[]>([])
@@ -12,6 +38,9 @@ export default function Users() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [issued, setIssued] = useState<{ code: AccessCode; target: string } | null>(null)
   const [issuing, setIssuing] = useState(false)
+  const [deleteUser, setDeleteUser] = useState<User | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const codeRef = useRef<HTMLElement>(null)
   const [messageApi, contextHolder] = message.useMessage()
 
   const load = useCallback(async (nextCursor: string | null, append: boolean) => {
@@ -66,11 +95,32 @@ export default function Users() {
 
   const copy = async () => {
     if (issued == null) return
-    try {
-      await navigator.clipboard.writeText(issued.code.code)
+    if (await copyText(issued.code.code)) {
       messageApi.success("Access code copied")
-    } catch {
+    } else if (codeRef.current != null) {
+      const range = document.createRange()
+      range.selectNodeContents(codeRef.current)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      messageApi.info("Clipboard unavailable; code selected — press Ctrl+C")
+    } else {
       messageApi.error("Unable to copy access code")
+    }
+  }
+
+  const removeAccount = async () => {
+    if (deleteUser == null) return
+    setDeleting(true)
+    try {
+      await api.deleteUser(deleteUser.id)
+      messageApi.success("Account removed; device credentials revoked")
+      setDeleteUser(null)
+      await load(null, false)
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "Unable to remove account")
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -96,14 +146,9 @@ export default function Users() {
         pagination={false}
         columns={[
           {
-            title: "Account",
-            key: "account",
-            render: (_, user) => (
-              <Space direction="vertical" size={0}>
-                <Text>{user.displayName}</Text>
-                <Text type="secondary">{user.username ?? "No username"}</Text>
-              </Space>
-            ),
+            title: "Username",
+            dataIndex: "username",
+            render: (username: string | null, user) => <Text>{username ?? user.displayName}</Text>,
           },
           { title: "Type", dataIndex: "type", render: (type: User["type"]) => <Tag>{type}</Tag> },
           {
@@ -119,9 +164,9 @@ export default function Users() {
             render: (_, user) => (
               <Space wrap>
                 <Select
-                  aria-label={`Role for ${user.displayName}`}
+                  aria-label={`Role for ${user.username ?? user.displayName}`}
                   value={user.type === "guest" || user.type === "system" ? undefined : user.type}
-                  style={{ width: 124 }}
+                  style={{ width: 118 }}
                   disabled={user.type === "guest" || user.type === "system"}
                   onChange={(type: "registered" | "admin") =>
                     void mutate(() => api.setUserType(user.id, type), "User type updated")}
@@ -136,19 +181,40 @@ export default function Users() {
                   loading={issuing}
                   onClick={() => void issue(user)}
                 >
-                  Device code
+                  Access code
                 </Button>
                 <Button size="small" onClick={() => void openCredentials(user)}>Devices</Button>
-                <Button
-                  size="small"
-                  danger={user.status === "active"}
-                  onClick={() => void mutate(
-                    () => api.setBanStatus(user.id, user.status === "active" ? "banned" : "active"),
-                    user.status === "active" ? "User banned" : "User unbanned",
-                  )}
+                <Dropdown
+                  trigger={["click"]}
+                  menu={{
+                    items: [
+                      {
+                        key: "ban",
+                        label: user.status === "active" ? "Ban user" : "Unban user",
+                        danger: user.status === "active",
+                      },
+                      { type: "divider" },
+                      {
+                        key: "remove",
+                        label: "Remove account",
+                        danger: true,
+                        disabled: user.username == null,
+                      },
+                    ],
+                    onClick: ({ key }) => {
+                      if (key === "remove") {
+                        setDeleteUser(user)
+                      } else if (key === "ban") {
+                        void mutate(
+                          () => api.setBanStatus(user.id, user.status === "active" ? "banned" : "active"),
+                          user.status === "active" ? "User banned" : "User unbanned",
+                        )
+                      }
+                    },
+                  }}
                 >
-                  {user.status === "active" ? "Ban" : "Unban"}
-                </Button>
+                  <Button size="small">More</Button>
+                </Dropdown>
               </Space>
             ),
           },
@@ -161,11 +227,16 @@ export default function Users() {
       )}
 
       <Drawer
-        title={selectedUser == null ? "Devices" : `Devices for ${selectedUser.displayName}`}
+        title={selectedUser == null ? "Devices" : `Devices for ${selectedUser.username ?? selectedUser.displayName}`}
         width={560}
         open={selectedUser != null}
         onClose={() => setSelectedUser(null)}
       >
+        <p className="page-subtitle" style={{ marginBottom: 16 }}>
+          Each row is an account credential issued when a device logged in.
+          Revoking it invalidates that device&apos;s bearer token immediately;
+          the user must sign in again.
+        </p>
         {credentials == null && <Text type="secondary">Loading...</Text>}
         {credentials != null && credentials.length === 0 && <Text type="secondary">No account devices.</Text>}
         {credentials != null && credentials.map((credential) => (
@@ -192,6 +263,7 @@ export default function Users() {
 
       <Modal
         open={issued != null}
+        width={520}
         title={issued?.target ? `Access code for ${issued.target}` : "Invite user"}
         onCancel={() => setIssued(null)}
         footer={[
@@ -201,7 +273,7 @@ export default function Users() {
       >
         {issued != null && (
           <>
-            <code className="code-display">{issued.code.code}</code>
+            <code ref={codeRef} className="code-display">{issued.code.code}</code>
             <p className="page-subtitle" style={{ marginBottom: 0 }}>
               {issued.target
                 ? `Use this on the user's new device to add it to the ${issued.target} account.`
@@ -211,7 +283,22 @@ export default function Users() {
           </>
         )}
       </Modal>
+
+      <Modal
+        open={deleteUser != null}
+        title={`Remove ${deleteUser?.username ?? "account"}?`}
+        onCancel={() => setDeleteUser(null)}
+        okText="Remove account"
+        okButtonProps={{ danger: true }}
+        confirmLoading={deleting}
+        onOk={() => void removeAccount()}
+      >
+        <p className="page-subtitle">
+          This deletes the account and revokes every device credential. The
+          username is released. Use Invite user afterwards to create a fresh
+          access code; owned instances are not deleted automatically.
+        </p>
+      </Modal>
     </section>
   )
 }
-

@@ -114,6 +114,7 @@ const listAccountUsers = `-- name: ListAccountUsers :many
 SELECT id, display_name, status, created_at, updated_at, user_type, username, password_hash FROM users
 WHERE user_type != 'guest'
   AND user_type != 'system'
+  AND deleted_at IS NULL
   AND (?1 IS NULL OR id > ?1)
 ORDER BY id ASC
 LIMIT ?2
@@ -154,6 +155,22 @@ func (q *Queries) ListAccountUsers(ctx context.Context, arg ListAccountUsersPara
 		return nil, err
 	}
 	return items, nil
+}
+
+const softDeleteUser = `-- name: SoftDeleteUser :exec
+UPDATE users
+SET status = 'banned',
+    username = NULL,
+    display_name = 'Deleted user',
+    password_hash = NULL,
+    deleted_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = ?
+`
+
+func (q *Queries) SoftDeleteUser(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, softDeleteUser, id)
+	return err
 }
 
 const setUserStatus = `-- name: SetUserStatus :exec
