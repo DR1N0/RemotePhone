@@ -93,9 +93,6 @@ class AuthService extends ChangeNotifier {
         if (match != null && match == observed) {
           await savePinnedFingerprint(baseUrl, observed);
           await saveServerPinnedFingerprint(info.serverId, observed);
-          if (known.isNotEmpty) {
-            await updateDiscoveredServer(info.serverId, baseUrl, info.name);
-          }
           return TrustedServer(
             baseUrl: baseUrl,
             trusted: true,
