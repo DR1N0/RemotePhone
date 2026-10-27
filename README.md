@@ -204,7 +204,7 @@ flutter analyze
 - **GPU acceleration must be requested explicitly on Windows.** The emulator can silently persist `hw.gpu.mode=swiftshader`; mako now passes `-gpu host` by default on Windows so games use the host GPU (verified with an AMD RX 9070: host Vulkan and GLES translators selected). Multiple instances share that GPU/VRAM and the H.264 encoder, so disk, VRAM, and encode capacity all need to be considered together.
 - **An Android emulator is a poor test client on the same Windows host.** Its NAT hairpin to the host's own LAN IP loses packets under video load; a real phone on the LAN is the trustworthy end-to-end test. The host-side WebRTC probe is unaffected.
 - **No capacity enforcement.** Each instance costs a full emulator (RAM/CPU/disk); start only what the host can carry.
-- Base-image capture/promote and QCOW2 layering are verified end-to-end with a clean template (capture → promote → new instance → reboot). A real 37GB game capture and a correspondingly larger data partition are still open; see [`docs/architecture/decisions-log.md`](docs/architecture/decisions-log.md) and the roadmap.
+- Base-image capture/promote and QCOW2 layering are verified end-to-end, including a 38GB Zenless Zone Zero base copied from a real phone into a 64GB AVD (capture → promote → cloned instance boot). Base-image GC, async capture/progress, per-instance base pinning, and the admin Images UI are still open; see [`docs/architecture/decisions-log.md`](docs/architecture/decisions-log.md).
 
 ## Documentation
 

@@ -42,6 +42,10 @@ type Adapter struct {
 	// convertOverlayFn flattens an instance's current userdata chain into a
 	// standalone qcow2 base image. Swappable in tests for the same reason.
 	convertOverlayFn func(qemuImgPath, sourcePath, destPath string) error
+	// convertKeyFn flattens the emulator's encryption-key overlay into a
+	// standalone raw key image. The key image must accompany a base image or
+	// a cloned instance cannot decrypt the captured userdata.
+	convertKeyFn func(qemuImgPath, sourcePath, destPath string) error
 }
 
 type ProcessHandle interface {
@@ -104,6 +108,15 @@ func NewAdapter(cfg config.Config, store runtime.HandleStore, transportStore *tr
 		).CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("qemu-img convert: %w (%s)", err, strings.TrimSpace(string(output)))
+		}
+		return nil
+	}
+	adapter.convertKeyFn = func(qemuImgPath, sourcePath, destPath string) error {
+		output, err := exec.Command(
+			qemuImgPath, "convert", "-O", "raw", sourcePath, destPath,
+		).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("qemu-img convert encryption key: %w (%s)", err, strings.TrimSpace(string(output)))
 		}
 		return nil
 	}
@@ -260,7 +273,10 @@ func (a *Adapter) CleanupInstanceData(instanceID string) error {
 //
 // /sdcard is part of the same /data filesystem on current AVDs (FUSE over
 // /data/media), so external-storage game resources are included in this
-// userdata capture rather than requiring a separate sdcard image.
+// userdata capture rather than requiring a separate sdcard image. The AVD's
+// encryption key is flattened into the artifact too; without it a cloned
+// instance generates a different key and hangs before Android can mount the
+// captured userdata.
 func (a *Adapter) CaptureBaseImage(baseImageID, sourceDataDir string) (artifactPath string, err error) {
 	artifactDir := filepath.Join(a.baseImageRoot, baseImageID)
 	if err := os.MkdirAll(artifactDir, 0700); err != nil {
@@ -289,7 +305,35 @@ func (a *Adapter) CaptureBaseImage(baseImageID, sourceDataDir string) (artifactP
 		cleanup()
 		return "", fmt.Errorf("flatten userdata for base image: %w", err)
 	}
+	if err := a.captureEncryptionKey(qemuImgPath, sourceDataDir, artifactDir); err != nil {
+		cleanup()
+		return "", err
+	}
 	return artifactDir, nil
+}
+
+// captureEncryptionKey includes the emulator's encryption-key state in the
+// base artifact. Without it, a cloned instance gets a fresh key and cannot
+// decrypt the captured userdata, which manifests as a boot hang. The key's
+// qcow2 overlay is flattened to a standalone raw image so the base does not
+// depend on the source instance directory.
+func (a *Adapter) captureEncryptionKey(qemuImgPath, sourceDir, artifactDir string) error {
+	keyTop := filepath.Join(sourceDir, "encryptionkey.img.qcow2")
+	keyRaw := filepath.Join(sourceDir, "encryptionkey.img")
+	dest := filepath.Join(artifactDir, "encryptionkey.img")
+
+	if info, err := os.Stat(keyTop); err == nil && !info.IsDir() {
+		if err := a.convertKeyFn(qemuImgPath, keyTop, dest); err != nil {
+			return fmt.Errorf("flatten encryption key: %w", err)
+		}
+		return nil
+	}
+	if info, err := os.Stat(keyRaw); err == nil && !info.IsDir() {
+		if err := copyFile(keyRaw, dest); err != nil {
+			return fmt.Errorf("copy encryption key: %w", err)
+		}
+	}
+	return nil
 }
 
 // resolveQemuImgBinary finds qemu-img alongside the resolved emulator
@@ -327,10 +371,11 @@ func (a *Adapter) resolveQemuImgBinary() (string, error) {
 // crash-and-respawn cycle.
 //
 // seedOverrideDir, if non-empty, is a captured base image's artifact
-// directory (see CaptureBaseImage) — config.ini is copied from there and the
+// directory (see CaptureBaseImage) — config.ini is copied from there, the
 // instance's userdata-qemu.img becomes a small qcow2 overlay backed by the
-// shared base, instead of a full copy. Empty means "no base image has ever
-// been promoted for this template," today's original copy behavior.
+// shared base, and the captured encryption key is copied so the clone can
+// decrypt that userdata. Empty means "no base image has ever been promoted
+// for this template," today's original copy behavior.
 func (a *Adapter) ensureInstanceAVD(instanceID string, template runtime.Template, seedOverrideDir string) (avdName, avdContentDir string, err error) {
 	avdName = instanceAVDName(instanceID)
 	avdHomeDir := filepath.Join(a.discovery.HomeDir, ".android", "avd")
@@ -366,6 +411,9 @@ func (a *Adapter) ensureInstanceAVD(instanceID string, template runtime.Template
 		}
 		if err := a.createOverlayFn(qemuImgPath, basePath, filepath.Join(avdContentDir, "userdata-qemu.img")); err != nil {
 			return "", "", fmt.Errorf("create instance userdata overlay: %w", err)
+		}
+		if err := copyOptionalFile(filepath.Join(seedOverrideDir, "encryptionkey.img"), filepath.Join(avdContentDir, "encryptionkey.img")); err != nil {
+			return "", "", fmt.Errorf("copy base image encryption key: %w", err)
 		}
 	} else {
 		if err := copyFile(resolveSeedUserdataPath(sourceDir), filepath.Join(avdContentDir, "userdata-qemu.img")); err != nil {
@@ -419,6 +467,24 @@ func copyFile(src, dst string) error {
 	defer out.Close()
 	_, err = io.Copy(out, in)
 	return err
+}
+
+// copyOptionalFile copies src when it exists, and does nothing when the
+// source AVD predates the key-in-base artifact format. Missing encryption-key
+// files are not an error for legacy artifacts; current captures always
+// include one.
+func copyOptionalFile(src, dst string) error {
+	info, err := os.Stat(src)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return nil
+	}
+	return copyFile(src, dst)
 }
 
 func findTemplate(templates []runtime.Template, templateID string) (runtime.Template, error) {

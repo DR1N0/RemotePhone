@@ -34,6 +34,9 @@ func setupFakeAVD(t *testing.T, avdName string, withPristineUserdata bool) (home
 	if err := os.WriteFile(filepath.Join(avdPath, "userdata-qemu.img"), []byte("live-state"), 0644); err != nil {
 		t.Fatalf("write userdata-qemu.img: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(avdPath, "encryptionkey.img"), []byte("key-state"), 0644); err != nil {
+		t.Fatalf("write encryptionkey.img: %v", err)
+	}
 	if withPristineUserdata {
 		if err := os.WriteFile(filepath.Join(avdPath, "userdata.img"), []byte("pristine"), 0644); err != nil {
 			t.Fatalf("write userdata.img: %v", err)
@@ -67,6 +70,13 @@ func newTestAdapter(homeDir, dataRoot string) *Adapter {
 		return os.WriteFile(overlayPath, []byte("overlay-backed-by:"+basePath), 0644)
 	}
 	adapter.convertOverlayFn = func(_, sourcePath, destPath string) error {
+		data, err := os.ReadFile(sourcePath)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(destPath, data, 0644)
+	}
+	adapter.convertKeyFn = func(_, sourcePath, destPath string) error {
 		data, err := os.ReadFile(sourcePath)
 		if err != nil {
 			return err
@@ -294,6 +304,39 @@ func TestCaptureBaseImageCopiesConfigAndFlattensUserdata(t *testing.T) {
 	if got, err := os.ReadFile(filepath.Join(artifactPath, "userdata-qemu.img")); err != nil || string(got) != "live-state" {
 		t.Errorf("captured userdata-qemu.img = %q, err %v, want live-state", got, err)
 	}
+	if got, err := os.ReadFile(filepath.Join(artifactPath, "encryptionkey.img")); err != nil || string(got) != "key-state" {
+		t.Errorf("captured encryptionkey.img = %q, err %v, want key-state", got, err)
+	}
+}
+
+func TestCaptureBaseImageFlattensEncryptionKeyOverlay(t *testing.T) {
+	homeDir, avdPath := setupFakeAVD(t, "test-avd", true)
+	if err := os.WriteFile(filepath.Join(avdPath, "encryptionkey.img.qcow2"), []byte("key-overlay"), 0644); err != nil {
+		t.Fatalf("write key overlay: %v", err)
+	}
+	adapter := newTestAdapter(homeDir, t.TempDir())
+	adapter.baseImageRoot = t.TempDir()
+
+	var keySource, keyDest string
+	adapter.convertKeyFn = func(_, sourcePath, destPath string) error {
+		keySource = sourcePath
+		keyDest = destPath
+		return os.WriteFile(destPath, []byte("flattened-key"), 0644)
+	}
+
+	artifactPath, err := adapter.CaptureBaseImage("image-1", avdPath)
+	if err != nil {
+		t.Fatalf("CaptureBaseImage: %v", err)
+	}
+	if keySource != filepath.Join(avdPath, "encryptionkey.img.qcow2") {
+		t.Errorf("key convert source = %q, want the qcow2 overlay", keySource)
+	}
+	if keyDest != filepath.Join(artifactPath, "encryptionkey.img") {
+		t.Errorf("key convert dest = %q, want artifact encryptionkey.img", keyDest)
+	}
+	if got, err := os.ReadFile(keyDest); err != nil || string(got) != "flattened-key" {
+		t.Errorf("captured key = %q, err %v, want flattened-key", got, err)
+	}
 }
 
 // TestCaptureBaseImageFlattensQuickbootOverlay covers the writable-layer bug
@@ -376,6 +419,9 @@ func TestStartSeedsFromBaseImageArtifactWhenProvided(t *testing.T) {
 	if err := os.WriteFile(baseUserdata, []byte("base-userdata"), 0644); err != nil {
 		t.Fatalf("write artifact userdata-qemu.img: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "encryptionkey.img"), []byte("base-key"), 0644); err != nil {
+		t.Fatalf("write artifact encryptionkey.img: %v", err)
+	}
 
 	var overlayQemuImgPath, overlayBasePath, overlayDestPath string
 	adapter.createOverlayFn = func(qemuImgPath, basePath, overlayPath string) error {
@@ -409,6 +455,9 @@ func TestStartSeedsFromBaseImageArtifactWhenProvided(t *testing.T) {
 	}
 	if got, err := os.ReadFile(filepath.Join(handle.DataDir, "userdata-qemu.img")); err != nil || string(got) != "thin-overlay" {
 		t.Errorf("instance userdata-qemu.img = %q, err %v, want thin overlay", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(handle.DataDir, "encryptionkey.img")); err != nil || string(got) != "base-key" {
+		t.Errorf("instance encryptionkey.img = %q, err %v, want base-key", got, err)
 	}
 	if got, err := os.ReadFile(baseUserdata); err != nil || string(got) != "base-userdata" {
 		t.Errorf("base userdata changed: %q, err %v", got, err)
