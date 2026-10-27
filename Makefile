@@ -72,7 +72,7 @@ build-admin: ## Build the embedded owner console
 	@cd apps/server/adminui && npm run build
 
 .PHONY: run-admin
-run-admin: ## Run the owner console Vite dev server (proxy to :3001)
+run-admin: ## Run the owner console Vite dev server (proxy to :3001 or MAKO_ADMIN_PORT)
 	@cd apps/server/adminui && npm run dev
 
 .PHONY: build

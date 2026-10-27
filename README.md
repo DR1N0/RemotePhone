@@ -9,7 +9,7 @@ It is built for the case desktop-streaming tools cannot express: playing touch-n
 - **Server (Go)**: active implementation in [`apps/server`](apps/server). Auth, multi-tenant users/credentials, multi-instance-per-owner, template discovery, instance lifecycle, sessions/PIN invites, WebRTC transport, admin API, worker supervision, HTTPS on the client API, and base-image capture/promote are implemented and covered by tests.
 - **Client (Flutter, Android)**: [`apps/client`](apps/client) has access-code login/pairing, mDNS server discovery, a template picker, a multi-instance list (start/stop/connect/delete), and a WebRTC streaming screen with touch input. Android is the only supported client platform — iOS distribution was deliberately ruled out for a free/open-source project.
 - **Windows is a first-class host now**: the server builds and runs on Windows with WHPX-accelerated emulators and AMD `h264_amf` hardware encoding (see [Windows host](#windows-host)).
-- **Owner console**: served by `mako-controlplane` at `http://127.0.0.1:3001/admin/` from `apps/server/adminui`; no login, loopback-only. The legacy TypeScript control plane (`apps/controlplane`) was removed on 2026-10-26.
+- **Owner console**: served by `mako-controlplane` at `http://127.0.0.1:3001/admin/` from `apps/server/adminui`; no login, loopback-only. The port is configurable with `MAKO_ADMIN_PORT` if 3001 is already in use. The legacy TypeScript control plane (`apps/controlplane`) was removed on 2026-10-26.
 
 ## Architecture
 
@@ -55,6 +55,7 @@ Set these before starting the control plane (the spawned worker inherits its env
 | `MAKO_BASE_IMAGE_ROOT` | `E:\mako\base-images` | Captured base images |
 | `STUN_URL` | `none` | `none` disables STUN; use it on a LAN |
 | `MAKO_CLIENT_ADDR` | `0.0.0.0:3000` | Bind the client API on the LAN for phones |
+| `MAKO_ADMIN_PORT` | `3001` | Owner console port on `127.0.0.1`; change it when 3001 is already taken |
 | `MAKO_TLS_CERT_PATH` / `MAKO_TLS_KEY_PATH` | defaults beside the DB | Self-signed cert/key |
 | `MAKO_STREAM_BITRATE` | `2000000` | H.264 bitrate (bits/s); lower it for weak WiFi |
 | `MAKO_AUDIO_DEBUG` | `1` | Log audio packet RMS/peak and `WriteSample` stalls (diagnostics only) |
@@ -99,7 +100,9 @@ $env:MAKO_STREAM_BITRATE = "2000000"
 .\mako-controlplane.exe
 ```
 
-On first run, read the bootstrap secret from `<db>.bootstrap-secret` and create the first admin (admin API is loopback-only on `127.0.0.1:3001`). The owner console is at `http://127.0.0.1:3001/admin/` and needs no login:
+On first run, read the bootstrap secret from `<db>.bootstrap-secret` and create the first admin (admin API is loopback-only on `127.0.0.1:3001` by default; set `MAKO_ADMIN_PORT` if that port is occupied). The owner console is at `http://127.0.0.1:3001/admin/` and needs no login:
+
+If you set `MAKO_ADMIN_PORT`, substitute that port in the owner-console and setup URLs below.
 
 ```powershell
 $secret = (Get-Content .\mako.db.bootstrap-secret -Raw).Trim()
@@ -146,7 +149,7 @@ curl.exe -k -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json
 
 An ordinary user's self code uses the same endpoint. The server returns `scope: "self"` or `scope: "new-or-existing"` and an expiry. Redeem with `POST /api/v1/access-codes/redeem` (`code`, `username`, `password`); the response includes `created`, the token, and `certSha256` for pinning.
 
-The loopback owner console on `127.0.0.1:3001` has no bearer-token requirement because reaching it already requires host access; it is protected against browser CSRF/DNS rebinding. It can create a code for any target (or unbound) and reset a password:
+The loopback owner console on `127.0.0.1:3001` (or `MAKO_ADMIN_PORT`) has no bearer-token requirement because reaching it already requires host access; it is protected against browser CSRF/DNS rebinding. It can create a code for any target (or unbound):
 
 ```powershell
 Set-Content -NoNewline $env:TEMP\code.json '{}'

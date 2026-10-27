@@ -2,7 +2,7 @@
 
 Two HTTP listeners, registered in `apps/server/cmd/mako-controlplane/main.go`. Route lists below were read directly from the route-registration code (`apiserver/{adminapi,clientapi,commonauth}`), not inferred from any design doc.
 
-## Owner console — `127.0.0.1:3001`
+## Owner console — `127.0.0.1:3001` (configurable with `MAKO_ADMIN_PORT`)
 
 The owner console is embedded from `apps/server/adminui` and served at `/admin/` (SPA fallback). It has no login; the loopback listener is the owner boundary. `/api/v1/admin/*` accepts requests with no bearer token and attributes them to `_SYSTEM`; a bearer token is still accepted for programmatic clients. Tokenless requests require a loopback Host, a same-origin/localhost Origin (or no Origin), and JSON POST bodies.
 

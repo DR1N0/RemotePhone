@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"mako/adminui"
@@ -86,6 +87,11 @@ func run() error {
 
 	dbPath := envOrDefault("MAKO_DB_PATH", "mako.db")
 	bootstrapSecretPath := envOrDefault("MAKO_BOOTSTRAP_SECRET_PATH", dbPath+".bootstrap-secret")
+
+	adminPort, err := adminPortFromEnv()
+	if err != nil {
+		return err
+	}
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -187,7 +193,9 @@ func run() error {
 	}
 	log.Printf("bootstrap access code: %s (certificate SHA-256: %s)", pairingSvc.PIN(), pairingSvc.CertSHA256())
 
-	adminSrv := &http.Server{Addr: "127.0.0.1:3001", Handler: newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc, pairingSvc, serverInfo)}
+	adminAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(adminPort))
+	adminSrv := &http.Server{Addr: adminAddr, Handler: newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc, pairingSvc, serverInfo)}
+	log.Printf("owner console: http://%s/admin/", adminAddr)
 	clientAddr := envOrDefault("MAKO_CLIENT_ADDR", "127.0.0.1:3000")
 	clientSrv := &http.Server{
 		Addr:      clientAddr,
@@ -210,7 +218,13 @@ func run() error {
 	}
 
 	errCh := make(chan error, 2)
-	go func() { errCh <- adminSrv.ListenAndServe() }()
+	go func() {
+		err := adminSrv.ListenAndServe()
+		if err != nil && err != http.ErrServerClosed {
+			err = fmt.Errorf("owner console listen on %s (set MAKO_ADMIN_PORT to a free port): %w", adminAddr, err)
+		}
+		errCh <- err
+	}()
 	go func() { errCh <- clientSrv.ListenAndServeTLS("", "") }() // cert/key already in TLSConfig
 
 	select {
@@ -278,6 +292,25 @@ func runWorkerLivenessResync(ctx context.Context, instanceSvc *instance.Service,
 			}
 		}
 	}
+}
+
+const defaultAdminPort = 3001
+
+// adminPortFromEnv returns the loopback owner-console port. The host is
+// deliberately not configurable: the console's security boundary is that it
+// is bound to 127.0.0.1, so exposing it on another interface would defeat the
+// owner-proof model. Only the port moves, which is enough to coexist with
+// unrelated software already using 3001.
+func adminPortFromEnv() (int, error) {
+	raw, ok := os.LookupEnv("MAKO_ADMIN_PORT")
+	if !ok || strings.TrimSpace(raw) == "" {
+		return defaultAdminPort, nil
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || port < 1 || port > 65535 {
+		return 0, fmt.Errorf("invalid MAKO_ADMIN_PORT %q: must be an integer between 1 and 65535", raw)
+	}
+	return port, nil
 }
 
 func envOrDefault(key, fallback string) string {

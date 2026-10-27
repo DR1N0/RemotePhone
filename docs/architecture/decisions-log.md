@@ -8,6 +8,12 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-27 — Owner console port is configurable
+
+The owner console was hardcoded to `127.0.0.1:3001`, so any unrelated program already using that port prevented the entire control plane from starting. `MAKO_ADMIN_PORT` now selects the port (default `3001`); the bind host remains `127.0.0.1` on purpose, because loopback binding is the owner boundary. The embedded Vite dev server already read the same variable for its `/api` proxy, so this aligns the Go listener with the existing UI tooling. Startup logs the actual console URL, and a bind failure names `MAKO_ADMIN_PORT`.
+
+---
+
 ### 2026-10-27 — Embedded, login-free owner console
 
 The former `apps/admin` React app moved to `apps/server/adminui` and is embedded into `mako-controlplane` with `go:embed`. It is served at `http://127.0.0.1:3001/admin/`; the built `dist` is committed so a clean `go build` does not require Node.

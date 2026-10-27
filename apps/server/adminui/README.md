@@ -1,7 +1,8 @@
 # mako owner console
 
 React/Vite UI embedded into `mako-controlplane` and served at
-`http://127.0.0.1:3001/admin/`.
+`http://127.0.0.1:3001/admin/` by default. The Go server and this dev
+server both honor `MAKO_ADMIN_PORT`; the console host stays loopback-only.
 
 - **Owner-only, no login.** Reaching the loopback listener is the owner proof.
   The UI calls `/api/v1/admin/*` without a bearer token; those requests are
@@ -17,7 +18,8 @@ React/Vite UI embedded into `mako-controlplane` and served at
   npm run build
   ```
 
-- **Dev server:** `npm run dev` proxies `/api` to `127.0.0.1:3001`.
+- **Dev server:** `npm run dev` proxies `/api` to `127.0.0.1:3001` by default;
+  set `MAKO_ADMIN_PORT` when the Go server uses another port.
 
 Pages: Overview, Users, Instances, Audit. Access codes and account removal
 are actions in the Users page; server identity lives in Overview. Removing an
