@@ -41,7 +41,7 @@ Owner/admin routes:
 | GET | `/admin/` | embedded owner UI |
 | GET | `/healthz` | |
 
-## Client API — `127.0.0.1:3000` (HTTPS, self-signed — see `security-model.md`)
+## Client API — `127.0.0.1:3000` (configurable with `MAKO_CLIENT_ADDR` / `MAKO_CLIENT_PORT`) (HTTPS, self-signed — see `security-model.md`)
 
 Shared routes (via `commonauth.RegisterRoutes`, address-based throttling **disabled** — a proxied public-facing surface would otherwise see every client as one address and let a few failures block everyone):
 

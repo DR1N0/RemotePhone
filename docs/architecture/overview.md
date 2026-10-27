@@ -64,7 +64,7 @@ apps/server/
 
 (`apps/server/cmd/mako-controlplane/main.go`):
 
-- Client API: `127.0.0.1:3000` by default, **HTTPS** with a self-signed certificate (`tlsidentity`). Set `MAKO_CLIENT_ADDR=0.0.0.0:3000` to reach it from a phone on the LAN. The client trusts it only after a single-use access code and then pins the certificate; known servers skip the code.
+- Client API: `127.0.0.1:3000` by default, **HTTPS** with a self-signed certificate (`tlsidentity`). Set `MAKO_CLIENT_ADDR=0.0.0.0:3000` to reach it from a phone on the LAN; `MAKO_CLIENT_PORT` can override just the port. The client trusts it only after a single-use access code and then pins the certificate; known servers skip the code.
 - Owner console: `127.0.0.1:3001` by default (`MAKO_ADMIN_PORT` changes the port; the host remains loopback), plain HTTP. Loopback is the owner boundary; `/api/v1/admin/*` accepts tokenless requests attributed to `_SYSTEM` (a bearer token is still accepted for programmatic clients). Same-origin UI requests are allowed; external Origins and non-JSON POSTs are rejected.
 
 The client API is LAN-reachable and paired via access codes; see `security-model.md`.

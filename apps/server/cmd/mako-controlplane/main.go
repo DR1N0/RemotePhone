@@ -92,6 +92,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	clientAddr, clientPort, err := clientListenAddrFromEnv()
+	if err != nil {
+		return err
+	}
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -196,19 +200,13 @@ func run() error {
 	adminAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(adminPort))
 	adminSrv := &http.Server{Addr: adminAddr, Handler: newAdminMux(svc, instanceSvc, adminSvc, transportSvc, imageSvc, pairingSvc, serverInfo)}
 	log.Printf("owner console: http://%s/admin/", adminAddr)
-	clientAddr := envOrDefault("MAKO_CLIENT_ADDR", "127.0.0.1:3000")
 	clientSrv := &http.Server{
 		Addr:      clientAddr,
 		Handler:   newClientMux(svc, instanceSvc, sessionSvc, transportSvc, imageSvc, pairingSvc, serverInfo),
 		TLSConfig: &tls.Config{Certificates: []tls.Certificate{tlsCert}},
 	}
+	log.Printf("client API: https://%s", clientAddr)
 
-	clientPort := 3000
-	if _, portText, err := net.SplitHostPort(clientAddr); err == nil {
-		if parsed, err := strconv.Atoi(portText); err == nil {
-			clientPort = parsed
-		}
-	}
 	advertiser, err := mdns.Start(serverInfo, clientPort, os.Getenv("MAKO_DISABLE_MDNS") == "1")
 	if err != nil {
 		log.Printf("mDNS discovery disabled: %v", err)
@@ -225,7 +223,13 @@ func run() error {
 		}
 		errCh <- err
 	}()
-	go func() { errCh <- clientSrv.ListenAndServeTLS("", "") }() // cert/key already in TLSConfig
+	go func() {
+		err := clientSrv.ListenAndServeTLS("", "") // cert/key already in TLSConfig
+		if err != nil && err != http.ErrServerClosed {
+			err = fmt.Errorf("client API listen on %s (set MAKO_CLIENT_ADDR/MAKO_CLIENT_PORT): %w", clientAddr, err)
+		}
+		errCh <- err
+	}()
 
 	select {
 	case <-ctx.Done():
@@ -306,9 +310,39 @@ func adminPortFromEnv() (int, error) {
 	if !ok || strings.TrimSpace(raw) == "" {
 		return defaultAdminPort, nil
 	}
+	return parsePortValue("MAKO_ADMIN_PORT", raw)
+}
+
+// clientListenAddrFromEnv resolves the HTTPS client API listener. The full
+// host:port address remains configurable through MAKO_CLIENT_ADDR; an
+// optional MAKO_CLIENT_PORT overrides only its port. Keeping the host in the
+// address is what lets the same binary bind loopback by default and the LAN
+// when explicitly requested.
+func clientListenAddrFromEnv() (addr string, port int, err error) {
+	rawAddr := envOrDefault("MAKO_CLIENT_ADDR", "127.0.0.1:3000")
+	host, portText, err := net.SplitHostPort(rawAddr)
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid MAKO_CLIENT_ADDR %q: must be host:port: %w", rawAddr, err)
+	}
+	port, err = parsePortValue("MAKO_CLIENT_ADDR", portText)
+	if err != nil {
+		return "", 0, err
+	}
+
+	if rawPort, ok := os.LookupEnv("MAKO_CLIENT_PORT"); ok && strings.TrimSpace(rawPort) != "" {
+		port, err = parsePortValue("MAKO_CLIENT_PORT", rawPort)
+		if err != nil {
+			return "", 0, err
+		}
+	}
+
+	return net.JoinHostPort(host, strconv.Itoa(port)), port, nil
+}
+
+func parsePortValue(key, raw string) (int, error) {
 	port, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || port < 1 || port > 65535 {
-		return 0, fmt.Errorf("invalid MAKO_ADMIN_PORT %q: must be an integer between 1 and 65535", raw)
+		return 0, fmt.Errorf("invalid %s %q: must be an integer between 1 and 65535", key, raw)
 	}
 	return port, nil
 }

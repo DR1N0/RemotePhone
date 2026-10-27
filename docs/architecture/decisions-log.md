@@ -8,6 +8,12 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-27 — Client API port is explicit and validated
+
+`MAKO_CLIENT_ADDR` already accepted a `host:port` address, but the port was parsed opportunistically for mDNS and invalid values were not rejected at startup. `MAKO_CLIENT_PORT` now provides an explicit port override while `MAKO_CLIENT_ADDR` continues to own the bind host (loopback by default, `0.0.0.0` for LAN). Both values are validated as ports before any database work, the resolved listener is logged, and a bind failure names both variables. mDNS advertises the resolved port rather than a hardcoded `3000`.
+
+---
+
 ### 2026-10-27 — Owner console port is configurable
 
 The owner console was hardcoded to `127.0.0.1:3001`, so any unrelated program already using that port prevented the entire control plane from starting. `MAKO_ADMIN_PORT` now selects the port (default `3001`); the bind host remains `127.0.0.1` on purpose, because loopback binding is the owner boundary. The embedded Vite dev server already read the same variable for its `/api` proxy, so this aligns the Go listener with the existing UI tooling. Startup logs the actual console URL, and a bind failure names `MAKO_ADMIN_PORT`.

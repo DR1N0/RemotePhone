@@ -54,7 +54,8 @@ Set these before starting the control plane (the spawned worker inherits its env
 | `MAKO_INSTANCE_DATA_ROOT` | `E:\mako\instance-data` | Per-instance cloned AVD directories |
 | `MAKO_BASE_IMAGE_ROOT` | `E:\mako\base-images` | Captured base images |
 | `STUN_URL` | `none` | `none` disables STUN; use it on a LAN |
-| `MAKO_CLIENT_ADDR` | `0.0.0.0:3000` | Bind the client API on the LAN for phones |
+| `MAKO_CLIENT_ADDR` | `127.0.0.1:3000` | Client API host and port; use `0.0.0.0:3000` for LAN phones |
+| `MAKO_CLIENT_PORT` | unset | Optional client API port override; host still comes from `MAKO_CLIENT_ADDR` |
 | `MAKO_ADMIN_PORT` | `3001` | Owner console port on `127.0.0.1`; change it when 3001 is already taken |
 | `MAKO_TLS_CERT_PATH` / `MAKO_TLS_KEY_PATH` | defaults beside the DB | Self-signed cert/key |
 | `MAKO_STREAM_BITRATE` | `2000000` | H.264 bitrate (bits/s); lower it for weak WiFi |
@@ -93,6 +94,8 @@ $env:MAKO_ANDROID_SDK_ROOT = "$env:LOCALAPPDATA\Android\Sdk"
 $env:MAKO_FFMPEG_PATH = "C:\ffmpeg\bin\ffmpeg.exe"
 $env:STUN_URL = "none"
 $env:MAKO_CLIENT_ADDR = "0.0.0.0:3000"
+# Optional: change only the client API port
+# $env:MAKO_CLIENT_PORT = "3010"
 $env:MAKO_STREAM_BITRATE = "2000000"
 # Optional debug override only (normally leave unset so LAN + Tailscale are
 # both advertised and ICE picks the reachable path):
