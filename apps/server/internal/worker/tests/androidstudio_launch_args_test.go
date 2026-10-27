@@ -32,6 +32,28 @@ func TestBuildLaunchArgs(t *testing.T) {
 	}
 }
 
+func TestBuildLaunchArgsIncludesGPUMode(t *testing.T) {
+	args := androidstudio.BuildLaunchArgs(androidstudio.LaunchRequest{
+		AVDName:     "Tablet_API_35",
+		ConsolePort: 5610,
+		AdbPort:     5611,
+		GRPCPort:    8555,
+		EnableGRPC:  true,
+		GPUMode:     "host",
+	})
+
+	expected := []string{
+		"-avd", "Tablet_API_35",
+		"-ports", "5610,5611",
+		"-grpc", "8555",
+		"-gpu", "host",
+	}
+
+	if !reflect.DeepEqual(args, expected) {
+		t.Fatalf("unexpected args: %#v", args)
+	}
+}
+
 func TestBuildLaunchArgsIncludesOptionalFlags(t *testing.T) {
 	args := androidstudio.BuildLaunchArgs(androidstudio.LaunchRequest{
 		AVDName:     "Tablet_API_35",

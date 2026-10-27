@@ -217,6 +217,24 @@ func TestPromoteBaseImageUpdatesTemplateCurrentPointer(t *testing.T) {
 	}
 }
 
+func TestPromoteBaseImageAllowsSystemOwner(t *testing.T) {
+	svc, db := newTestService(t, &fakeWorker{artifactPath: "/mako/base-images/img-1"})
+	createTestUser(t, db, "owner-1", "registered", "active")
+	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/mako/instance-data/inst-1.avd"))
+	captured, err := svc.CaptureCandidateImage(context.Background(), "inst-1", "owner-1", testActor("owner-1"))
+	if err != nil {
+		t.Fatalf("CaptureCandidateImage: %v", err)
+	}
+
+	tmpl, err := svc.PromoteBaseImage(context.Background(), captured.ID, "_SYSTEM", testActor("_SYSTEM"))
+	if err != nil {
+		t.Fatalf("PromoteBaseImage as owner console _SYSTEM: %v", err)
+	}
+	if tmpl.CurrentBaseImageID == nil || *tmpl.CurrentBaseImageID != captured.ID {
+		t.Errorf("CurrentBaseImageID = %v, want %s", tmpl.CurrentBaseImageID, captured.ID)
+	}
+}
+
 func TestPromoteBaseImageRejectsNonAdmin(t *testing.T) {
 	svc, db := newTestService(t, nil)
 	createTestUser(t, db, "owner-1", "registered", "active")

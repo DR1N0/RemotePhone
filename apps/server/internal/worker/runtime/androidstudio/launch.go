@@ -20,6 +20,7 @@ type LaunchRequest struct {
 	ReadOnly    bool
 	WipeData    bool
 	EnableGRPC  bool
+	GPUMode     string
 	ExtraArgs   []string
 }
 
@@ -49,6 +50,9 @@ func BuildLaunchArgs(req LaunchRequest) []string {
 	}
 	if req.EnableGRPC {
 		args = append(args, "-grpc", strconv.Itoa(req.GRPCPort))
+	}
+	if req.GPUMode != "" {
+		args = append(args, "-gpu", req.GPUMode)
 	}
 	args = append(args, req.ExtraArgs...)
 	return args

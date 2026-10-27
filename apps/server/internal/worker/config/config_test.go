@@ -81,6 +81,17 @@ func TestLoadEmulatorAudio(t *testing.T) {
 	}
 }
 
+func TestLoadGPUMode(t *testing.T) {
+	t.Setenv("MAKO_GPU_MODE", "")
+	if cfg := Load(); cfg.GPUMode != defaultGPUMode() {
+		t.Errorf("GPUMode = %q, want default %q", cfg.GPUMode, defaultGPUMode())
+	}
+	t.Setenv("MAKO_GPU_MODE", "swiftshader")
+	if cfg := Load(); cfg.GPUMode != "swiftshader" {
+		t.Errorf("GPUMode = %q, want swiftshader", cfg.GPUMode)
+	}
+}
+
 func TestLoadStunNoneDisablesSTUN(t *testing.T) {
 	t.Setenv("STUN_URL", "none")
 	if cfg := Load(); cfg.StunURL != "" {

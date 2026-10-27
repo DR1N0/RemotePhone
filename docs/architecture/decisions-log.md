@@ -8,6 +8,32 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-27 — Windows GPU acceleration must be explicit
+
+The Android Emulator can persist `hw.gpu.mode=swiftshader` in `hardware-qemu.ini`; with no `-gpu` flag, mako's instances followed that and rendered through SwiftShader/lavapipe even though the host has an AMD RX 9070. An explicit `-gpu host` test selected the host AMD GPU (Vulkan 1.4 physical device, GLES 4.5 core translator) and WHPX remained operational, including with `-no-window`.
+
+`MAKO_GPU_MODE` now controls the emulator `-gpu` argument. It defaults to `host` on Windows and `auto` elsewhere; `auto`, `swiftshader`, or `swangle` remain available for machines without usable host acceleration. This matters for large games far more than for the previous UI-only tests: software rendering is not representative of playable performance.
+
+Caveats: every emulator instance shares the host GPU, VRAM, and the AMD encoder; host GPU acceleration from a Windows service/Session 0 is still untested. Capacity planning must account for GPU/VRAM/encode limits, not just disk.
+
+---
+
+### 2026-10-27 — QCOW2 base-image layering
+
+The previous base-image implementation flattened an instance into `base_images`, but new instances copied the whole `userdata-qemu.img`. At the 1GB-app + 36GB-resource scale measured on a real phone (`com.miHoYo.Nap` 3.3.0: about 37GB in `/sdcard/Android/data/com.miHoYo.Nap/files`, with only ~196KB in `LocalStorage`), that would require a full 37GB copy per user.
+
+The worker now implements file-level layering:
+
+- `CaptureBaseImage` runs `qemu-img convert` over the instance's complete userdata chain (emulator top overlay plus any existing base overlay), producing one standalone qcow2 base artifact.
+- `ensureInstanceAVD` creates each instance's `userdata-qemu.img` with `qemu-img create -f qcow2 -b <base> -F qcow2`; no full copy.
+- The emulator remains free to add its own `userdata-qemu.img.qcow2` child; that child is where live writes go.
+
+Verified end-to-end through the real control plane: created instance A from a template, booted it with host GPU, stopped it, captured a candidate, promoted it from the owner console, created instance B, and started it. B's `userdata-qemu.img` was a 193KB qcow2 overlay backed by A's 9.7MB flattened base; its emulator top layer grew to 1.1GB during boot. B booted, a `/data/local/tmp` marker survived a stop/start, and the base SHA-256 stayed unchanged. The owner-console promote path needed a fix because `_SYSTEM` is a `system` user, not an `admin`; that is covered by a test. `qemu-img convert` also flattened the real 10GB template chain to a standalone 1.8GB artifact with no backing file. `/sdcard` was confirmed to be FUSE over the same `/data` device, so external-storage game resources are inside the userdata chain; no separate sdcard.img exists on the current AVD.
+
+Still required before calling this production-ready: per-instance base-ID pinning and base GC, async capture for 37GB bases, a larger data partition than the current 10GB template, a base-image admin UI, and a real game capture/promote/boot test. Existing full-copy instances are not migrated automatically.
+
+---
+
 ### 2026-10-27 — Client API port is explicit and validated
 
 `MAKO_CLIENT_ADDR` already accepted a `host:port` address, but the port was parsed opportunistically for mDNS and invalid values were not rejected at startup. `MAKO_CLIENT_PORT` now provides an explicit port override while `MAKO_CLIENT_ADDR` continues to own the bind host (loopback by default, `0.0.0.0` for LAN). Both values are validated as ports before any database work, the resolved listener is logged, and a bind failure names both variables. mDNS advertises the resolved port rather than a hardcoded `3000`.

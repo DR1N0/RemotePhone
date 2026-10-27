@@ -26,6 +26,7 @@ type Adapter struct {
 	audioDebug     bool
 	headless       bool
 	emulatorAudio  string
+	gpuMode        string
 	dataRoot       string
 	baseImageRoot  string
 	launchFn       func(string, LaunchRequest) (ProcessHandle, error)
@@ -34,11 +35,13 @@ type Adapter struct {
 	// then a process-kill fallback). Swappable in tests so they never shell
 	// out to a real adb/emulator.
 	stopEmulatorFn func(runtime.InstanceHandle) error
-	// commitOverlayFn merges a running (or just-stopped) instance's
-	// quickboot qcow2 overlay into its backing userdata-qemu.img — see
-	// CaptureBaseImage's doc comment for why this is necessary. Swappable
-	// in tests so they never shell out to a real qemu-img binary.
-	commitOverlayFn func(qemuImgPath, overlayPath string) error
+	// createOverlayFn makes a per-instance writable qcow2 overlay backed by a
+	// promoted base image. Swappable in tests so they never shell out to a
+	// real qemu-img binary.
+	createOverlayFn func(qemuImgPath, basePath, overlayPath string) error
+	// convertOverlayFn flattens an instance's current userdata chain into a
+	// standalone qcow2 base image. Swappable in tests for the same reason.
+	convertOverlayFn func(qemuImgPath, sourcePath, destPath string) error
 }
 
 type ProcessHandle interface {
@@ -72,6 +75,7 @@ func NewAdapter(cfg config.Config, store runtime.HandleStore, transportStore *tr
 		audioDebug:     cfg.AudioDebug,
 		headless:       cfg.Headless,
 		emulatorAudio:  cfg.EmulatorAudio,
+		gpuMode:        cfg.GPUMode,
 		dataRoot:       cfg.InstanceDataRoot,
 		baseImageRoot:  cfg.BaseImageRoot,
 		stopFn:         StopProcess,
@@ -84,10 +88,22 @@ func NewAdapter(cfg config.Config, store runtime.HandleStore, transportStore *tr
 		}
 		return execProcess{pid: cmd.Process.Pid}, nil
 	}
-	adapter.commitOverlayFn = func(qemuImgPath, overlayPath string) error {
-		output, err := exec.Command(qemuImgPath, "commit", overlayPath).CombinedOutput()
+	adapter.createOverlayFn = func(qemuImgPath, basePath, overlayPath string) error {
+		output, err := exec.Command(
+			qemuImgPath, "create", "-f", "qcow2",
+			"-b", basePath, "-F", "qcow2", overlayPath,
+		).CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("qemu-img commit: %w (%s)", err, strings.TrimSpace(string(output)))
+			return fmt.Errorf("qemu-img create overlay: %w (%s)", err, strings.TrimSpace(string(output)))
+		}
+		return nil
+	}
+	adapter.convertOverlayFn = func(qemuImgPath, sourcePath, destPath string) error {
+		output, err := exec.Command(
+			qemuImgPath, "convert", "-O", "qcow2", sourcePath, destPath,
+		).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("qemu-img convert: %w (%s)", err, strings.TrimSpace(string(output)))
 		}
 		return nil
 	}
@@ -137,6 +153,7 @@ func (a *Adapter) Start(req runtime.StartRequest) (runtime.InstanceHandle, error
 	// not something each client gets to choose. MAKO_HEADLESS=0 keeps a
 	// visible window for local debugging.
 	launchReq.Headless = a.headless
+	launchReq.GPUMode = a.gpuMode
 	if a.emulatorAudio != "" {
 		launchReq.ExtraArgs = append(launchReq.ExtraArgs, "-audio", a.emulatorAudio)
 	}
@@ -232,58 +249,47 @@ func (a *Adapter) CleanupInstanceData(instanceID string) error {
 // CaptureBaseImageArtifact snapshots a (stopped) instance's current AVD
 // state — sourceAvdDir, its state_data_ref content directory — into a new,
 // immutable artifact directory under baseImageRoot, keyed by baseImageID
-// (the control plane's freshly-generated base_images.id). Only config.ini
-// and userdata-qemu.img are copied: the same two files ensureInstanceAVD
-// seeds a new instance from, nothing else (cache/sdcard/snapshots are
-// ephemeral, regenerated fresh by the emulator either way). Returns the
-// artifact directory path for the control plane to persist as
-// base_images.artifact_path.
-// CaptureBaseImage's trickiest step is mergeQuickbootOverlay: the emulator
-// never writes new guest data directly into userdata-qemu.img once it's
-// booted at least once. Instead it creates a sibling userdata-qemu.img.qcow2
-// — a qcow2 overlay backed by userdata-qemu.img — and all live writes go
-// there (confirmed by direct testing: userdata-qemu.img's own mtime/hash
-// never change across a boot, while the .qcow2 sibling grows). Copying only
-// userdata-qemu.img therefore silently captures stale, pre-boot state. The
-// fix is `qemu-img commit`, which merges the overlay's deltas back into its
-// backing file in place — verified by booting a fresh instance from a
-// committed capture and confirming a file written and sync'd just before
-// stop is actually present (raw byte-grepping the disk image is NOT a
-// reliable way to check this — the qcow2/filesystem layout doesn't
-// guarantee short strings stay contiguous — an actual boot is the only
-// trustworthy verification).
+// (the control plane's freshly-generated base_images.id). It captures
+// config.ini and flattens the complete userdata chain into one standalone
+// qcow2 image. On current emulators the writable data is not necessarily in
+// userdata-qemu.img at all: the emulator creates
+// userdata-qemu.img.qcow2 on top of it, and a layered instance may itself be
+// a qcow2 overlay on a promoted base. `qemu-img convert` follows the whole
+// backing chain, so the resulting artifact has no external dependency and
+// can safely become the backing file for future instances.
+//
+// /sdcard is part of the same /data filesystem on current AVDs (FUSE over
+// /data/media), so external-storage game resources are included in this
+// userdata capture rather than requiring a separate sdcard image.
 func (a *Adapter) CaptureBaseImage(baseImageID, sourceDataDir string) (artifactPath string, err error) {
-	if err := a.mergeQuickbootOverlay(sourceDataDir); err != nil {
-		return "", fmt.Errorf("merge quickboot overlay: %w", err)
-	}
-
 	artifactDir := filepath.Join(a.baseImageRoot, baseImageID)
 	if err := os.MkdirAll(artifactDir, 0700); err != nil {
 		return "", fmt.Errorf("create base image artifact dir: %w", err)
 	}
+	cleanup := func() { _ = os.RemoveAll(artifactDir) }
+
 	if err := copyFile(filepath.Join(sourceDataDir, "config.ini"), filepath.Join(artifactDir, "config.ini")); err != nil {
+		cleanup()
 		return "", fmt.Errorf("capture config.ini: %w", err)
 	}
-	if err := copyFile(filepath.Join(sourceDataDir, "userdata-qemu.img"), filepath.Join(artifactDir, "userdata-qemu.img")); err != nil {
-		return "", fmt.Errorf("capture userdata-qemu.img: %w", err)
-	}
-	return artifactDir, nil
-}
 
-// mergeQuickbootOverlay is a no-op if sourceDataDir has no
-// userdata-qemu.img.qcow2 (e.g. an instance that's never actually booted
-// far enough to create one — capture already requires state_data_ref to be
-// set, but that alone doesn't guarantee a boot completed).
-func (a *Adapter) mergeQuickbootOverlay(sourceDataDir string) error {
-	overlayPath := filepath.Join(sourceDataDir, "userdata-qemu.img.qcow2")
-	if _, err := os.Stat(overlayPath); err != nil {
-		return nil
+	// Prefer the emulator's writable top layer; if the instance never
+	// booted far enough to create one, flatten the base file directly.
+	sourcePath := filepath.Join(sourceDataDir, "userdata-qemu.img.qcow2")
+	if info, statErr := os.Stat(sourcePath); statErr != nil || info.IsDir() {
+		sourcePath = filepath.Join(sourceDataDir, "userdata-qemu.img")
 	}
+
 	qemuImgPath, err := a.resolveQemuImgBinary()
 	if err != nil {
-		return err
+		cleanup()
+		return "", err
 	}
-	return a.commitOverlayFn(qemuImgPath, overlayPath)
+	if err := a.convertOverlayFn(qemuImgPath, sourcePath, filepath.Join(artifactDir, "userdata-qemu.img")); err != nil {
+		cleanup()
+		return "", fmt.Errorf("flatten userdata for base image: %w", err)
+	}
+	return artifactDir, nil
 }
 
 // resolveQemuImgBinary finds qemu-img alongside the resolved emulator
@@ -321,10 +327,10 @@ func (a *Adapter) resolveQemuImgBinary() (string, error) {
 // crash-and-respawn cycle.
 //
 // seedOverrideDir, if non-empty, is a captured base image's artifact
-// directory (see CaptureBaseImageArtifact) — both config.ini and the seed
-// userdata image are copied from there instead of the template's live,
-// on-disk AVD. Empty means "no base image has ever been promoted for this
-// template," today's original behavior.
+// directory (see CaptureBaseImage) — config.ini is copied from there and the
+// instance's userdata-qemu.img becomes a small qcow2 overlay backed by the
+// shared base, instead of a full copy. Empty means "no base image has ever
+// been promoted for this template," today's original copy behavior.
 func (a *Adapter) ensureInstanceAVD(instanceID string, template runtime.Template, seedOverrideDir string) (avdName, avdContentDir string, err error) {
 	avdName = instanceAVDName(instanceID)
 	avdHomeDir := filepath.Join(a.discovery.HomeDir, ".android", "avd")
@@ -348,8 +354,23 @@ func (a *Adapter) ensureInstanceAVD(instanceID string, template runtime.Template
 	if err := copyFile(filepath.Join(sourceDir, "config.ini"), filepath.Join(avdContentDir, "config.ini")); err != nil {
 		return "", "", fmt.Errorf("copy config.ini: %w", err)
 	}
-	if err := copyFile(resolveSeedUserdataPath(sourceDir), filepath.Join(avdContentDir, "userdata-qemu.img")); err != nil {
-		return "", "", fmt.Errorf("seed userdata-qemu.img: %w", err)
+
+	if seedOverrideDir != "" {
+		basePath, err := filepath.Abs(filepath.Join(seedOverrideDir, "userdata-qemu.img"))
+		if err != nil {
+			return "", "", fmt.Errorf("resolve base image path: %w", err)
+		}
+		qemuImgPath, err := a.resolveQemuImgBinary()
+		if err != nil {
+			return "", "", err
+		}
+		if err := a.createOverlayFn(qemuImgPath, basePath, filepath.Join(avdContentDir, "userdata-qemu.img")); err != nil {
+			return "", "", fmt.Errorf("create instance userdata overlay: %w", err)
+		}
+	} else {
+		if err := copyFile(resolveSeedUserdataPath(sourceDir), filepath.Join(avdContentDir, "userdata-qemu.img")); err != nil {
+			return "", "", fmt.Errorf("seed userdata-qemu.img: %w", err)
+		}
 	}
 
 	if err := os.MkdirAll(avdHomeDir, 0700); err != nil {

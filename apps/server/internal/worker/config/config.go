@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -23,6 +24,7 @@ type Config struct {
 	AudioDebug          bool
 	Headless            bool
 	EmulatorAudio       string
+	GPUMode             string
 }
 
 func Load() Config {
@@ -55,7 +57,19 @@ func Load() Config {
 		// played on the host speakers. Use MAKO_EMULATOR_AUDIO=auto for a
 		// local debugging session where host sound is wanted.
 		EmulatorAudio: getenv("MAKO_EMULATOR_AUDIO", "none"),
+		// On Windows the emulator's persisted hardware-qemu.ini may select
+		// SwiftShader even when a capable GPU is present. Explicitly request
+		// the host GPU; MAKO_GPU_MODE=auto/swiftshader is the fallback for
+		// machines without usable host acceleration.
+		GPUMode: getenv("MAKO_GPU_MODE", defaultGPUMode()),
 	}
+}
+
+func defaultGPUMode() string {
+	if runtime.GOOS == "windows" {
+		return "host"
+	}
+	return "auto"
 }
 
 func getenv(key, fallback string) string {

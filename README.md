@@ -61,6 +61,7 @@ Set these before starting the control plane (the spawned worker inherits its env
 | `MAKO_STREAM_BITRATE` | `2000000` | H.264 bitrate (bits/s); lower it for weak WiFi |
 | `MAKO_AUDIO_DEBUG` | `1` | Log audio packet RMS/peak and `WriteSample` stalls (diagnostics only) |
 | `MAKO_HEADLESS` | `1` | One worker owns one instance; default `-no-window`. Set `0` only to debug with a visible emulator window. |
+| `MAKO_GPU_MODE` | `host` on Windows, `auto` elsewhere | Emulator `-gpu` mode. Use `auto`, `swiftshader`, or `swangle` when host GPU acceleration is unavailable; `host` avoids silently falling back to software rendering. |
 | `MAKO_EMULATOR_AUDIO` | `none` | Emulator `-audio` backend. `none` keeps guest audio for `streamAudio` but plays nothing on the host; use `auto` for local debugging with host sound. |
 | `MAKO_PAIRING_PIN` | random 6 digits | Local bootstrap access code printed at control-plane startup and seeded as a one-use code; set a stable value for automation. |
 | `MAKO_SERVER_NAME` | host name | Display name shown in the client's server picker. The stable server ID is independent of it. |
@@ -200,9 +201,10 @@ flutter analyze
 - **Full-screen phone UI; the guest owns navigation.** The client hides the phone's system bars, the worker switches the emulated device to three-button navigation, and the guest's Back/Home/Recents buttons are tapped inside the video. The phone's Back gesture exits the stream and disconnects.
 - **Trusted LAN only.** The server uses a self-signed certificate; first contact is bootstrapped with an access code and the client pins the certificate afterwards. Do not expose it to the public internet without a VPN or reverse proxy.
 - **ICE advertises every routable IPv4 interface** (LAN, Tailscale, other VPNs), excluding only link-local, multicast and IPv6; loopback is kept for local probes. ICE chooses. `MAKO_WEBRTC_HOST_IP` is only a debug override. There is no Tailscale-specific configuration.
+- **GPU acceleration must be requested explicitly on Windows.** The emulator can silently persist `hw.gpu.mode=swiftshader`; mako now passes `-gpu host` by default on Windows so games use the host GPU (verified with an AMD RX 9070: host Vulkan and GLES translators selected). Multiple instances share that GPU/VRAM and the H.264 encoder, so disk, VRAM, and encode capacity all need to be considered together.
 - **An Android emulator is a poor test client on the same Windows host.** Its NAT hairpin to the host's own LAN IP loses packets under video load; a real phone on the LAN is the trustworthy end-to-end test. The host-side WebRTC probe is unaffected.
 - **No capacity enforcement.** Each instance costs a full emulator (RAM/CPU/disk); start only what the host can carry.
-- Base-image capture/promote is unit-tested, but its live boot verification is still open (see [`docs/windows-migration-handoff.md`](docs/windows-migration-handoff.md) and the decisions log).
+- Base-image capture/promote and QCOW2 layering are verified end-to-end with a clean template (capture → promote → new instance → reboot). A real 37GB game capture and a correspondingly larger data partition are still open; see [`docs/architecture/decisions-log.md`](docs/architecture/decisions-log.md) and the roadmap.
 
 ## Documentation
 

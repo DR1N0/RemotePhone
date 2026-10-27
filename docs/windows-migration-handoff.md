@@ -2,6 +2,10 @@
 
 ## Status 2026-10-22 — Windows host is working
 
+### GPU acceleration update (2026-10-27)
+
+The host GPU is not used automatically if the AVD's generated `hardware-qemu.ini` says `hw.gpu.mode=swiftshader`; mako was silently running SwiftShader/lavapipe. An explicit `-gpu host` run selected the AMD RX 9070 (host Vulkan 1.4 physical device, GLES 4.5 core translator) with WHPX still active, including `-no-window`. `MAKO_GPU_MODE` now defaults to `host` on Windows and can be set to `auto`/`swiftshader`/`swangle` for machines where host acceleration is unavailable. This is essential for large games. Instances share the GPU, VRAM, and encoder; Windows service/Session 0 GPU behavior is still untested.
+
 Both problems below have been worked on the Windows machine. Summary:
 
 - **Server builds/tests/serves natively on Windows 11** (Go 1.27.3, Ryzen 9700X, RX 9070). The POSIX-only blockers were fixed (bootstrap-secret platform split, Win32 process liveness/stop, adb-first graceful emulator shutdown, `.exe`/SDK path resolution, `STUN_URL=none`); the full Go test suite passes natively.
