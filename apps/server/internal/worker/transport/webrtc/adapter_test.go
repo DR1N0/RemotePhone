@@ -138,8 +138,9 @@ func TestHandleOfferNegotiatesH264VideoForRecvonlyOffer(t *testing.T) {
 	waitForTestGathering(t, offerGathering)
 
 	adapter := NewAdapter("instance-1", "attachment-1", "participant", "adb", 1080, 1920, "", "", "")
+	frameSource := emugrpc.NewFakeFrameSource()
 	adapter.newFrameSource = func(string, int, int) emugrpc.FrameSource {
-		return emugrpc.NewFakeFrameSource()
+		return frameSource
 	}
 	adapter.selectEncoder = func(context.Context, string, int, int) (string, string, error) {
 		return "ffmpeg", "libx264", nil
@@ -148,6 +149,10 @@ func TestHandleOfferNegotiatesH264VideoForRecvonlyOffer(t *testing.T) {
 		return &fakeEncoderProcess{stdout: io.NopCloser(strings.NewReader(""))}, nil
 	}
 	defer func() { _ = adapter.Stop() }()
+
+	// The emulator may return a landscape frame even though the AVD metadata
+	// is portrait; startVideoCapture must size the encoder from this frame.
+	frameSource.Push(emugrpc.Frame{Width: 960, Height: 432, Data: make([]byte, 960*432*4)})
 
 	answer, err := adapter.HandleOffer("instance-1", "attachment-1", offerer.LocalDescription().SDP)
 	if err != nil {

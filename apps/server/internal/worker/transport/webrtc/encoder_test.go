@@ -78,6 +78,19 @@ func TestDefaultEncoderCandidatesPutsSoftwareLast(t *testing.T) {
 	}
 }
 
+func TestBuildFFmpegArgsAppliesCaptureRotation(t *testing.T) {
+	args := buildFFmpegArgs("ffmpeg", "libx264", EncodeOptions{
+		Width: 432, Height: 960, FPS: 30, BitRate: 2_000_000, Rotate: 90,
+	})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-s 432x960") {
+		t.Errorf("input size missing: %v", args)
+	}
+	if !strings.Contains(joined, "-vf transpose=2") {
+		t.Errorf("counter-clockwise rotation filter missing: %v", args)
+	}
+}
+
 func TestBuildFFmpegArgsAMFKeepsKeyframesAndHeaders(t *testing.T) {
 	args := buildFFmpegArgs("ffmpeg", "h264_amf", EncodeOptions{Width: 540, Height: 1200, FPS: 30, BitRate: 2_000_000})
 	joined := strings.Join(args, " ")

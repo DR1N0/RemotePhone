@@ -257,18 +257,71 @@ func (a *Adapter) startVideoCapture(pc *webrtc.PeerConnection, videoTrack *webrt
 		return nil, fmt.Errorf("video capture unavailable: emulator gRPC unreachable at %s: %w", a.grpcAddr, err)
 	}
 
-	ffmpegPath, codec, err := a.selectEncoder(ctx, a.ffmpegPath, captureW, captureH)
+	// The emulator's screenshot scaler preserves the display's aspect ratio,
+	// so a landscape game can return a differently-shaped frame than the
+	// portrait size requested at session creation. Wait for the first frame
+	// and size the encoder (and touch mapping) from the actual frame instead
+	// of dropping every frame forever.
+	var first emugrpc.Frame
+	select {
+	case f, ok := <-frames:
+		if !ok {
+			cancel()
+			return nil, fmt.Errorf("video capture unavailable: emulator closed the screenshot stream")
+		}
+		first = f
+	case <-time.After(5 * time.Second):
+		cancel()
+		return nil, fmt.Errorf("video capture unavailable: no screenshot frame from emulator within 5s")
+	}
+	captureW, captureH = first.Width, first.Height
+	if captureW <= 0 || captureH <= 0 {
+		captureW, captureH = halveForCapture(a.screenW), halveForCapture(a.screenH)
+	}
+	expectedBytes := captureW * captureH * 4
+	if len(first.Data) != expectedBytes {
+		cancel()
+		return nil, fmt.Errorf("video capture unavailable: first frame has %d bytes, want %d for %dx%d",
+			len(first.Data), expectedBytes, captureW, captureH)
+	}
+
+	// Refresh the device size once adb is definitely available, then match
+	// its orientation to the actual video frame. Input events are normalized
+	// against this, so a landscape game must map to landscape coordinates
+	// rather than the AVD's portrait dimensions.
+	rotation := QueryDisplayRotation(a.adbSerial)
+	screenW, screenH := QueryScreenSize(a.adbSerial, a.screenW, a.screenH)
+	rotate := 0
+	encodeW, encodeH := captureW, captureH
+	if rotation == 90 || rotation == 270 {
+		// The emulator's gRPC stream can hand back a portrait buffer with a
+		// landscape composition rotated inside it; rotate the encoded output
+		// so the client sees a normal landscape frame.
+		if captureW < captureH {
+			rotate = rotation
+			encodeW, encodeH = captureH, captureW
+		}
+		screenW, screenH = screenH, screenW
+	} else if rotation == 180 {
+		rotate = 180
+	}
+	a.screenW, a.screenH = screenW, screenH
+	log.Printf("capture: actual frame %dx%d, rotate=%d, encode %dx%d, input display %dx%d for instance=%s",
+		captureW, captureH, rotate, encodeW, encodeH, screenW, screenH, a.instanceID)
+
+	ffmpegPath, codec, err := a.selectEncoder(ctx, a.ffmpegPath, encodeW, encodeH)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("video capture unavailable: no working H264 encoder found: %w", err)
 	}
-	log.Printf("capture: selected encoder %s for instance=%s at %dx%d", codec, a.instanceID, captureW, captureH)
+	log.Printf("capture: selected encoder %s for instance=%s at %dx%d", codec, a.instanceID, encodeW, encodeH)
 
 	encoder, err := a.startEncoder(ffmpegPath, codec, EncodeOptions{
 		Width:   captureW,
 		Height:  captureH,
 		FPS:     captureFPS,
 		BitRate: a.bitRate,
+		Rotate:  rotate,
 	})
 	if err != nil {
 		cancel()
@@ -281,17 +334,15 @@ func (a *Adapter) startVideoCapture(pc *webrtc.PeerConnection, videoTrack *webrt
 		a.stopPeerConnection(pc)
 	})
 
-	// RGBA8888 is 4 bytes/pixel — ffmpeg's rawvideo demuxer has no in-band
-	// framing, so every frame fed to it must be exactly this many bytes or
-	// the stream desyncs. A frame at an unexpected size (e.g. the emulator's
-	// aspect-ratio-preserving scaling didn't land exactly on captureW x
-	// captureH) is dropped rather than risking a corrupted encode.
-	expectedBytes := captureW * captureH * 4
+	// Feed the first frame and then stream the rest. A later size change is
+	// still dropped rather than risking a corrupted rawvideo stream; the
+	// common orientation change (portrait -> landscape) is handled above.
+	session.pacer.Update(first.Data)
 	go func() {
 		for frame := range frames {
-			if len(frame.Data) != expectedBytes {
-				log.Printf("capture[%s]: dropping frame with size %d, want %d for %dx%d",
-					a.instanceID, len(frame.Data), expectedBytes, captureW, captureH)
+			if frame.Width != captureW || frame.Height != captureH || len(frame.Data) != expectedBytes {
+				log.Printf("capture[%s]: dropping frame with size %d (%dx%d), want %d for %dx%d",
+					a.instanceID, len(frame.Data), frame.Width, frame.Height, expectedBytes, captureW, captureH)
 				continue
 			}
 			session.pacer.Update(frame.Data)

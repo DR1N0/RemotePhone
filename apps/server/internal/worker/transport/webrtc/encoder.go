@@ -161,6 +161,10 @@ type EncodeOptions struct {
 	Width, Height int
 	FPS           int
 	BitRate       int // bits per second
+	// Rotate is the clockwise rotation, in degrees (0/90/180/270), applied to
+	// the raw frames before encoding. The emulator's gRPC screenshot stream
+	// can return a portrait buffer containing a rotated landscape composition.
+	Rotate int
 }
 
 // h264Level matches the level-id ("1f" = 31 = level 3.1) common to every
@@ -200,14 +204,30 @@ func buildFFmpegArgs(ffmpegPath, codec string, opts EncodeOptions) []string {
 		"-i", "pipe:0",
 	}
 
+	rotationFilter := ""
+	switch opts.Rotate {
+	case 90:
+		rotationFilter = "transpose=2"
+	case 180:
+		rotationFilter = "hflip,vflip"
+	case 270:
+		rotationFilter = "transpose=1"
+	}
+
 	switch codec {
 	case "h264_videotoolbox":
+		if rotationFilter != "" {
+			args = append(args, "-vf", rotationFilter)
+		}
 		args = append(args,
 			"-c:v", "h264_videotoolbox", "-pix_fmt", "yuv420p", "-realtime", "true", "-allow_sw", "0",
 			"-profile:v", "baseline", "-level:v", h264Level,
 			"-b:v", strconv.Itoa(opts.BitRate), "-g", strconv.Itoa(opts.FPS),
 		)
 	case "h264_nvenc":
+		if rotationFilter != "" {
+			args = append(args, "-vf", rotationFilter)
+		}
 		args = append(args,
 			"-c:v", "h264_nvenc", "-pix_fmt", "yuv420p", "-preset", "p1", "-tune", "ll", "-rc", "cbr",
 			"-profile:v", "baseline", "-level:v", h264Level,
@@ -217,9 +237,13 @@ func buildFFmpegArgs(ffmpegPath, codec string, opts EncodeOptions) []string {
 		// Pixel format conversion happens via the hwupload filter chain
 		// below (vaapi encodes from an uploaded hardware surface, not a
 		// plain -pix_fmt output flag) — nv12 is vaapi's expected format.
+		vf := "format=nv12,hwupload"
+		if rotationFilter != "" {
+			vf = rotationFilter + "," + vf
+		}
 		args = append(args,
 			"-vaapi_device", "/dev/dri/renderD128",
-			"-vf", "format=nv12,hwupload",
+			"-vf", vf,
 			"-c:v", "h264_vaapi",
 			"-profile:v", "constrained_baseline", "-level:v", h264Level,
 			"-b:v", strconv.Itoa(opts.BitRate), "-g", strconv.Itoa(opts.FPS), "-bf", "0",
@@ -232,6 +256,9 @@ func buildFFmpegArgs(ffmpegPath, codec string, opts EncodeOptions) []string {
 		// 30fps), and `-header_spacing <gop>` repeats SPS/PPS with each IDR
 		// so a client joining mid-stream can decode. No -bf: AMF warns about
 		// it and baseline cannot use B-frames anyway.
+		if rotationFilter != "" {
+			args = append(args, "-vf", rotationFilter)
+		}
 		args = append(args,
 			"-c:v", "h264_amf", "-pix_fmt", "yuv420p",
 			"-usage", "lowlatency_high_quality", "-quality", "speed", "-rc", "cbr",
@@ -245,6 +272,9 @@ func buildFFmpegArgs(ffmpegPath, codec string, opts EncodeOptions) []string {
 		// baseline profile above cannot represent — baseline requires 4:2:0
 		// — and libx264 fails outright (zero bytes of output) rather than
 		// downsampling for you.
+		if rotationFilter != "" {
+			args = append(args, "-vf", rotationFilter)
+		}
 		args = append(args,
 			"-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast", "-tune", "zerolatency",
 			"-profile:v", "baseline", "-level:v", h264Level,

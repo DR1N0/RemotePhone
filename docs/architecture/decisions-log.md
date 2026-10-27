@@ -8,6 +8,16 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-28 — Landscape games need capture-rotation normalization
+
+The first real-client Zenless Zone Zero stream connected but rendered black. The worker log showed every frame dropped at 540x960: the emulator's gRPC screenshot stream had actually returned a 432x960 portrait buffer whose composition was rotated 90°, while the AVD metadata was portrait. Waiting for a fixed frame size therefore never matched after the game forced landscape.
+
+The capture pipeline now waits for the first frame, queries the emulator's current display rotation, and sets the encoder dimensions from the actual frame. For a 90°/270° display whose frame is still portrait, it applies an ffmpeg transpose filter and swaps the encoded dimensions; input coordinates are mapped to the swapped display size. The client now receives a normal landscape ZZZ frame. A size/orientation change after the first frame still requires a reconnect; dynamic mid-session restart remains future work.
+
+The `zzz` template itself was created by renaming the prepared AVD/database template ID from `Zenless_Base` to `zzz` (client display label `Zzz`), and a client-created instance connected successfully after the game was launched into landscape.
+
+---
+
 ### 2026-10-27 — Windows GPU acceleration must be explicit
 
 The Android Emulator can persist `hw.gpu.mode=swiftshader` in `hardware-qemu.ini`; with no `-gpu` flag, mako's instances followed that and rendered through SwiftShader/lavapipe even though the host has an AMD RX 9070. An explicit `-gpu host` test selected the host AMD GPU (Vulkan 1.4 physical device, GLES 4.5 core translator) and WHPX remained operational, including with `-no-window`.

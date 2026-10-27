@@ -15,6 +15,8 @@ import (
 )
 
 var wmSizeRE = regexp.MustCompile(`(\d+)x(\d+)`)
+var displayRotationRE = regexp.MustCompile(`mCurrentRotation=ROTATION_(\d+)`)
+var displayViewportOrientationRE = regexp.MustCompile(`displayId=0[^\]]*orientation=(\d+)`)
 
 // ConfigureGuestNavigation switches the emulated Android device from
 // edge-swipe gesture navigation to three-button navigation. The phone's own
@@ -46,20 +48,54 @@ func ConfigureGuestNavigation(adbSerial string) {
 // Medium_Phone_API_36.1 is 1080x2400, not the older 1080x1920 default),
 // so hardcoding one resolution silently mis-scales every touch event.
 func QueryScreenSize(adbSerial string, fallbackW, fallbackH int) (int, int) {
-	out, err := exec.Command("adb", "-s", adbSerial, "shell", "wm", "size").Output()
+	// The worker can ask this immediately after spawning the emulator, before
+	// adbd is ready. Retry briefly instead of permanently falling back to a
+	// stale profile resolution and mis-scaling touch input.
+	for attempt := 0; attempt < 5; attempt++ {
+		out, err := exec.Command("adb", "-s", adbSerial, "shell", "wm", "size").Output()
+		if err == nil {
+			m := wmSizeRE.FindStringSubmatch(string(out))
+			if m != nil {
+				w, errW := strconv.Atoi(m[1])
+				h, errH := strconv.Atoi(m[2])
+				if errW == nil && errH == nil && w > 0 && h > 0 {
+					return w, h
+				}
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fallbackW, fallbackH
+}
+
+// QueryDisplayRotation returns the current display rotation in degrees
+// (0/90/180/270). The emulator's gRPC screenshot stream can return frames in
+// the panel's natural orientation while Android composes a rotated image, so
+// the capture pipeline needs this to normalize the frame.
+func QueryDisplayRotation(adbSerial string) int {
+	// Prefer the compact display dump's viewport orientation; dumpsys window
+	// is large and its current-rotation field is not present in every vendor
+	// build. Both report the same 0/1/2/3 rotation.
+	if out, err := exec.Command("adb", "-s", adbSerial, "shell", "dumpsys", "display").Output(); err == nil {
+		if m := displayViewportOrientationRE.FindStringSubmatch(string(out)); m != nil {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				return n * 90
+			}
+		}
+	}
+	out, err := exec.Command("adb", "-s", adbSerial, "shell", "dumpsys", "window").Output()
 	if err != nil {
-		return fallbackW, fallbackH
+		return 0
 	}
-	m := wmSizeRE.FindStringSubmatch(string(out))
+	m := displayRotationRE.FindStringSubmatch(string(out))
 	if m == nil {
-		return fallbackW, fallbackH
+		return 0
 	}
-	w, errW := strconv.Atoi(m[1])
-	h, errH := strconv.Atoi(m[2])
-	if errW != nil || errH != nil || w <= 0 || h <= 0 {
-		return fallbackW, fallbackH
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0
 	}
-	return w, h
+	return n * 90
 }
 
 // BuildADBInputArgs returns the adb shell input args for a normalized InputEvent.
