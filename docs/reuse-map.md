@@ -56,6 +56,22 @@ auth model, or AVD layout.
 - **Game assets, APKs, base images, or certificates.** They are not in the repo,
   and should not be added.
 
+## Go import status
+
+This repository is **not importable as a Go dependency** in its current form:
+
+- `apps/server/go.mod` declares `module remotephone`, which is not a fetchable
+  module path.
+- The reusable packages live under `internal/`. Go's internal-package rule blocks
+  imports from other modules, even with a `replace` directive.
+- `webrtc` additionally depends on `worker/host` and `worker/transport`, expects
+  an ffmpeg binary, and is constructed around one worker instance.
+
+If you need a Go dependency, copy the package under the MIT license or extract a
+separate module. `emugrpc` is the cleanest candidate: it only depends on gRPC and
+its generated proto. `webrtc` needs a public-API pass first. Restructuring the
+frozen snapshot just to make `go get` work costs more than copying one package.
+
 ## Recommended reading order
 
 1. [Architecture overview](architecture/overview.md) - process topology and the
