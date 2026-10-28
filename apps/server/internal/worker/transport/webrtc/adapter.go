@@ -151,6 +151,7 @@ func NewAdapter(instanceID, attachmentID, role, adbSerial string, screenW, scree
 // emulator gRPC video frame source, ffmpeg encoder, pacer, and the audio
 // source goroutine. Stop tears them all down together.
 type captureSession struct {
+	mu          sync.Mutex
 	cancel      context.CancelFunc
 	encoder     encoderProcess
 	pacer       *Pacer
@@ -158,11 +159,25 @@ type captureSession struct {
 	audioDone   chan struct{}
 }
 
+func (c *captureSession) swapPipeline(encoder encoderProcess, pacer *Pacer) (encoderProcess, *Pacer) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	oldEncoder, oldPacer := c.encoder, c.pacer
+	c.encoder, c.pacer = encoder, pacer
+	return oldEncoder, oldPacer
+}
+
 func (c *captureSession) Stop() {
 	if c == nil {
 		return
 	}
-	c.cancel()
+	c.mu.Lock()
+	cancel, encoder, pacer := c.cancel, c.encoder, c.pacer
+	c.encoder, c.pacer = nil, nil
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	if c.audioCancel != nil {
 		c.audioCancel()
 	}
@@ -173,11 +188,11 @@ func (c *captureSession) Stop() {
 		case <-time.After(2 * time.Second):
 		}
 	}
-	if c.pacer != nil {
-		c.pacer.Stop()
+	if pacer != nil {
+		pacer.Stop()
 	}
-	if c.encoder != nil {
-		c.encoder.Stop()
+	if encoder != nil {
+		encoder.Stop()
 	}
 }
 
@@ -283,26 +298,11 @@ func (a *Adapter) startVideoCapture(pc *webrtc.PeerConnection, videoTrack *webrt
 	// its orientation to the actual video frame. Input events are normalized
 	// against this, so a landscape game must map to landscape coordinates
 	// rather than the AVD's portrait dimensions.
-	rotation := QueryDisplayRotation(a.adbSerial)
-	screenW, screenH := QueryScreenSize(a.adbSerial, a.screenW, a.screenH)
-	rotate := 0
-	encodeW, encodeH := captureW, captureH
-	if rotation == 90 || rotation == 270 {
-		// The emulator's gRPC stream can hand back a portrait buffer with a
-		// landscape composition rotated inside it; rotate the encoded output
-		// so the client sees a normal landscape frame.
-		if captureW < captureH {
-			rotate = rotation
-			encodeW, encodeH = captureH, captureW
-		}
-		screenW, screenH = screenH, screenW
-	} else if rotation == 180 {
-		rotate = 180
-	}
-	a.rotation = rotation
+	displayRotation, rotation, encodeW, encodeH, screenW, screenH := a.captureGeometry(captureW, captureH)
+	a.rotation = displayRotation
 	a.screenW, a.screenH = screenW, screenH
 	log.Printf("capture: actual frame %dx%d, rotate=%d, encode %dx%d, input display %dx%d for instance=%s",
-		captureW, captureH, rotate, encodeW, encodeH, screenW, screenH, a.instanceID)
+		captureW, captureH, rotation, encodeW, encodeH, screenW, screenH, a.instanceID)
 
 	ffmpegPath, codec, err := a.selectEncoder(ctx, a.ffmpegPath, encodeW, encodeH)
 	if err != nil {
@@ -311,42 +311,95 @@ func (a *Adapter) startVideoCapture(pc *webrtc.PeerConnection, videoTrack *webrt
 	}
 	log.Printf("capture: selected encoder %s for instance=%s at %dx%d", codec, a.instanceID, encodeW, encodeH)
 
-	encoder, err := a.startEncoder(ffmpegPath, codec, EncodeOptions{
-		Width:   captureW,
-		Height:  captureH,
-		FPS:     captureFPS,
-		BitRate: a.bitRate,
-		Rotate:  rotate,
-	})
+	startPipeline := func(width, height, rotate int) (encoderProcess, *Pacer, error) {
+		encoder, err := a.startEncoder(ffmpegPath, codec, EncodeOptions{
+			Width:   width,
+			Height:  height,
+			FPS:     captureFPS,
+			BitRate: a.bitRate,
+			Rotate:  rotate,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		pacer := NewPacer(encoder, captureFPS, func(stallErr error) {
+			log.Printf("capture[%s]: encoder stalled, closing connection: %v", a.instanceID, stallErr)
+			a.stopPeerConnection(pc)
+		})
+		return encoder, pacer, nil
+	}
+
+	encoder, pacer, err := startPipeline(captureW, captureH, rotation)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("video capture unavailable: start %s encoder: %w", codec, err)
 	}
-
-	session := &captureSession{cancel: cancel, encoder: encoder}
-	session.pacer = NewPacer(encoder, captureFPS, func(stallErr error) {
-		log.Printf("capture[%s]: encoder stalled, closing connection: %v", a.instanceID, stallErr)
-		a.stopPeerConnection(pc)
-	})
-
-	// Feed the first frame and then stream the rest. A later size change is
-	// still dropped rather than risking a corrupted rawvideo stream; the
-	// common orientation change (portrait -> landscape) is handled above.
+	session := &captureSession{cancel: cancel, encoder: encoder, pacer: pacer}
 	session.pacer.Update(first.Data)
+	go pipeH264(encoder.Stdout(), videoTrack, a.instanceID)
+
+	// The guest can rotate after the session starts (e.g. launching a
+	// landscape-only game from a portrait launcher). gRPC frame dimensions
+	// then change; restart ffmpeg with the new geometry and let the client
+	// follow the new frame orientation instead of dropping every frame.
+	currentW, currentH := captureW, captureH
+	expectedBytes = currentW * currentH * 4
 	go func() {
 		for frame := range frames {
-			if frame.Width != captureW || frame.Height != captureH || len(frame.Data) != expectedBytes {
-				log.Printf("capture[%s]: dropping frame with size %d (%dx%d), want %d for %dx%d",
-					a.instanceID, len(frame.Data), frame.Width, frame.Height, expectedBytes, captureW, captureH)
+			if ctx.Err() != nil {
+				return
+			}
+			if frame.Width == currentW && frame.Height == currentH && len(frame.Data) == expectedBytes {
+				pacer.Update(frame.Data)
 				continue
 			}
-			session.pacer.Update(frame.Data)
+			if frame.Width <= 0 || frame.Height <= 0 || len(frame.Data) != frame.Width*frame.Height*4 {
+				continue
+			}
+			nextDisplayRotation, nextRotation, nextEncodeW, nextEncodeH, nextScreenW, nextScreenH := a.captureGeometry(frame.Width, frame.Height)
+			log.Printf("capture: geometry changed to %dx%d, rotate=%d, encode %dx%d, input display %dx%d for instance=%s",
+				frame.Width, frame.Height, nextRotation, nextEncodeW, nextEncodeH, nextScreenW, nextScreenH, a.instanceID)
+			nextEncoder, nextPacer, startErr := startPipeline(frame.Width, frame.Height, nextRotation)
+			if startErr != nil {
+				log.Printf("capture[%s]: restart encoder for %dx%d failed: %v", a.instanceID, frame.Width, frame.Height, startErr)
+				continue
+			}
+			oldEncoder, oldPacer := session.swapPipeline(nextEncoder, nextPacer)
+			if oldPacer != nil {
+				oldPacer.Stop()
+			}
+			if oldEncoder != nil {
+				oldEncoder.Stop()
+			}
+			encoder, pacer = nextEncoder, nextPacer
+			currentW, currentH = frame.Width, frame.Height
+			expectedBytes = currentW * currentH * 4
+			a.rotation = nextDisplayRotation
+			a.screenW, a.screenH = nextScreenW, nextScreenH
+			pacer.Update(frame.Data)
+			go pipeH264(encoder.Stdout(), videoTrack, a.instanceID)
 		}
 	}()
 
-	go pipeH264(encoder.Stdout(), videoTrack, a.instanceID)
-
 	return session, nil
+}
+
+// captureGeometry maps the emulator's current frame orientation and display
+// rotation to encoder output dimensions and touch-input display dimensions.
+func (a *Adapter) captureGeometry(frameW, frameH int) (displayRotation, encodeRotate, encodeW, encodeH, screenW, screenH int) {
+	displayRotation = QueryDisplayRotation(a.adbSerial)
+	screenW, screenH = QueryScreenSize(a.adbSerial, a.screenW, a.screenH)
+	encodeW, encodeH = frameW, frameH
+	if displayRotation == 90 || displayRotation == 270 {
+		if frameW < frameH {
+			encodeRotate = displayRotation
+			encodeW, encodeH = frameH, frameW
+		}
+		screenW, screenH = screenH, screenW
+	} else if displayRotation == 180 {
+		encodeRotate = 180
+	}
+	return displayRotation, encodeRotate, encodeW, encodeH, screenW, screenH
 }
 
 func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string, error) {

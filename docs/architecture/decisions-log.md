@@ -8,6 +8,18 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-28 — Guest orientation changes, edge controls, and the ZZZ anti-cheat blocker
+
+Two independent orientation fixes landed:
+- The client now locks its UI orientation to the decoded video's aspect ratio: landscape frames rotate the phone UI landscape, portrait frames portrait. This prevents a landscape-only game from being shown as a small landscape strip inside a portrait app, and makes reconnect aspect stable.
+- The worker now detects a mid-session gRPC frame-geometry change, restarts ffmpeg with the new dimensions/rotation, and updates the touch transform. Connecting to a portrait launcher before launching a landscape game therefore transitions to a correctly oriented stream instead of dropping every frame.
+
+The stream screen's original top-left exit button became a collapsible menu attached to the right edge. It contains guest Back (KEYCODE_BACK=4), Home (KEYCODE_HOME=3), and Exit stream, so games that hide the guest's navigation bar cannot trap the user.
+
+The ZZZ login crash is **not** a mako rendering bug. After `PlayerLoginScRsp`/`StartBasicsReq`, the game loads `libtersafe2.so` (Tencent anti-cheat); the process then aborts in the emulator's ARM64 translator: `Abort message: 'Guest call didn't restore sp: expected ..., actual ... -0x10'`, with the native stack in `libndk_translation.so berberis::ExecuteGuestCall`. Tombstones also show `libtersafe2.so` running on UnityMain and worker threads. Clearing the Vulkan PSO cache did not change the crash; deleting the cache only made the game re-download about 261 MB of data. This blocks the login happy path and therefore blocks baking an emulator-compiled shader cache into the base. Candidate paths are an older Android system image whose translation layer handles the anti-cheat (API 33/34), a native x86_64 ZZZ build, or streaming a real physical device; all are environment changes, not worker fixes.
+
+---
+
 ### 2026-10-28 — Reconnect black screen was a client renderer lifecycle bug
 
 Reconnect showed decoded-but-black video only on alternating sessions. Worker logs showed fresh frames and audio, and a direct gRPC frame capture proved the emulator content was non-black. The Flutter client was disposing its `RTCVideoRenderer` on every stream exit and creating a new texture for the next screen; on Android that intermittently left the new texture black even though `framesDecoded` advanced. The client now keeps one app-lifetime renderer and only swaps its `srcObject`.

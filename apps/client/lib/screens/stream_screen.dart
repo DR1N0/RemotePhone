@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -27,6 +29,8 @@ class _StreamScreenState extends State<StreamScreen> {
   bool _disconnected = false;
   bool _allowPop = false;
   bool _leaving = false;
+  bool _menuOpen = false;
+  bool? _appliedLandscape;
 
   static const _windowChannel = MethodChannel('mako/window');
 
@@ -37,15 +41,35 @@ class _StreamScreenState extends State<StreamScreen> {
       api: context.read<AuthService>().client,
       instanceId: widget.instance.id,
     );
+    _session.addListener(_applyRemoteOrientation);
     _enterFullscreen();
     _session.connect();
   }
 
   @override
   void dispose() {
+    _session.removeListener(_applyRemoteOrientation);
+    unawaited(SystemChrome.setPreferredOrientations(const []));
     _setFullscreen(false);
     _disconnectOnce();
     super.dispose();
+  }
+
+  /// The guest may force landscape (ZZZ does). Rotate the phone UI with the
+  /// decoded frame so the video fills the screen instead of becoming a small
+  /// landscape strip inside a portrait app.
+  void _applyRemoteOrientation() {
+    final landscape = _session.remoteLandscape;
+    if (landscape == null || landscape == _appliedLandscape) return;
+    _appliedLandscape = landscape;
+    unawaited(SystemChrome.setPreferredOrientations(
+      landscape
+          ? const [
+              DeviceOrientation.landscapeLeft,
+              DeviceOrientation.landscapeRight,
+            ]
+          : const [DeviceOrientation.portraitUp],
+    ));
   }
 
   void _enterFullscreen() {
@@ -78,6 +102,7 @@ class _StreamScreenState extends State<StreamScreen> {
     if (_leaving) return;
     _leaving = true;
     _disconnected = true;
+    await SystemChrome.setPreferredOrientations(const []);
     // Let PopScope's canPop become true before the programmatic pop below.
     if (mounted) setState(() => _allowPop = true);
     await _session.disconnect();
@@ -97,6 +122,9 @@ class _StreamScreenState extends State<StreamScreen> {
   }
 
   void _handlePointer(PointerEvent event, String action) {
+    if (_menuOpen && action == 'down') {
+      setState(() => _menuOpen = false);
+    }
     final normalized = _normalizedPosition(event.position);
     if (normalized == null) return;
     _session.sendTouch(
@@ -105,6 +133,10 @@ class _StreamScreenState extends State<StreamScreen> {
       y: normalized.dy,
       pointerId: event.pointer,
     );
+  }
+
+  void _sendGuestKey(int keycode) {
+    _session.sendKey(action: 'down', keycode: keycode);
   }
 
   @override
@@ -183,23 +215,84 @@ class _StreamScreenState extends State<StreamScreen> {
           ),
         ),
         Positioned(
-          top: 8,
-          left: 8,
-          child: SafeArea(
-            child: IconButton(
-              tooltip: 'Exit stream',
-              onPressed: _leave,
-              icon: const Icon(Icons.arrow_back, size: 20),
-              style: IconButton.styleFrom(
-                foregroundColor: Colors.white,
-                backgroundColor: Colors.black54,
-                minimumSize: const Size(40, 40),
-                padding: EdgeInsets.zero,
-              ),
-            ),
-          ),
+          right: 0,
+          top: 0,
+          bottom: 0,
+          child: Center(child: _buildControlMenu()),
         ),
       ],
+    );
+  }
+
+  Widget _buildControlMenu() {
+    final buttons = <Widget>[
+      _menuButton(
+        icon: Icons.arrow_back,
+        tooltip: 'Guest Back',
+        onPressed: () => _sendGuestKey(4),
+      ),
+      _menuButton(
+        icon: Icons.home,
+        tooltip: 'Guest Home',
+        onPressed: () => _sendGuestKey(3),
+      ),
+      _menuButton(
+        icon: Icons.close,
+        tooltip: 'Exit stream',
+        onPressed: _leave,
+      ),
+    ];
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOut,
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.62),
+        borderRadius: const BorderRadius.horizontal(
+          left: Radius.circular(18),
+        ),
+        child: _menuOpen
+            ? Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ...buttons,
+                    IconButton(
+                      tooltip: 'Collapse menu',
+                      onPressed: () => setState(() => _menuOpen = false),
+                      icon: const Icon(
+                        Icons.chevron_right,
+                        color: Colors.white70,
+                        size: 20,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : IconButton(
+                tooltip: 'Open controls',
+                onPressed: () => setState(() => _menuOpen = true),
+                icon: const Icon(
+                  Icons.chevron_left,
+                  color: Colors.white70,
+                  size: 22,
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _menuButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+  }) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      icon: Icon(icon, color: Colors.white, size: 20),
+      constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+      padding: EdgeInsets.zero,
     );
   }
 }

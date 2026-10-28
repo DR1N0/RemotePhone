@@ -28,6 +28,11 @@ class WebrtcSession extends ChangeNotifier {
 
   SessionConnectionState state = SessionConnectionState.idle;
   String? errorMessage;
+  bool? _remoteLandscape;
+
+  /// True when the latest decoded video frame is wider than tall. The stream
+  /// screen uses this to rotate the phone UI to match the guest display.
+  bool? get remoteLandscape => _remoteLandscape;
 
   RTCPeerConnection? _pc;
   RTCDataChannel? _inputChannel;
@@ -294,6 +299,15 @@ class WebrtcSession extends ChangeNotifier {
           continue;
         }
         if (kind != 'video') continue;
+        final width = report.values['frameWidth'];
+        final height = report.values['frameHeight'];
+        if (width is num && height is num && width > 0 && height > 0) {
+          final landscape = width > height;
+          if (_remoteLandscape != landscape) {
+            _remoteLandscape = landscape;
+            notifyListeners();
+          }
+        }
         debugPrint('[webrtc] video stats: packetsReceived=${report.values['packetsReceived']} '
             'bytesReceived=${report.values['bytesReceived']} '
             'framesReceived=${report.values['framesReceived']} '
@@ -330,6 +344,7 @@ class WebrtcSession extends ChangeNotifier {
     }
     await _closePeerConnection();
     _sharedRenderer.srcObject = null;
+    _remoteLandscape = null;
     state = SessionConnectionState.disconnected;
     notifyListeners();
     debugPrint('[webrtc] disconnect() done');
