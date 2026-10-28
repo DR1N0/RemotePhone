@@ -1,10 +1,12 @@
 # RemotePhone
 
-**状态：无限期暂停 · v0.0.1 · 一个已经结束的实验，不是产品**
+**状态：无限期暂停 · v0.0.1 · 维护模式的公开快照**
 
-[English](README.md) · [Release notes](docs/releases/v0.0.1.md) · [GitHub release](https://github.com/DR1N0/RemotePhone/releases/tag/v0.0.1)
+[English](README.md) · [Release notes](docs/releases/v0.0.1.md) · [复用地图](docs/reuse-map.md) · [工程笔记](docs/engineering-notes.md) · [GitHub release](https://github.com/DR1N0/RemotePhone/releases/tag/v0.0.1)
 
 RemotePhone 是一个自托管的 Android 模拟器串流实验。控制面、Flutter 客户端、触摸/横竖屏和 QCOW2 基础镜像都做出来了；但目标游戏过不了反作弊，所以项目停在这里。
+
+仓库现在处于**维护模式**：不再加新功能，也不承诺支持；保留公开作为参考实现。想复用代码，先看[复用地图](docs/reuse-map.md)和[工程笔记](docs/engineering-notes.md)。贡献和安全边界见 [`CONTRIBUTING.md`](CONTRIBUTING.md) 和 [`SECURITY.md`](SECURITY.md)。
 
 ---
 
@@ -98,7 +100,7 @@ Android 包名是 `com.remotephone.client`。客户端通过 `_remotephone._tcp`
 
 ### 如果以后有人接手
 
-控制面、访问码/证书固定、QCOW2 基础镜像分层、WebRTC 触摸和方向处理都可以复用。
+控制面、访问码/证书固定、QCOW2 基础镜像分层、WebRTC 触摸和方向处理都可以复用。入口、耦合和坑见[复用地图](docs/reuse-map.md)；最花时间的失败见[工程笔记](docs/engineering-notes.md)。
 
 比较诚实的后续路线只有三条：
 

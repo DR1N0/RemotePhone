@@ -1,14 +1,16 @@
 # RemotePhone
 
-**Status: paused indefinitely · v0.0.1 · a finished experiment, not a product**
+**Status: paused indefinitely · v0.0.1 · maintenance-only public snapshot**
 
-[Release notes](docs/releases/v0.0.1.md) · [GitHub release](https://github.com/DR1N0/RemotePhone/releases/tag/v0.0.1) · [中文](README.zh-CN.md)
+[Release notes](docs/releases/v0.0.1.md) · [Reuse map](docs/reuse-map.md) · [Engineering notes](docs/engineering-notes.md) · [GitHub release](https://github.com/DR1N0/RemotePhone/releases/tag/v0.0.1) · [中文](README.zh-CN.md)
 
 RemotePhone started as a simple idea: run several Android emulators on my own PC, stream each one to a phone with real touch input, and let a few people each have their own "phone" on the same machine.
 
 It got surprisingly far. Then it ran into miHoYo's anti-cheat and stopped there.
 
 This repository is the honest snapshot of that attempt: the control plane works, the client works, the streaming/touch/orientation plumbing works — but the one use case that made the project interesting, playing games like **Zenless Zone Zero** and **Genshin Impact** through an Android emulator, does not work, and I do not have a responsible way around it.
+
+The repository is now **maintenance-only**: no new features and no support promises. It stays public as a reference implementation. If you want to borrow code, start with the [reuse map](docs/reuse-map.md); the bugs worth knowing about are in the [engineering notes](docs/engineering-notes.md).
 
 ---
 
@@ -104,11 +106,11 @@ adb install -r build\app\outputs\flutter-apk\app-debug.apk
 
 The Android package is `com.remotephone.client`. The client discovers servers over `_remotephone._tcp` mDNS, or you can add the URL manually. First contact uses a one-time access code and then pins the server certificate.
 
-For the full setup, env-var table, firewall notes, and API details, see the archived documentation in [`docs/`](docs/). The README intentionally no longer claims this is an active product.
+For the full setup, env-var table, firewall notes, and API details, see the archived documentation in [`docs/`](docs/). The README intentionally no longer claims this is an active product. Contribution and security expectations are in [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md).
 
 ### If someone wants to continue
 
-The useful pieces are the control plane, access-code/cert-pinning auth, QCOW2 base-image layering, and the WebRTC touch/orientation pipeline. They can be reused.
+The useful pieces are the control plane, access-code/cert-pinning auth, QCOW2 base-image layering, and the WebRTC touch/orientation pipeline. They can be reused; the [reuse map](docs/reuse-map.md) lists the entry points, coupling, and caveats, and the [engineering notes](docs/engineering-notes.md) cover the failures that cost the most time.
 
 The least dishonest next paths are:
 

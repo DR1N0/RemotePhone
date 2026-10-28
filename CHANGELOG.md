@@ -1,5 +1,9 @@
 # Changelog
 
+> `v0.0.1` is the final snapshot. The repository is maintenance-only: no new
+> features, no support promises. See the [reuse map](docs/reuse-map.md) and
+> [engineering notes](docs/engineering-notes.md).
+
 ## v0.0.1 — 2026-10-28
 
 The first and final public snapshot of RemotePhone.

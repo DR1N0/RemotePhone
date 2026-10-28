@@ -8,6 +8,22 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-28 — Repository frozen as a maintenance-only reference
+
+The project is paused permanently and the repository is now maintenance-only. It
+is deliberately **not archived**: the v0.0.1 tree, issues, and release stay
+visible and clonable. New features and productization work are out of scope;
+small documentation corrections and reproducible build/defect reports are still
+welcome (see `CONTRIBUTING.md`).
+
+The useful output is the implementation itself plus two navigation documents:
+`docs/reuse-map.md` (what can be borrowed, where to start, how coupled it is) and
+`docs/engineering-notes.md` (the failures that cost the most time). The release
+notes and README link to both. This is a documentation/positioning decision, not
+a code change; the v0.0.1 behavior is unchanged.
+
+---
+
 ### 2026-10-28 — Guest orientation changes, edge controls, and the ZZZ anti-cheat blocker
 
 Two independent orientation fixes landed:
