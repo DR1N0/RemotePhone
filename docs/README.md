@@ -1,5 +1,7 @@
 # Documentation index
 
+> **Project status: paused indefinitely (v0.0.1).** See the [README](../README.md) for the post-mortem. These documents are kept as an archive of the implementation, not as a promise of future work.
+
 - **[`architecture/`](architecture/overview.md)** — the current-state source of truth: system topology, data model, security model, API surfaces, and a decisions log. Start here. These files are living documents, edited in place as the system changes.
 - **[`plans/`](plans/roadmap.md)** — the phase roadmap and per-phase plans (historical, kept for rationale and verified acceptance criteria).
 - **[`architecture/planned-subsystems.md`](architecture/planned-subsystems.md)** — design intent for what's not built yet. A target, not current state — move sections out to the other architecture files as they're implemented.

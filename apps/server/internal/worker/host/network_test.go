@@ -7,7 +7,7 @@ import (
 
 func TestIsAdvertisableIPv4IncludesLANAndTailscale(t *testing.T) {
 	for _, raw := range []string{
-		"192.168.1.7",
+		"192.168.1.10",
 		"10.0.0.5",
 		"172.16.4.2",
 		"100.99.102.55", // Tailscale / RFC 6598 CGNAT range: routable on the tailnet

@@ -34,8 +34,8 @@ func TestLoadStreamBitRate(t *testing.T) {
 }
 
 func TestLoadWebRTCHostIPOverride(t *testing.T) {
-	t.Setenv("REMOTEPHONE_WEBRTC_HOST_IP", "192.168.1.7")
-	if cfg := Load(); cfg.WebRTCHostIP != "192.168.1.7" {
+	t.Setenv("REMOTEPHONE_WEBRTC_HOST_IP", "192.168.1.10")
+	if cfg := Load(); cfg.WebRTCHostIP != "192.168.1.10" {
 		t.Errorf("WebRTCHostIP = %q, want explicit override", cfg.WebRTCHostIP)
 	}
 	t.Setenv("REMOTEPHONE_WEBRTC_HOST_IP", "")

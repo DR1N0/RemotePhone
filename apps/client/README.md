@@ -1,6 +1,8 @@
-# remotephone client (Android)
+# RemotePhone client (Android)
 
-Flutter client for [remotephone](../..) — it logs in to a `remotephone-controlplane` server, lists the user's managed Android instances, and streams one over WebRTC with touch input.
+> **Project status: paused indefinitely (v0.0.1).** See the [root README](../../README.md) for the post-mortem. The target miHoYo games do not run on the emulator runtime because their anti-cheat crashes the ARM translation layer.
+
+Flutter client for [RemotePhone](../..) — it logs in to a `remotephone-controlplane` server, lists the user's managed Android instances, and streams one over WebRTC with touch input.
 
 Android is the only supported platform (iOS distribution was deliberately ruled out for a free/open-source project).
 
@@ -9,7 +11,7 @@ Android is the only supported platform (iOS distribution was deliberately ruled 
 ```powershell
 flutter pub get
 # Optional: bake in the server URL (otherwise the add-server screen defaults to 10.0.2.2:3000)
-flutter build apk --debug --dart-define=REMOTEPHONE_DEFAULT_SERVER=https://192.168.1.7:3000
+flutter build apk --debug --dart-define=REMOTEPHONE_DEFAULT_SERVER=https://192.168.1.10:3000
 adb install -r build\app\outputs\flutter-apk\app-debug.apk
 ```
 
@@ -38,9 +40,11 @@ The app pins the server certificate after a successful access-code redemption or
 - Multiple instances per user: create, start, stop, delete, connect
 - WebRTC video (hardware H.264 when available) and audio (PCMU), with Android routing it as media (speaker + media volume, not the call earpiece)
 - Multi-touch with per-finger pointer IDs, injected via the emulator's gRPC `sendTouch`
-- Full-screen streaming: the phone's system bars are hidden, the guest uses three-button navigation inside the video, and the phone's Back gesture disconnects and returns to the instance list
+- Full-screen streaming with a collapsible right-edge menu containing guest Back/Home and Exit stream. The phone's own Back gesture also disconnects and returns to the instance list.
 
-## Not implemented yet
+## Known gaps
 
+- **Zenless Zone Zero / Genshin Impact do not work**: miHoYo's anti-cheat aborts inside the emulator's ARM translation layer after login. This is the reason the project is paused; see the root README for the tombstone evidence.
 - Opus audio (currently 8 kHz mono PCMU)
 - PIN-based session invites in the UI (server endpoints exist)
+- Production hardening: no install/update story, no multi-tenant capacity enforcement, no iOS/desktop client

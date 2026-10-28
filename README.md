@@ -1,216 +1,235 @@
 # RemotePhone
 
-RemotePhone hosts Android emulator instances on your own machine and streams them to an Android phone or tablet over a trusted LAN. Each instance is a fully independent Android device: native touch input (not a virtual gamepad), its own cloned AVD/userdata, its own worker process, and its own WebRTC video stream.
+**Status: paused indefinitely · v0.0.1 · a finished experiment, not a product**
 
-It is built for the case desktop-streaming tools cannot express: playing touch-native mobile games on a phone, and letting several people drive several independent emulator "seats" on one host.
+English | [中文](#中文)
 
-## Status
+RemotePhone started as a simple idea: run several Android emulators on my own PC, stream each one to a phone with real touch input, and let a few people each have their own "phone" on the same machine.
 
-- **Server (Go)**: active implementation in [`apps/server`](apps/server). Auth, multi-tenant users/credentials, multi-instance-per-owner, template discovery, instance lifecycle, sessions/PIN invites, WebRTC transport, admin API, worker supervision, HTTPS on the client API, and base-image capture/promote are implemented and covered by tests.
-- **Client (Flutter, Android)**: [`apps/client`](apps/client) has access-code login/pairing, mDNS server discovery, a template picker, a multi-instance list (start/stop/connect/delete), and a WebRTC streaming screen with touch input. Android is the only supported client platform — iOS distribution was deliberately ruled out for a free/open-source project.
-- **Windows is a first-class host now**: the server builds and runs on Windows with WHPX-accelerated emulators and AMD `h264_amf` hardware encoding (see [Windows host](#windows-host)).
-- **Owner console**: served by `remotephone-controlplane` at `http://127.0.0.1:3001/admin/` from `apps/server/adminui`; no login, loopback-only. The port is configurable with `REMOTEPHONE_ADMIN_PORT` if 3001 is already in use. The legacy TypeScript control plane (`apps/controlplane`) was removed on 2026-10-26.
+It got surprisingly far. Then it ran into miHoYo's anti-cheat and stopped there.
 
-## Architecture
+This repository is the honest snapshot of that attempt: the control plane works, the client works, the streaming/touch/orientation plumbing works — but the one use case that made the project interesting, playing games like **Zenless Zone Zero** and **Genshin Impact** through an Android emulator, does not work, and I do not have a responsible way around it.
 
+---
+
+## English
+
+### What this was supposed to be
+
+A self-hosted, LAN-first alternative to desktop streaming for **touch-native mobile games**:
+
+- every user gets a real Android emulator instance, not a desktop stream with a fake controller overlay;
+- each instance has its own AVD, userdata, worker process, and WebRTC stream;
+- instances are created from captured base images, with thin QCOW2 overlays so a 30 GB game does not have to be cloned per user;
+- the phone client sends native touch/key input directly to the emulator;
+- no cloud account, no relay server, no per-minute billing.
+
+That was the differentiator. A generic PC-streaming box would be competing with Sunshine/Moonlight, and I had no reason to do that.
+
+### Why it stopped
+
+**Zenless Zone Zero's anti-cheat crashes inside the emulator's ARM translation layer.**
+
+Concretely:
+
+- the game ships `arm64-v8a` native libraries only;
+- the Android Studio x86_64 emulator runs them through `libndk_translation` / berberis;
+- after login, the game loads `libtersafe2.so` (Tencent anti-cheat), and the process dies with:
+
+```text
+Fatal signal 6 (SIGABRT)
+Abort message: 'Guest call didn't restore sp: expected ..., actual ... -0x10'
+#04 libndk_translation.so (berberis::ExecuteGuestCall)
 ```
-apps/server/
-  cmd/remotephone-controlplane   # auth, instances, sessions, admin/client APIs
-  cmd/remotephone-worker         # one process per running instance
-  internal/controlplane/  # auth, instance, session, transport, admin, image,
-                          #   placement, workerproc, reconcile, tlsidentity
-  internal/worker/        # emulator runtime, WebRTC transport, gRPC capture
-  adminui/                # React owner console, embedded at /admin/ on 3001
-apps/client/              # Flutter Android client
-```
 
-- The control plane spawns one `remotephone-worker` process per running instance, health-checks it, and respawns/adopts the emulator if it dies.
-- Every instance gets its own registered AVD cloned from a template; deleting the instance removes that AVD.
-- `remotephone-worker` captures the emulator through its gRPC screenshot stream, encodes H.264 with a hardware encoder when available, and sends video/input over WebRTC directly to the client (media never goes through the control plane).
-- A user may own multiple instances; each instance can be started, stopped, and connected independently. An owner can invite guests to one session with a short PIN.
+I reproduced this consistently. Clearing the Vulkan PSO cache did not help; it only made the game download about 261 MB of data again. Switching encoders, restarting the game, and clearing the cache all left the same native abort. This is not a rendering bug in RemotePhone; it is the anti-cheat interacting with the x86-to-ARM translation boundary.
 
-## Quick start (Windows)
+The same category of problem applies to other heavy miHoYo titles. The old "PC client in mobile/touch mode" launch flags for Genshin/Star Rail were unofficial and got removed; a quick scan of the local Zenless Zone Zero PC install found no mobile UI/touch mode to switch on. A PC client with a virtual controller is a different product, and Sunshine/Moonlight already does PC streaming very well.
 
-### 1. Prerequisites
+So the project lost the thing it was built around: **native touch + independent Android instances**. A LAN streaming server that cannot run the games in question is interesting engineering, but not a product.
 
-- Go **1.27+**
-- Android SDK with `emulator`, `platform-tools`, and at least one x86_64 system image
-- An AVD created with Android Studio or `avdmanager` (for example `Medium_Phone_API_36.1`)
-- `ffmpeg` with an H.264 encoder; on AMD GPUs use a build with `--enable-amf` and check `ffmpeg -encoders | findstr h264_amf`
-- Windows Hypervisor Platform (WHPX) enabled — verify with `emulator -accel-check`
-- For building the client only: Flutter 3.x, JDK 17, Android SDK
+### What actually works
 
-### 2. Environment
+This is why the repo is still useful as a snapshot:
 
-Set these before starting the control plane (the spawned worker inherits its environment):
+- Go control plane and per-instance worker processes;
+- user accounts, unified access codes, certificate pinning, loopback owner console;
+- mDNS server discovery;
+- Android emulator instance lifecycle (create/start/stop/delete/adopt);
+- QCOW2 thin base-image layering, including the encryption-key handoff;
+- WebRTC H.264 video and PCMU audio;
+- native multi-touch and key input;
+- landscape/portrait capture normalization and touch-coordinate mapping;
+- a collapsible edge menu with guest Back/Home and stream exit;
+- a Flutter Android client and an embedded React owner console;
+- tests for the control plane, worker, capture/transport, and auth paths.
 
-| Variable | Example | Purpose |
-|---|---|---|
-| `REMOTEPHONE_DB_PATH` | `E:\remotephone\remotephone.db` | SQLite database |
-| `REMOTEPHONE_WORKER_BINARY_PATH` | `E:\remotephone\remotephone-worker.exe` | Worker binary the control plane spawns |
-| `REMOTEPHONE_ANDROID_SDK_ROOT` | `%LOCALAPPDATA%\Android\Sdk` | Android SDK |
-| `REMOTEPHONE_ANDROID_EMULATOR_PATH` | `%LOCALAPPDATA%\Android\Sdk\emulator\emulator.exe` | Emulator binary (optional if SDK root is set) |
-| `REMOTEPHONE_FFMPEG_PATH` | `C:\ffmpeg\bin\ffmpeg.exe` | ffmpeg binary (optional if on `PATH`) |
-| `REMOTEPHONE_INSTANCE_DATA_ROOT` | `E:\remotephone\instance-data` | Per-instance cloned AVD directories |
-| `REMOTEPHONE_BASE_IMAGE_ROOT` | `E:\remotephone\base-images` | Captured base images |
-| `STUN_URL` | `none` | `none` disables STUN; use it on a LAN |
-| `REMOTEPHONE_CLIENT_ADDR` | `127.0.0.1:3000` | Client API host and port; use `0.0.0.0:3000` for LAN phones |
-| `REMOTEPHONE_CLIENT_PORT` | unset | Optional client API port override; host still comes from `REMOTEPHONE_CLIENT_ADDR` |
-| `REMOTEPHONE_ADMIN_PORT` | `3001` | Owner console port on `127.0.0.1`; change it when 3001 is already taken |
-| `REMOTEPHONE_TLS_CERT_PATH` / `REMOTEPHONE_TLS_KEY_PATH` | defaults beside the DB | Self-signed cert/key |
-| `REMOTEPHONE_STREAM_BITRATE` | `2000000` | H.264 bitrate (bits/s); lower it for weak WiFi |
-| `REMOTEPHONE_AUDIO_DEBUG` | `1` | Log audio packet RMS/peak and `WriteSample` stalls (diagnostics only) |
-| `REMOTEPHONE_HEADLESS` | `1` | One worker owns one instance; default `-no-window`. Set `0` only to debug with a visible emulator window. |
-| `REMOTEPHONE_GPU_MODE` | `host` on Windows, `auto` elsewhere | Emulator `-gpu` mode. Use `auto`, `swiftshader`, or `swangle` when host GPU acceleration is unavailable; `host` avoids silently falling back to software rendering. |
-| `REMOTEPHONE_EMULATOR_AUDIO` | `none` | Emulator `-audio` backend. `none` keeps guest audio for `streamAudio` but plays nothing on the host; use `auto` for local debugging with host sound. |
-| `REMOTEPHONE_PAIRING_PIN` | random 6 digits | Local bootstrap access code printed at control-plane startup and seeded as a one-use code; set a stable value for automation. |
-| `REMOTEPHONE_SERVER_NAME` | host name | Display name shown in the client's server picker. The stable server ID is independent of it. |
-| `REMOTEPHONE_SERVER_ID_PATH` | `<db>.server-id` | Persisted UUID identifying this server across restarts/IP changes. |
-| `REMOTEPHONE_DISABLE_MDNS` | unset | Set `1` to disable LAN mDNS advertisement (`_remotephone._tcp`). |
-| `REMOTEPHONE_WEBRTC_HOST_IP` | unset | Optional debug override: restrict ICE to one IPv4 address. By default every routable IPv4 interface (LAN, Tailscale, other VPNs) is advertised and ICE chooses. |
+It can be used for **light emulator-friendly Android apps**. It was never hardened for production, multiple concurrent users, or untrusted networks.
 
-### 3. Build and run
+### What does not work / was never finished
 
-The owner console is committed as built `apps/server/adminui/dist`; rebuild it after UI changes (Node 20+):
+- **Zenless Zone Zero, Genshin Impact, Honkai: Star Rail** — anti-cheat + ARM translation blocker described above.
+- **Production operations** — no installer, no CI release pipeline, no upgrade/migration story, no GPU capacity enforcement.
+- **Base-image polish** — shader-cache bake-in with login wipe is not implemented; base-image GC and async capture/progress are still open.
+- **Security hardening** — trusted LAN only; self-signed certificate; do not expose it to the public internet.
+- **Cross-platform clients** — Android only; no iOS/desktop client.
+- **Performance guarantees** — tested on one Windows host and one phone; not a benchmark.
 
-```powershell
-cd apps/server/adminui
-npm ci
-npm run build
-```
+### If you still want to run it
+
+Prerequisites: Go 1.27+, Android SDK/emulator with an x86_64 image, ffmpeg with H.264 support, Windows Hypervisor Platform on Windows, and Flutter/JDK 17 for the client.
 
 ```powershell
 cd apps/server
 go build -o ..\..\.bin\remotephone-worker.exe ./cmd/remotephone-worker
 go build -o ..\..\.bin\remotephone-controlplane.exe ./cmd/remotephone-controlplane
-```
 
-Run both in separate terminals (or let the control plane spawn workers):
-
-```powershell
-# terminal 1 — control plane
-$env:REMOTEPHONE_DB_PATH = "E:\remotephone\remotephone.db"
-$env:REMOTEPHONE_WORKER_BINARY_PATH = "E:\remotephone\remotephone-worker.exe"
+$env:REMOTEPHONE_DB_PATH = "E:\RemotePhone\remotephone.db"
+$env:REMOTEPHONE_WORKER_BINARY_PATH = "E:\RemotePhone\remotephone-worker.exe"
 $env:REMOTEPHONE_ANDROID_SDK_ROOT = "$env:LOCALAPPDATA\Android\Sdk"
 $env:REMOTEPHONE_FFMPEG_PATH = "C:\ffmpeg\bin\ffmpeg.exe"
-$env:STUN_URL = "none"
 $env:REMOTEPHONE_CLIENT_ADDR = "0.0.0.0:3000"
-# Optional: change only the client API port
-# $env:REMOTEPHONE_CLIENT_PORT = "3010"
-$env:REMOTEPHONE_STREAM_BITRATE = "2000000"
-# Optional debug override only (normally leave unset so LAN + Tailscale are
-# both advertised and ICE picks the reachable path):
-# $env:REMOTEPHONE_WEBRTC_HOST_IP = "192.168.1.7"
-.\remotephone-controlplane.exe
+$env:REMOTEPHONE_ADMIN_PORT = "3001"
+$env:REMOTEPHONE_GPU_MODE = "host"
+$env:STUN_URL = "none"
+.\..\..\.bin\remotephone-controlplane.exe
 ```
 
-On first run, read the bootstrap secret from `<db>.bootstrap-secret` and create the first admin (admin API is loopback-only on `127.0.0.1:3001` by default; set `REMOTEPHONE_ADMIN_PORT` if that port is occupied). The owner console is at `http://127.0.0.1:3001/admin/` and needs no login:
-
-If you set `REMOTEPHONE_ADMIN_PORT`, substitute that port in the owner-console and setup URLs below.
-
-```powershell
-$secret = (Get-Content .\remotephone.db.bootstrap-secret -Raw).Trim()
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3001/api/v1/auth/setup `
-  -ContentType application/json `
-  -Body (@{ username="admin"; password="change-me"; deviceLabel="pc"; bootstrapSecret=$secret } | ConvertTo-Json)
-```
-
-After creating the first admin, pair the Android client with either the startup bootstrap access code or an owner-generated code:
-
-```powershell
-Set-Content -NoNewline $env:TEMP\code.json '{}'
-curl.exe -H "Content-Type: application/json" `
-  --data-binary "@$env:TEMP\code.json" `
-  http://127.0.0.1:3001/api/v1/admin/access-codes
-```
-
-Use the returned code with the admin username/password in the client.
-
-### 4. Build and run the Android client
+Then open the owner console at `http://127.0.0.1:3001/admin/` and build/install the client:
 
 ```powershell
 cd apps/client
 flutter pub get
-# Optional: bake in the server URL so a real phone does not need to type it
-flutter build apk --debug --dart-define=REMOTEPHONE_DEFAULT_SERVER=https://192.168.1.7:3000
+flutter build apk --debug --dart-define=REMOTEPHONE_DEFAULT_SERVER=https://192.168.1.10:3000
 adb install -r build\app\outputs\flutter-apk\app-debug.apk
 ```
 
-The app opens on **Servers**, even with no saved account. Servers discovered by mDNS appear under **Nearby**; **+** opens manual entry. The add-server flow is URL → access code (only when the certificate is not already trusted) → username/password. Access codes are unified:
+The Android package is `com.remotephone.client`. The client discovers servers over `_remotephone._tcp` mDNS, or you can add the URL manually. First contact uses a one-time access code and then pins the server certificate.
 
-- A **self code** is created by any logged-in user for their own account. Use it on a new phone to add that device.
-- An **admin code** is created by an `admin` user. It is not bound to an account: the server decides at redemption whether to create a new ordinary user or add a device to an existing account, based on whether the username already exists. It never creates an admin.
-- The certificate pin is stored only in the saved server profile, keyed by the server's stable UUID. Adding/known-server detection always fetches `/server/info`, finds profiles for that server ID, and trusts the connection only if the certificate observed on that connection equals the profile's pinned hash. The same IP can therefore host two different servers: each server ID selects its own profile and pin. "Forget server" removes the profile and its pin, so re-adding requires a fresh access code. Clearing app data does the same.
+For the full setup, env-var table, firewall notes, and API details, see the archived documentation in [`docs/`](docs/). The README intentionally no longer claims this is an active product.
 
-Create an admin code on the client API:
+### If someone wants to continue
 
-```powershell
-Set-Content -NoNewline $env:TEMP\code.json '{}'
-curl.exe -k -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" `
-  --data-binary "@$env:TEMP\code.json" `
-  https://192.168.1.7:3000/api/v1/access-codes
+The useful pieces are the control plane, access-code/cert-pinning auth, QCOW2 base-image layering, and the WebRTC touch/orientation pipeline. They can be reused.
+
+The least dishonest next paths are:
+
+1. **real Android phones** as the runtime (native touch, native anti-cheat);
+2. **Windows PC game streaming** for PC-native titles, accepting that Sunshine/Moonlight already owns that space;
+3. **light/emulator-friendly Android apps** on this emulator runtime.
+
+What I would not recommend is spending more time trying to make an Android x86 emulator pass a AAA mobile anti-cheat. That is an environment boundary, not a bug to patch in this repo.
+
+### License and trademarks
+
+MIT. See [`LICENSE`](LICENSE).
+
+RemotePhone is not affiliated with or endorsed by miHoYo/HoYoverse, Tencent, Google, or the Android Open Source Project. Game names and trademarks belong to their respective owners.
+
+---
+
+## 中文
+
+### 这个项目原本想做什么
+
+一开始的想法很朴素：在**自己的 Windows 电脑**上开几台 Android 模拟器，把画面和触摸直接串到手机上。每个用户拿到一台独立的模拟器，而不是一个套着虚拟手柄的 PC 桌面串流；每台实例有自己的 AVD、userdata、worker 和 WebRTC 流；游戏资源用 QCOW2 基础镜像 + 薄层复制，避免每个用户都复制 30GB；手机端发送的是真正的触摸/按键输入。
+
+这才是我觉得值得做的地方。单纯做一个 PC 串流器没有意义——Sunshine/Moonlight 已经很成熟，我没有必要重复造一遍。
+
+### 为什么放弃
+
+**绝区零的反作弊，在模拟器的 ARM 翻译层里直接崩了。**
+
+具体来说：
+
+- 绝区零只带 `arm64-v8a` 原生库；
+- Android Studio 的 x86_64 模拟器要用 `libndk_translation` / berberis 翻译执行；
+- 登录后游戏加载 `libtersafe2.so`（腾讯反作弊），进程随即 abort：
+
+```text
+Fatal signal 6 (SIGABRT)
+Abort message: 'Guest call didn't restore sp: expected ..., actual ... -0x10'
+#04 libndk_translation.so (berberis::ExecuteGuestCall)
 ```
 
-An ordinary user's self code uses the same endpoint. The server returns `scope: "self"` or `scope: "new-or-existing"` and an expiry. Redeem with `POST /api/v1/access-codes/redeem` (`code`, `username`, `password`); the response includes `created`, the token, and `certSha256` for pinning.
+这个问题可以稳定复现。清 Vulkan PSO cache 没有用，只会让游戏重新下载约 261MB；换编码器、重启游戏也一样。它不是 RemotePhone 的渲染 bug，而是反作弊和 x86→ARM 翻译边界撞在了一起。
 
-The loopback owner console on `127.0.0.1:3001` (or `REMOTEPHONE_ADMIN_PORT`) has no bearer-token requirement because reaching it already requires host access; it is protected against browser CSRF/DNS rebinding. It can create a code for any target (or unbound):
+原神/星穹铁道这类体量的米哈游游戏也属于同一类风险。早年的“PC 客户端切手机/触屏模式”启动参数是未公开玩法，后来失效了；我扫了一遍本机绝区零 PC 安装目录，也没有发现可切换的移动端 UI/触屏模式。用 PC 客户端 + 虚拟手柄是另一条产品路线，而那条路线已经有 Sunshine/Moonlight。
 
-```powershell
-Set-Content -NoNewline $env:TEMP\code.json '{}'
-curl.exe -H "Content-Type: application/json" `
-  --data-binary "@$env:TEMP\code.json" `
-  http://127.0.0.1:3001/api/v1/admin/access-codes
-```
+于是项目失去了它最核心的东西：**原生触摸 + 独立 Android 实例**。一个跑不了目标游戏的 LAN 串流服务，工程上再有趣，也不是产品。
 
-The owner never sets or reads a user password. If someone loses access, remove the account in Users; owned instances are deleted, then use Invite user to issue a fresh unbound access code. The user creates a new account, and the owner can promote it to admin from the same page. If the only admin is removed, the owner console can promote the replacement account. This is the unavoidable out-of-band recovery path.
+### 目前还能用的部分
 
-After redemption, the saved profile stores the certificate pin; later known-server detection verifies it and hides the code field. Forget server removes the profile and its pin.
+- Go 控制面 + 每实例 worker；
+- 账号、统一访问码、证书固定、仅本机 owner console；
+- mDNS 服务发现；
+- 模拟器实例的创建/启动/停止/删除/接管；
+- QCOW2 基础镜像分层（包括 encryption key 的传递）；
+- WebRTC H.264 视频和 PCMU 音频；
+- 原生多点触摸和按键输入；
+- 横竖屏采集归一化和触摸坐标映射；
+- 右侧可折叠浮层（受控机 Back/Home + 退出串流）；
+- Flutter Android 客户端和嵌入式 React owner console；
+- 控制面、worker、采集/传输、鉴权的测试。
 
-### Firewall
+它仍然可以拿来跑**轻量、对模拟器友好的 Android 应用**。但它从来没有为生产环境、多租户并发或不可信网络做过加固。
 
-The first time `remotephone-worker.exe`, `emulator.exe`, or either qemu binary listens, Windows Defender Firewall may prompt. Allow private networks. Running test tools with `go run` creates a new temporary executable each time and therefore re-prompts every run — build them to a fixed path instead.
+### 哪些不行 / 没做完
 
-For a one-time setup, run [scripts/windows/firewall-allow.ps1](scripts/windows/firewall-allow.ps1) from an elevated PowerShell. It adds inbound allow-rules for the fixed binaries (including the headless qemu and `.bin\webrtc.test.exe`) and, with `-DisableNotifications`, also silences the "blocked app" popup for unknown programs. After that, starting `remotephone-controlplane` is enough: it spawns each instance's worker and emulator itself.
+- **绝区零、原神、星穹铁道**：反作弊 + ARM 翻译，当前路线无法登录。
+- **生产运维**：没有安装器、没有 CI 发布流程、没有升级/迁移方案、没有 GPU 容量控制。
+- **基础镜像收尾**：登录后编译 shader 再打进 base、抹除登录信息，没有实现；镜像 GC、异步采集进度也还空着。
+- **安全加固**：只适合可信 LAN；自签名证书；不要直接暴露到公网。
+- **跨平台客户端**：只有 Android，没有 iOS/桌面客户端。
+- **性能承诺**：只在一台 Windows 主机和一台手机上验证过，不是 benchmark。
 
-`go test` normally builds a new temporary test executable, which cannot be covered by a fixed-path firewall rule. For the WebRTC transport tests, build once to the fixed path:
+### 如果还想跑起来
+
+前置条件：Go 1.27+、Android SDK/emulator 和 x86_64 镜像、带 H.264 的 ffmpeg、Windows 上启用 WHPX，以及构建客户端用的 Flutter/JDK 17。
 
 ```powershell
 cd apps/server
-go test -c -o ..\..\.bin\webrtc.test.exe ./internal/worker/transport/webrtc
-..\..\.bin\webrtc.test.exe -test.v
+go build -o ..\..\.bin\remotephone-worker.exe ./cmd/remotephone-worker
+go build -o ..\..\.bin\remotephone-controlplane.exe ./cmd/remotephone-controlplane
+
+$env:REMOTEPHONE_DB_PATH = "E:\RemotePhone\remotephone.db"
+$env:REMOTEPHONE_WORKER_BINARY_PATH = "E:\RemotePhone\remotephone-worker.exe"
+$env:REMOTEPHONE_ANDROID_SDK_ROOT = "$env:LOCALAPPDATA\Android\Sdk"
+$env:REMOTEPHONE_FFMPEG_PATH = "C:\ffmpeg\bin\ffmpeg.exe"
+$env:REMOTEPHONE_CLIENT_ADDR = "0.0.0.0:3000"
+$env:REMOTEPHONE_ADMIN_PORT = "3001"
+$env:REMOTEPHONE_GPU_MODE = "host"
+$env:STUN_URL = "none"
+.\..\..\.bin\remotephone-controlplane.exe
 ```
 
-The client API (TCP 3000) and WebRTC UDP ports must be reachable from the phone.
-
-## Testing
-
-```powershell
-cd apps/server
-go test ./...
-```
+然后打开 `http://127.0.0.1:3001/admin/`，构建并安装客户端：
 
 ```powershell
 cd apps/client
-flutter analyze
+flutter pub get
+flutter build apk --debug --dart-define=REMOTEPHONE_DEFAULT_SERVER=https://192.168.1.10:3000
+adb install -r build\app\outputs\flutter-apk\app-debug.apk
 ```
 
-## Limitations (current)
+Android 包名是 `com.remotephone.client`。客户端通过 `_remotephone._tcp` mDNS 发现服务，也可以手动填 URL。首次连接需要一次性访问码，之后会固定服务器证书。
 
-- **Audio is 8 kHz mono μ-law (PCMU), not Opus.** It is carried over WebRTC and playable on the Android client, but it is telephone-quality; Opus is the next quality step.
-- **Multi-touch is implemented through the emulator's gRPC `sendTouch`** (pointer IDs are carried from the client), with an adb single-touch fallback if gRPC input fails. Keyboard events still use adb.
-- **Full-screen phone UI; the guest owns navigation.** The client hides the phone's system bars, the worker switches the emulated device to three-button navigation, and the guest's Back/Home/Recents buttons are tapped inside the video. The phone's Back gesture exits the stream and disconnects.
-- **Trusted LAN only.** The server uses a self-signed certificate; first contact is bootstrapped with an access code and the client pins the certificate afterwards. Do not expose it to the public internet without a VPN or reverse proxy.
-- **ICE advertises every routable IPv4 interface** (LAN, Tailscale, other VPNs), excluding only link-local, multicast and IPv6; loopback is kept for local probes. ICE chooses. `REMOTEPHONE_WEBRTC_HOST_IP` is only a debug override. There is no Tailscale-specific configuration.
-- **GPU acceleration must be requested explicitly on Windows.** The emulator can silently persist `hw.gpu.mode=swiftshader`; remotephone now passes `-gpu host` by default on Windows so games use the host GPU (verified with an AMD RX 9070: host Vulkan and GLES translators selected). Multiple instances share that GPU/VRAM and the H.264 encoder, so disk, VRAM, and encode capacity all need to be considered together.
-- **An Android emulator is a poor test client on the same Windows host.** Its NAT hairpin to the host's own LAN IP loses packets under video load; a real phone on the LAN is the trustworthy end-to-end test. The host-side WebRTC probe is unaffected.
-- **No capacity enforcement.** Each instance costs a full emulator (RAM/CPU/disk); start only what the host can carry.
-- Base-image capture/promote and QCOW2 layering are verified end-to-end, including a 38GB Zenless Zone Zero base copied from a real phone into a 64GB AVD (capture → promote → cloned instance boot). Base-image GC, async capture/progress, per-instance base pinning, and the admin Images UI are still open; see [`docs/architecture/decisions-log.md`](docs/architecture/decisions-log.md).
+完整的环境变量、防火墙和 API 细节在 [`docs/`](docs/) 里，保留原样作为归档文档；README 不再假装它是活跃产品。
 
-## Documentation
+### 如果以后有人接手
 
-- [`docs/architecture/overview.md`](docs/architecture/overview.md) — current system shape and package map
-- [`docs/architecture/data-model.md`](docs/architecture/data-model.md) — schema, including multi-instance ownership
-- [`docs/architecture/api-surfaces.md`](docs/architecture/api-surfaces.md)
-- [`docs/architecture/decisions-log.md`](docs/architecture/decisions-log.md)
-- [`docs/plans/roadmap.md`](docs/plans/roadmap.md)
-- [`docs/windows-migration-handoff.md`](docs/windows-migration-handoff.md) — Windows-specific findings and verification notes
+控制面、访问码/证书固定、QCOW2 基础镜像分层、WebRTC 触摸和方向处理都可以复用。
+
+比较诚实的后续路线只有三条：
+
+1. **真实 Android 手机**做 runtime：原生触摸、原生反作弊；
+2. **Windows PC 原生游戏串流**：接受 Sunshine/Moonlight 已经占据这块市场；
+3. **轻量、对模拟器友好的 Android 应用**继续用这套 emulator runtime。
+
+我不建议继续在 Android x86 模拟器上对抗 AAA 手游反作弊。那是环境边界，不是这个仓库能修的 bug。
+
+### 许可与商标
+
+MIT，见 [`LICENSE`](LICENSE)。
+
+RemotePhone 与 miHoYo/米哈游、HoYoverse、腾讯、Google、Android Open Source Project 均无隶属或背书关系。游戏名称和商标归各自权利人所有。

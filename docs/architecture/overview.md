@@ -1,5 +1,7 @@
 # System overview
 
+> **Project status: paused indefinitely (v0.0.1).** The target games (Zenless Zone Zero / Genshin Impact) abort in the Android emulator's ARM translation layer after their anti-cheat loads. See the [README](../../README.md) and the anti-cheat entry in the decisions log.
+
 This document describes the remotephone control plane **as it actually exists right now**. Unlike design/planning documents, this file is edited in place as reality changes — if it disagrees with the code, the code wins and this file is wrong.
 
 ## Motivation (why this exists instead of Moonlight/Sunshine/Apollo/Artemis)

@@ -1,5 +1,7 @@
 # Go backend consolidation — roadmap
 
+> **Project status: paused indefinitely (v0.0.1).** The roadmap is historical; no further phases are planned. See the [README](../../README.md) for the post-mortem.
+
 Living index of remaining implementation phases. Update status in place as work proceeds; this is not a substitute for the per-phase plan files it links to.
 
 | # | Phase | Status | Scope |

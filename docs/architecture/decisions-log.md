@@ -236,7 +236,7 @@ An earlier attempt at the same date restricted ICE to one detected `192.168/10/1
 
 The policy is now: IPv4/UDP only, advertise every routable IPv4 interface (LAN, Tailscale `100.64/10`, other VPNs), exclude link-local/multicast/IPv6 (loopback stays for local probes), and let ICE choose. `REMOTEPHONE_WEBRTC_HOST_IP` remains as a debug override for a specific interface, not as a Tailscale prerequisite. `host.IsAdvertisableIPv4` owns the predicate and is unit-tested for LAN, Tailscale, link-local, multicast and IPv6.
 
-Verified on a real phone (Xiaomi 23127PN0CC, Wi-Fi `192.168.1.4`): ICE selected `192.168.1.4 -> 192.168.1.7`, video ran at ~30fps with `framesDecoded` tracking `framesReceived` and no freeze over the test window. The emulator-as-client hairpin remains a test-environment artifact and is not a reason to restrict candidates.
+Verified on a real phone (a real Android phone, Wi-Fi `192.168.1.11`): ICE selected `192.168.1.11 -> 192.168.1.10`, video ran at ~30fps with `framesDecoded` tracking `framesReceived` and no freeze over the test window. The emulator-as-client hairpin remains a test-environment artifact and is not a reason to restrict candidates.
 
 ---
 
