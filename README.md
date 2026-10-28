@@ -2,7 +2,7 @@
 
 **Status: paused indefinitely · v0.0.1 · a finished experiment, not a product**
 
-English | [中文](#中文)
+[Release notes](docs/releases/v0.0.1.md) · [GitHub release](https://github.com/DR1N0/RemotePhone/releases/tag/v0.0.1) · [中文](#中文)
 
 RemotePhone started as a simple idea: run several Android emulators on my own PC, stream each one to a phone with real touch input, and let a few people each have their own "phone" on the same machine.
 
