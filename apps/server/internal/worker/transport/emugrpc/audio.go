@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	emupb "mako/internal/worker/transport/emugrpc/proto"
+	emupb "remotephone/internal/worker/transport/emugrpc/proto"
 )
 
 // AudioFrame is one chunk of raw PCM audio from the emulator. Data is

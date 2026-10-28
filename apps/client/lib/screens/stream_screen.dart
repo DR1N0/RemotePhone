@@ -32,7 +32,7 @@ class _StreamScreenState extends State<StreamScreen> {
   bool _menuOpen = false;
   bool? _appliedLandscape;
 
-  static const _windowChannel = MethodChannel('mako/window');
+  static const _windowChannel = MethodChannel('remotephone/window');
 
   @override
   void initState() {

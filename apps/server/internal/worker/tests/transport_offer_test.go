@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"mako/internal/worker/api"
-	"mako/internal/worker/transport"
+	"remotephone/internal/worker/api"
+	"remotephone/internal/worker/transport"
 )
 
 func TestOfferEndpointReturns200WithAnswer(t *testing.T) {

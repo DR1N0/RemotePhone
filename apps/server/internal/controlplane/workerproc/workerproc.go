@@ -1,11 +1,11 @@
 // Package workerproc owns the OS-process mechanics of running a
-// mako-worker binary: starting it, waiting for it to become reachable, and
+// remotephone-worker binary: starting it, waiting for it to become reachable, and
 // killing it. It is deliberately narrow and kept separate from
 // internal/controlplane/placement (which owns the policy — when to spawn,
 // which port to use) so the exec.Command seam is small and fake-able in
 // tests, per docs/architecture/decisions-log.md's bar for this phase
 // ("a fake process-execer so unit tests never shell out to a real
-// mako-worker binary"). See docs/plans/worker-lifecycle.md.
+// remotephone-worker binary"). See docs/plans/worker-lifecycle.md.
 package workerproc
 
 import (
@@ -36,7 +36,7 @@ type Execer interface {
 }
 
 // OSExecer is the real Execer, wrapping os/exec. Deliberately does NOT use
-// exec.CommandContext: a spawned mako-worker must keep running independently
+// exec.CommandContext: a spawned remotephone-worker must keep running independently
 // of the request that spawned it (even across a control-plane restart) —
 // see docs/architecture/planned-subsystems.md's "Worker lifecycle" section.
 type OSExecer struct{}
@@ -54,7 +54,7 @@ func (OSExecer) Start(ctx context.Context, binaryPath string, env []string) (Pro
 	cmd.Env = env
 	// A crash log on disk is more useful than output silently mixed into
 	// (or lost from) the control plane's own stdout/stderr.
-	if logFile, err := os.CreateTemp("", "mako-worker-*.log"); err == nil {
+	if logFile, err := os.CreateTemp("", "remotephone-worker-*.log"); err == nil {
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 	} else {
@@ -67,17 +67,17 @@ func (OSExecer) Start(ctx context.Context, binaryPath string, env []string) (Pro
 	return &osProcess{cmd: cmd}, nil
 }
 
-// Spawn starts a fresh mako-worker process bound to 127.0.0.1:listenPort,
-// labeled instanceID (MAKO_WORKER_ID — matches the 1:1 model: one worker
+// Spawn starts a fresh remotephone-worker process bound to 127.0.0.1:listenPort,
+// labeled instanceID (REMOTEPHONE_WORKER_ID — matches the 1:1 model: one worker
 // process per running instance), and returns its handle. The process is
 // not necessarily healthy yet — callers must WaitHealthy next.
 func Spawn(ctx context.Context, execer Execer, binaryPath, instanceID string, listenPort int, extraEnv []string) (Process, string, error) {
 	addr := fmt.Sprintf("127.0.0.1:%d", listenPort)
 	baseURL := "http://" + addr
 	env := append(append([]string{}, extraEnv...),
-		"MAKO_WORKER_LISTEN_ADDR="+addr,
-		"MAKO_WORKER_BASE_URL="+baseURL,
-		"MAKO_WORKER_ID="+instanceID,
+		"REMOTEPHONE_WORKER_LISTEN_ADDR="+addr,
+		"REMOTEPHONE_WORKER_BASE_URL="+baseURL,
+		"REMOTEPHONE_WORKER_ID="+instanceID,
 	)
 	proc, err := execer.Start(ctx, binaryPath, env)
 	if err != nil {

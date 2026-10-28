@@ -87,7 +87,7 @@ Port `transport-service.ts` and `signaling-service.ts`:
 
 ## Testing
 
-Unit tests per package (fake `WorkerClient`, real SQLite temp-file DB, same pattern as `instance`). Specifically verify the promote/demote redesign: pending-role is set before any worker call; a failed worker call leaves pending set and never updates `role`; a failed persistence-after-success triggers `ErrAuditTerminalOutcomeUnavailable`. End-to-end smoke test against the real `mako-worker` binary for session create → attachment connect → signaling offer/ICE relay, reusing the real-worker harness from Phase 1's smoke test.
+Unit tests per package (fake `WorkerClient`, real SQLite temp-file DB, same pattern as `instance`). Specifically verify the promote/demote redesign: pending-role is set before any worker call; a failed worker call leaves pending set and never updates `role`; a failed persistence-after-success triggers `ErrAuditTerminalOutcomeUnavailable`. End-to-end smoke test against the real `remotephone-worker` binary for session create → attachment connect → signaling offer/ICE relay, reusing the real-worker harness from Phase 1's smoke test.
 
 ## Explicitly out of scope
 

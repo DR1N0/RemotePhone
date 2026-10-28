@@ -3,10 +3,10 @@ package adminapi
 import (
 	"net/http"
 
-	"mako/internal/controlplane/admin"
-	"mako/internal/controlplane/apiserver/middleware"
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/transport"
+	"remotephone/internal/controlplane/admin"
+	"remotephone/internal/controlplane/apiserver/middleware"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/transport"
 
 	"github.com/google/uuid"
 )

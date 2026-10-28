@@ -27,9 +27,9 @@ func TestAdminPortFromEnv(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.set {
-				t.Setenv("MAKO_ADMIN_PORT", tt.value)
+				t.Setenv("REMOTEPHONE_ADMIN_PORT", tt.value)
 			} else {
-				unsetEnvForTest(t, "MAKO_ADMIN_PORT")
+				unsetEnvForTest(t, "REMOTEPHONE_ADMIN_PORT")
 			}
 
 			got, err := adminPortFromEnv()

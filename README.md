@@ -1,6 +1,6 @@
-# mako
+# RemotePhone
 
-Mako hosts Android emulator instances on your own machine and streams them to an Android phone or tablet over a trusted LAN. Each instance is a fully independent Android device: native touch input (not a virtual gamepad), its own cloned AVD/userdata, its own worker process, and its own WebRTC video stream.
+RemotePhone hosts Android emulator instances on your own machine and streams them to an Android phone or tablet over a trusted LAN. Each instance is a fully independent Android device: native touch input (not a virtual gamepad), its own cloned AVD/userdata, its own worker process, and its own WebRTC video stream.
 
 It is built for the case desktop-streaming tools cannot express: playing touch-native mobile games on a phone, and letting several people drive several independent emulator "seats" on one host.
 
@@ -9,14 +9,14 @@ It is built for the case desktop-streaming tools cannot express: playing touch-n
 - **Server (Go)**: active implementation in [`apps/server`](apps/server). Auth, multi-tenant users/credentials, multi-instance-per-owner, template discovery, instance lifecycle, sessions/PIN invites, WebRTC transport, admin API, worker supervision, HTTPS on the client API, and base-image capture/promote are implemented and covered by tests.
 - **Client (Flutter, Android)**: [`apps/client`](apps/client) has access-code login/pairing, mDNS server discovery, a template picker, a multi-instance list (start/stop/connect/delete), and a WebRTC streaming screen with touch input. Android is the only supported client platform — iOS distribution was deliberately ruled out for a free/open-source project.
 - **Windows is a first-class host now**: the server builds and runs on Windows with WHPX-accelerated emulators and AMD `h264_amf` hardware encoding (see [Windows host](#windows-host)).
-- **Owner console**: served by `mako-controlplane` at `http://127.0.0.1:3001/admin/` from `apps/server/adminui`; no login, loopback-only. The port is configurable with `MAKO_ADMIN_PORT` if 3001 is already in use. The legacy TypeScript control plane (`apps/controlplane`) was removed on 2026-10-26.
+- **Owner console**: served by `remotephone-controlplane` at `http://127.0.0.1:3001/admin/` from `apps/server/adminui`; no login, loopback-only. The port is configurable with `REMOTEPHONE_ADMIN_PORT` if 3001 is already in use. The legacy TypeScript control plane (`apps/controlplane`) was removed on 2026-10-26.
 
 ## Architecture
 
 ```
 apps/server/
-  cmd/mako-controlplane   # auth, instances, sessions, admin/client APIs
-  cmd/mako-worker         # one process per running instance
+  cmd/remotephone-controlplane   # auth, instances, sessions, admin/client APIs
+  cmd/remotephone-worker         # one process per running instance
   internal/controlplane/  # auth, instance, session, transport, admin, image,
                           #   placement, workerproc, reconcile, tlsidentity
   internal/worker/        # emulator runtime, WebRTC transport, gRPC capture
@@ -24,9 +24,9 @@ apps/server/
 apps/client/              # Flutter Android client
 ```
 
-- The control plane spawns one `mako-worker` process per running instance, health-checks it, and respawns/adopts the emulator if it dies.
+- The control plane spawns one `remotephone-worker` process per running instance, health-checks it, and respawns/adopts the emulator if it dies.
 - Every instance gets its own registered AVD cloned from a template; deleting the instance removes that AVD.
-- `mako-worker` captures the emulator through its gRPC screenshot stream, encodes H.264 with a hardware encoder when available, and sends video/input over WebRTC directly to the client (media never goes through the control plane).
+- `remotephone-worker` captures the emulator through its gRPC screenshot stream, encodes H.264 with a hardware encoder when available, and sends video/input over WebRTC directly to the client (media never goes through the control plane).
 - A user may own multiple instances; each instance can be started, stopped, and connected independently. An owner can invite guests to one session with a short PIN.
 
 ## Quick start (Windows)
@@ -46,28 +46,28 @@ Set these before starting the control plane (the spawned worker inherits its env
 
 | Variable | Example | Purpose |
 |---|---|---|
-| `MAKO_DB_PATH` | `E:\mako\mako.db` | SQLite database |
-| `MAKO_WORKER_BINARY_PATH` | `E:\mako\mako-worker.exe` | Worker binary the control plane spawns |
-| `MAKO_ANDROID_SDK_ROOT` | `%LOCALAPPDATA%\Android\Sdk` | Android SDK |
-| `MAKO_ANDROID_EMULATOR_PATH` | `%LOCALAPPDATA%\Android\Sdk\emulator\emulator.exe` | Emulator binary (optional if SDK root is set) |
-| `MAKO_FFMPEG_PATH` | `C:\ffmpeg\bin\ffmpeg.exe` | ffmpeg binary (optional if on `PATH`) |
-| `MAKO_INSTANCE_DATA_ROOT` | `E:\mako\instance-data` | Per-instance cloned AVD directories |
-| `MAKO_BASE_IMAGE_ROOT` | `E:\mako\base-images` | Captured base images |
+| `REMOTEPHONE_DB_PATH` | `E:\remotephone\remotephone.db` | SQLite database |
+| `REMOTEPHONE_WORKER_BINARY_PATH` | `E:\remotephone\remotephone-worker.exe` | Worker binary the control plane spawns |
+| `REMOTEPHONE_ANDROID_SDK_ROOT` | `%LOCALAPPDATA%\Android\Sdk` | Android SDK |
+| `REMOTEPHONE_ANDROID_EMULATOR_PATH` | `%LOCALAPPDATA%\Android\Sdk\emulator\emulator.exe` | Emulator binary (optional if SDK root is set) |
+| `REMOTEPHONE_FFMPEG_PATH` | `C:\ffmpeg\bin\ffmpeg.exe` | ffmpeg binary (optional if on `PATH`) |
+| `REMOTEPHONE_INSTANCE_DATA_ROOT` | `E:\remotephone\instance-data` | Per-instance cloned AVD directories |
+| `REMOTEPHONE_BASE_IMAGE_ROOT` | `E:\remotephone\base-images` | Captured base images |
 | `STUN_URL` | `none` | `none` disables STUN; use it on a LAN |
-| `MAKO_CLIENT_ADDR` | `127.0.0.1:3000` | Client API host and port; use `0.0.0.0:3000` for LAN phones |
-| `MAKO_CLIENT_PORT` | unset | Optional client API port override; host still comes from `MAKO_CLIENT_ADDR` |
-| `MAKO_ADMIN_PORT` | `3001` | Owner console port on `127.0.0.1`; change it when 3001 is already taken |
-| `MAKO_TLS_CERT_PATH` / `MAKO_TLS_KEY_PATH` | defaults beside the DB | Self-signed cert/key |
-| `MAKO_STREAM_BITRATE` | `2000000` | H.264 bitrate (bits/s); lower it for weak WiFi |
-| `MAKO_AUDIO_DEBUG` | `1` | Log audio packet RMS/peak and `WriteSample` stalls (diagnostics only) |
-| `MAKO_HEADLESS` | `1` | One worker owns one instance; default `-no-window`. Set `0` only to debug with a visible emulator window. |
-| `MAKO_GPU_MODE` | `host` on Windows, `auto` elsewhere | Emulator `-gpu` mode. Use `auto`, `swiftshader`, or `swangle` when host GPU acceleration is unavailable; `host` avoids silently falling back to software rendering. |
-| `MAKO_EMULATOR_AUDIO` | `none` | Emulator `-audio` backend. `none` keeps guest audio for `streamAudio` but plays nothing on the host; use `auto` for local debugging with host sound. |
-| `MAKO_PAIRING_PIN` | random 6 digits | Local bootstrap access code printed at control-plane startup and seeded as a one-use code; set a stable value for automation. |
-| `MAKO_SERVER_NAME` | host name | Display name shown in the client's server picker. The stable server ID is independent of it. |
-| `MAKO_SERVER_ID_PATH` | `<db>.server-id` | Persisted UUID identifying this server across restarts/IP changes. |
-| `MAKO_DISABLE_MDNS` | unset | Set `1` to disable LAN mDNS advertisement (`_mako._tcp`). |
-| `MAKO_WEBRTC_HOST_IP` | unset | Optional debug override: restrict ICE to one IPv4 address. By default every routable IPv4 interface (LAN, Tailscale, other VPNs) is advertised and ICE chooses. |
+| `REMOTEPHONE_CLIENT_ADDR` | `127.0.0.1:3000` | Client API host and port; use `0.0.0.0:3000` for LAN phones |
+| `REMOTEPHONE_CLIENT_PORT` | unset | Optional client API port override; host still comes from `REMOTEPHONE_CLIENT_ADDR` |
+| `REMOTEPHONE_ADMIN_PORT` | `3001` | Owner console port on `127.0.0.1`; change it when 3001 is already taken |
+| `REMOTEPHONE_TLS_CERT_PATH` / `REMOTEPHONE_TLS_KEY_PATH` | defaults beside the DB | Self-signed cert/key |
+| `REMOTEPHONE_STREAM_BITRATE` | `2000000` | H.264 bitrate (bits/s); lower it for weak WiFi |
+| `REMOTEPHONE_AUDIO_DEBUG` | `1` | Log audio packet RMS/peak and `WriteSample` stalls (diagnostics only) |
+| `REMOTEPHONE_HEADLESS` | `1` | One worker owns one instance; default `-no-window`. Set `0` only to debug with a visible emulator window. |
+| `REMOTEPHONE_GPU_MODE` | `host` on Windows, `auto` elsewhere | Emulator `-gpu` mode. Use `auto`, `swiftshader`, or `swangle` when host GPU acceleration is unavailable; `host` avoids silently falling back to software rendering. |
+| `REMOTEPHONE_EMULATOR_AUDIO` | `none` | Emulator `-audio` backend. `none` keeps guest audio for `streamAudio` but plays nothing on the host; use `auto` for local debugging with host sound. |
+| `REMOTEPHONE_PAIRING_PIN` | random 6 digits | Local bootstrap access code printed at control-plane startup and seeded as a one-use code; set a stable value for automation. |
+| `REMOTEPHONE_SERVER_NAME` | host name | Display name shown in the client's server picker. The stable server ID is independent of it. |
+| `REMOTEPHONE_SERVER_ID_PATH` | `<db>.server-id` | Persisted UUID identifying this server across restarts/IP changes. |
+| `REMOTEPHONE_DISABLE_MDNS` | unset | Set `1` to disable LAN mDNS advertisement (`_remotephone._tcp`). |
+| `REMOTEPHONE_WEBRTC_HOST_IP` | unset | Optional debug override: restrict ICE to one IPv4 address. By default every routable IPv4 interface (LAN, Tailscale, other VPNs) is advertised and ICE chooses. |
 
 ### 3. Build and run
 
@@ -81,35 +81,35 @@ npm run build
 
 ```powershell
 cd apps/server
-go build -o ..\..\.bin\mako-worker.exe ./cmd/mako-worker
-go build -o ..\..\.bin\mako-controlplane.exe ./cmd/mako-controlplane
+go build -o ..\..\.bin\remotephone-worker.exe ./cmd/remotephone-worker
+go build -o ..\..\.bin\remotephone-controlplane.exe ./cmd/remotephone-controlplane
 ```
 
 Run both in separate terminals (or let the control plane spawn workers):
 
 ```powershell
 # terminal 1 — control plane
-$env:MAKO_DB_PATH = "E:\mako\mako.db"
-$env:MAKO_WORKER_BINARY_PATH = "E:\mako\mako-worker.exe"
-$env:MAKO_ANDROID_SDK_ROOT = "$env:LOCALAPPDATA\Android\Sdk"
-$env:MAKO_FFMPEG_PATH = "C:\ffmpeg\bin\ffmpeg.exe"
+$env:REMOTEPHONE_DB_PATH = "E:\remotephone\remotephone.db"
+$env:REMOTEPHONE_WORKER_BINARY_PATH = "E:\remotephone\remotephone-worker.exe"
+$env:REMOTEPHONE_ANDROID_SDK_ROOT = "$env:LOCALAPPDATA\Android\Sdk"
+$env:REMOTEPHONE_FFMPEG_PATH = "C:\ffmpeg\bin\ffmpeg.exe"
 $env:STUN_URL = "none"
-$env:MAKO_CLIENT_ADDR = "0.0.0.0:3000"
+$env:REMOTEPHONE_CLIENT_ADDR = "0.0.0.0:3000"
 # Optional: change only the client API port
-# $env:MAKO_CLIENT_PORT = "3010"
-$env:MAKO_STREAM_BITRATE = "2000000"
+# $env:REMOTEPHONE_CLIENT_PORT = "3010"
+$env:REMOTEPHONE_STREAM_BITRATE = "2000000"
 # Optional debug override only (normally leave unset so LAN + Tailscale are
 # both advertised and ICE picks the reachable path):
-# $env:MAKO_WEBRTC_HOST_IP = "192.168.1.7"
-.\mako-controlplane.exe
+# $env:REMOTEPHONE_WEBRTC_HOST_IP = "192.168.1.7"
+.\remotephone-controlplane.exe
 ```
 
-On first run, read the bootstrap secret from `<db>.bootstrap-secret` and create the first admin (admin API is loopback-only on `127.0.0.1:3001` by default; set `MAKO_ADMIN_PORT` if that port is occupied). The owner console is at `http://127.0.0.1:3001/admin/` and needs no login:
+On first run, read the bootstrap secret from `<db>.bootstrap-secret` and create the first admin (admin API is loopback-only on `127.0.0.1:3001` by default; set `REMOTEPHONE_ADMIN_PORT` if that port is occupied). The owner console is at `http://127.0.0.1:3001/admin/` and needs no login:
 
-If you set `MAKO_ADMIN_PORT`, substitute that port in the owner-console and setup URLs below.
+If you set `REMOTEPHONE_ADMIN_PORT`, substitute that port in the owner-console and setup URLs below.
 
 ```powershell
-$secret = (Get-Content .\mako.db.bootstrap-secret -Raw).Trim()
+$secret = (Get-Content .\remotephone.db.bootstrap-secret -Raw).Trim()
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3001/api/v1/auth/setup `
   -ContentType application/json `
   -Body (@{ username="admin"; password="change-me"; deviceLabel="pc"; bootstrapSecret=$secret } | ConvertTo-Json)
@@ -132,7 +132,7 @@ Use the returned code with the admin username/password in the client.
 cd apps/client
 flutter pub get
 # Optional: bake in the server URL so a real phone does not need to type it
-flutter build apk --debug --dart-define=MAKO_DEFAULT_SERVER=https://192.168.1.7:3000
+flutter build apk --debug --dart-define=REMOTEPHONE_DEFAULT_SERVER=https://192.168.1.7:3000
 adb install -r build\app\outputs\flutter-apk\app-debug.apk
 ```
 
@@ -153,7 +153,7 @@ curl.exe -k -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json
 
 An ordinary user's self code uses the same endpoint. The server returns `scope: "self"` or `scope: "new-or-existing"` and an expiry. Redeem with `POST /api/v1/access-codes/redeem` (`code`, `username`, `password`); the response includes `created`, the token, and `certSha256` for pinning.
 
-The loopback owner console on `127.0.0.1:3001` (or `MAKO_ADMIN_PORT`) has no bearer-token requirement because reaching it already requires host access; it is protected against browser CSRF/DNS rebinding. It can create a code for any target (or unbound):
+The loopback owner console on `127.0.0.1:3001` (or `REMOTEPHONE_ADMIN_PORT`) has no bearer-token requirement because reaching it already requires host access; it is protected against browser CSRF/DNS rebinding. It can create a code for any target (or unbound):
 
 ```powershell
 Set-Content -NoNewline $env:TEMP\code.json '{}'
@@ -168,9 +168,9 @@ After redemption, the saved profile stores the certificate pin; later known-serv
 
 ### Firewall
 
-The first time `mako-worker.exe`, `emulator.exe`, or either qemu binary listens, Windows Defender Firewall may prompt. Allow private networks. Running test tools with `go run` creates a new temporary executable each time and therefore re-prompts every run — build them to a fixed path instead.
+The first time `remotephone-worker.exe`, `emulator.exe`, or either qemu binary listens, Windows Defender Firewall may prompt. Allow private networks. Running test tools with `go run` creates a new temporary executable each time and therefore re-prompts every run — build them to a fixed path instead.
 
-For a one-time setup, run [scripts/windows/firewall-allow.ps1](scripts/windows/firewall-allow.ps1) from an elevated PowerShell. It adds inbound allow-rules for the fixed binaries (including the headless qemu and `.bin\webrtc.test.exe`) and, with `-DisableNotifications`, also silences the "blocked app" popup for unknown programs. After that, starting `mako-controlplane` is enough: it spawns each instance's worker and emulator itself.
+For a one-time setup, run [scripts/windows/firewall-allow.ps1](scripts/windows/firewall-allow.ps1) from an elevated PowerShell. It adds inbound allow-rules for the fixed binaries (including the headless qemu and `.bin\webrtc.test.exe`) and, with `-DisableNotifications`, also silences the "blocked app" popup for unknown programs. After that, starting `remotephone-controlplane` is enough: it spawns each instance's worker and emulator itself.
 
 `go test` normally builds a new temporary test executable, which cannot be covered by a fixed-path firewall rule. For the WebRTC transport tests, build once to the fixed path:
 
@@ -200,8 +200,8 @@ flutter analyze
 - **Multi-touch is implemented through the emulator's gRPC `sendTouch`** (pointer IDs are carried from the client), with an adb single-touch fallback if gRPC input fails. Keyboard events still use adb.
 - **Full-screen phone UI; the guest owns navigation.** The client hides the phone's system bars, the worker switches the emulated device to three-button navigation, and the guest's Back/Home/Recents buttons are tapped inside the video. The phone's Back gesture exits the stream and disconnects.
 - **Trusted LAN only.** The server uses a self-signed certificate; first contact is bootstrapped with an access code and the client pins the certificate afterwards. Do not expose it to the public internet without a VPN or reverse proxy.
-- **ICE advertises every routable IPv4 interface** (LAN, Tailscale, other VPNs), excluding only link-local, multicast and IPv6; loopback is kept for local probes. ICE chooses. `MAKO_WEBRTC_HOST_IP` is only a debug override. There is no Tailscale-specific configuration.
-- **GPU acceleration must be requested explicitly on Windows.** The emulator can silently persist `hw.gpu.mode=swiftshader`; mako now passes `-gpu host` by default on Windows so games use the host GPU (verified with an AMD RX 9070: host Vulkan and GLES translators selected). Multiple instances share that GPU/VRAM and the H.264 encoder, so disk, VRAM, and encode capacity all need to be considered together.
+- **ICE advertises every routable IPv4 interface** (LAN, Tailscale, other VPNs), excluding only link-local, multicast and IPv6; loopback is kept for local probes. ICE chooses. `REMOTEPHONE_WEBRTC_HOST_IP` is only a debug override. There is no Tailscale-specific configuration.
+- **GPU acceleration must be requested explicitly on Windows.** The emulator can silently persist `hw.gpu.mode=swiftshader`; remotephone now passes `-gpu host` by default on Windows so games use the host GPU (verified with an AMD RX 9070: host Vulkan and GLES translators selected). Multiple instances share that GPU/VRAM and the H.264 encoder, so disk, VRAM, and encode capacity all need to be considered together.
 - **An Android emulator is a poor test client on the same Windows host.** Its NAT hairpin to the host's own LAN IP loses packets under video load; a real phone on the LAN is the trustworthy end-to-end test. The host-side WebRTC probe is unaffected.
 - **No capacity enforcement.** Each instance costs a full emulator (RAM/CPU/disk); start only what the host can carry.
 - Base-image capture/promote and QCOW2 layering are verified end-to-end, including a 38GB Zenless Zone Zero base copied from a real phone into a 64GB AVD (capture → promote → cloned instance boot). Base-image GC, async capture/progress, per-instance base pinning, and the admin Images UI are still open; see [`docs/architecture/decisions-log.md`](docs/architecture/decisions-log.md).

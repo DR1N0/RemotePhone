@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mako/internal/worker/config"
-	"mako/internal/worker/runtime"
+	"remotephone/internal/worker/config"
+	"remotephone/internal/worker/runtime"
 )
 
 // setupFakeAVD creates a minimal AVD directory structure under a temp home
@@ -107,7 +107,7 @@ func TestStartClonesTemplateIntoANewIndependentlyRegisteredInstanceAVD(t *testin
 		t.Fatalf("Start: %v", err)
 	}
 
-	wantAVDName := "mako_instance_instance_1"
+	wantAVDName := "remotephone_instance_instance_1"
 	if capturedReq.AVDName != wantAVDName {
 		t.Errorf("LaunchRequest.AVDName = %q, want %q (per-instance AVD, not the shared template's)", capturedReq.AVDName, wantAVDName)
 	}
@@ -466,7 +466,7 @@ func TestStartSeedsFromBaseImageArtifactWhenProvided(t *testing.T) {
 
 func TestInstanceAVDNameSanitizesHyphens(t *testing.T) {
 	got := instanceAVDName("557ea68b-323e-4157-bc7d-502e0a24b6bb")
-	want := "mako_instance_557ea68b_323e_4157_bc7d_502e0a24b6bb"
+	want := "remotephone_instance_557ea68b_323e_4157_bc7d_502e0a24b6bb"
 	if got != want {
 		t.Errorf("instanceAVDName = %q, want %q", got, want)
 	}

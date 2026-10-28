@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"mako/internal/worker/runtime"
+	"remotephone/internal/worker/runtime"
 )
 
 const (
@@ -24,11 +24,11 @@ const (
 	// origins.
 	TemplateIDPrefix = "android-studio:"
 
-	// instanceAVDPrefix marks mako's own per-instance cloned AVDs. They live
+	// instanceAVDPrefix marks remotephone's own per-instance cloned AVDs. They live
 	// in the same ~/.android/avd directory as real templates, so discovery
 	// must skip them — otherwise a running instance's clone shows up as a
 	// selectable template (and can be cloned again, producing chains).
-	instanceAVDPrefix = "mako_instance_"
+	instanceAVDPrefix = "remotephone_instance_"
 )
 
 // emulatorBinaryName returns the platform's emulator executable filename.
@@ -86,7 +86,7 @@ func ResolveEmulatorBinary(opts DiscoveryOptions) (string, error) {
 		}
 	}
 
-	return "", errors.New("android studio emulator binary not found (set MAKO_ANDROID_EMULATOR_PATH or MAKO_ANDROID_SDK_ROOT)")
+	return "", errors.New("android studio emulator binary not found (set REMOTEPHONE_ANDROID_EMULATOR_PATH or REMOTEPHONE_ANDROID_SDK_ROOT)")
 }
 
 func DiscoverTemplates(opts DiscoveryOptions) ([]runtime.Template, error) {

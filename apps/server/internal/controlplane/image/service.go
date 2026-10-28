@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"strings"
 
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/persistence/repo"
-	workerapi "mako/internal/worker/api"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/persistence/repo"
+	workerapi "remotephone/internal/worker/api"
 
 	"github.com/google/uuid"
 )

@@ -10,7 +10,7 @@ import 'session_cache.dart';
 enum SessionConnectionState { idle, connecting, connected, failed, disconnected }
 
 /// Owns one streaming session's full lifecycle: create the session record,
-/// negotiate the WebRTC peer connection against mako-worker (via the
+/// negotiate the WebRTC peer connection against remotephone-worker (via the
 /// control plane's signaling relay), render the incoming video track, and
 /// carry outgoing touch/key input over the "input" data channel. One
 /// instance per stream screen — not reused across sessions.
@@ -87,7 +87,7 @@ class WebrtcSession extends ChangeNotifier {
     }
     debugPrint('[webrtc] creating new session for instance=$instanceId');
     final ownerClientId =
-        'mako-client-${DateTime.now().millisecondsSinceEpoch}';
+        'remotephone-client-${DateTime.now().millisecondsSinceEpoch}';
     // attachmentId comes straight from the server, not session.ownerAttachment
     // — createSession can now hand back a reclaimed owner attachment or a
     // brand new participant attachment (if the owner is already connected

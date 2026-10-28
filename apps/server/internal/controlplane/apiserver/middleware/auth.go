@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"strings"
 
-	"mako/internal/controlplane/auth"
+	"remotephone/internal/controlplane/auth"
 )
 
 const bearerPrefix = "Bearer "

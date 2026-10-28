@@ -1,6 +1,6 @@
 package auth
 
-import "mako/internal/controlplane/persistence/repo"
+import "remotephone/internal/controlplane/persistence/repo"
 
 // UserDTO is the only shape a user row may take crossing into an HTTP
 // response. Never add a field here by spreading a repo.User row — add it

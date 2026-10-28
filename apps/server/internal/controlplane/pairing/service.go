@@ -62,11 +62,11 @@ func New(pin string, cert tls.Certificate) (*Service, error) {
 	}, nil
 }
 
-// NewFromEnv uses MAKO_PAIRING_PIN when set, otherwise generates a fresh
+// NewFromEnv uses REMOTEPHONE_PAIRING_PIN when set, otherwise generates a fresh
 // six-digit PIN for this process. The caller is responsible for showing the
 // PIN to the host user (the control plane logs it at startup).
 func NewFromEnv(cert tls.Certificate) (*Service, error) {
-	pin := os.Getenv("MAKO_PAIRING_PIN")
+	pin := os.Getenv("REMOTEPHONE_PAIRING_PIN")
 	if strings.TrimSpace(pin) == "" {
 		generated, err := generatePIN()
 		if err != nil {

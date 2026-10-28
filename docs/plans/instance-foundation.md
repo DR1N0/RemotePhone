@@ -1,10 +1,10 @@
 # Phase 1: Instance foundation
 
-**Status: Done.** Verified both by unit/integration tests (fake worker client) and a manual end-to-end run against the real `mako-worker` binary — create → start (spawned and inspected a real Android Studio Emulator process) → stop (process exited) → delete (404 afterward). See "As built" below for where implementation diverged from this plan.
+**Status: Done.** Verified both by unit/integration tests (fake worker client) and a manual end-to-end run against the real `remotephone-worker` binary — create → start (spawned and inspected a real Android Studio Emulator process) → stop (process exited) → delete (404 afterward). See "As built" below for where implementation diverged from this plan.
 
 Living plan — edit in place as scope evolves; not dated/immutable. See `roadmap.md` for how this fits the overall sequence, and `docs/architecture/decisions-log.md` (2026-10-14) for why this phase has no `workers` table or placement-selection logic.
 
-**Goal:** Instance CRUD/lifecycle works end-to-end against one configured worker, with an audit trail. No process spawning yet — matches today's TS behavior of pointing at one externally-started `mako-worker`.
+**Goal:** Instance CRUD/lifecycle works end-to-end against one configured worker, with an audit trail. No process spawning yet — matches today's TS behavior of pointing at one externally-started `remotephone-worker`.
 
 **Depends on:** auth (done).
 
@@ -17,7 +17,7 @@ Port `audit-service.ts`'s `record()`/`list()` as a thin Go service over the exis
 Add sqlc queries for `instances`: create, get-by-id, list-by-owner, update-desired-state, update-observed-state. Follow the existing pipeline (`apps/server/internal/controlplane/persistence/queries/`, `make sqlc-generate`) already used for auth. No `workers` queries.
 
 ### `placement` package
-Deliberately trivial for this phase: a function returning the one configured worker base URL (env/config-driven, matching `apps/controlplane/src/config/env.ts`'s `MAKO_WORKER_BASE_URL` pattern — e.g. `MAKO_WORKER_BASE_URL`, default `http://127.0.0.1:7780`). Kept as its own package (not inlined into `instance`) so Phase 4 can swap the internals for real `exec.Command` spawning without changing callers. No `Selector`-among-many interface — nothing to select among yet.
+Deliberately trivial for this phase: a function returning the one configured worker base URL (env/config-driven, matching `apps/controlplane/src/config/env.ts`'s `REMOTEPHONE_WORKER_BASE_URL` pattern — e.g. `REMOTEPHONE_WORKER_BASE_URL`, default `http://127.0.0.1:7780`). Kept as its own package (not inlined into `instance`) so Phase 4 can swap the internals for real `exec.Command` spawning without changing callers. No `Selector`-among-many interface — nothing to select among yet.
 
 ### Worker HTTP client
 Port `worker-client.ts`'s HTTP client interface/types faithfully: start/stop/inspect instance. Collapse the TS version's ad hoc per-method error strings (`"Worker request failed with status …"`, `"Worker ICE relay failed with status …"`, etc.) into one typed error the caller can `errors.Is`-check, instead of distinct strings per call site.

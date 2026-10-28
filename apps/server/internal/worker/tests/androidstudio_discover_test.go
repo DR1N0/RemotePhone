@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mako/internal/worker/runtime/androidstudio"
+	"remotephone/internal/worker/runtime/androidstudio"
 )
 
 func TestResolveEmulatorBinaryPrefersExplicitPath(t *testing.T) {

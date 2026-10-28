@@ -11,9 +11,9 @@ import (
 	"regexp"
 	"strings"
 
-	"mako/internal/controlplane/apiserver/commonauth"
-	"mako/internal/controlplane/apiserver/middleware"
-	"mako/internal/controlplane/auth"
+	"remotephone/internal/controlplane/apiserver/commonauth"
+	"remotephone/internal/controlplane/apiserver/middleware"
+	"remotephone/internal/controlplane/auth"
 
 	"github.com/google/uuid"
 )

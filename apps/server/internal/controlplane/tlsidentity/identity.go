@@ -81,7 +81,7 @@ func (id *Identity) create() error {
 	now := time.Now()
 	template := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "mako"},
+		Subject:      pkix.Name{CommonName: "remotephone"},
 		NotBefore:    now.Add(-time.Hour), // tolerate modest clock skew
 		NotAfter:     now.Add(certValidity),
 		KeyUsage:     x509.KeyUsageDigitalSignature,

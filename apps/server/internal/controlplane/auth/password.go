@@ -1,4 +1,4 @@
-// Package auth implements mako's bearer-credential identity system: password
+// Package auth implements remotephone's bearer-credential identity system: password
 // hashing, token generation, the bootstrap secret, and the AuthService that
 // ties them to persisted users and credentials. This is a faithful port of
 // the pre-Go TypeScript implementation; exact parameters and boundary

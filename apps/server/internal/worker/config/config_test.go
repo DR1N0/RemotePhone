@@ -3,7 +3,7 @@ package config
 import "testing"
 
 func TestLoadDefaultsToLoopbackListener(t *testing.T) {
-	t.Setenv("MAKO_WORKER_LISTEN_ADDR", "")
+	t.Setenv("REMOTEPHONE_WORKER_LISTEN_ADDR", "")
 
 	cfg := Load()
 
@@ -13,7 +13,7 @@ func TestLoadDefaultsToLoopbackListener(t *testing.T) {
 }
 
 func TestLoadUsesConfiguredListenerAddress(t *testing.T) {
-	t.Setenv("MAKO_WORKER_LISTEN_ADDR", "192.168.1.10:7780")
+	t.Setenv("REMOTEPHONE_WORKER_LISTEN_ADDR", "192.168.1.10:7780")
 
 	cfg := Load()
 
@@ -23,70 +23,70 @@ func TestLoadUsesConfiguredListenerAddress(t *testing.T) {
 }
 
 func TestLoadStreamBitRate(t *testing.T) {
-	t.Setenv("MAKO_STREAM_BITRATE", "800000")
+	t.Setenv("REMOTEPHONE_STREAM_BITRATE", "800000")
 	if cfg := Load(); cfg.StreamBitRate != 800000 {
 		t.Errorf("StreamBitRate = %d, want 800000", cfg.StreamBitRate)
 	}
-	t.Setenv("MAKO_STREAM_BITRATE", "not-a-number")
+	t.Setenv("REMOTEPHONE_STREAM_BITRATE", "not-a-number")
 	if cfg := Load(); cfg.StreamBitRate != 2_000_000 {
-		t.Errorf("invalid MAKO_STREAM_BITRATE fell back to %d, want 2000000", cfg.StreamBitRate)
+		t.Errorf("invalid REMOTEPHONE_STREAM_BITRATE fell back to %d, want 2000000", cfg.StreamBitRate)
 	}
 }
 
 func TestLoadWebRTCHostIPOverride(t *testing.T) {
-	t.Setenv("MAKO_WEBRTC_HOST_IP", "192.168.1.7")
+	t.Setenv("REMOTEPHONE_WEBRTC_HOST_IP", "192.168.1.7")
 	if cfg := Load(); cfg.WebRTCHostIP != "192.168.1.7" {
 		t.Errorf("WebRTCHostIP = %q, want explicit override", cfg.WebRTCHostIP)
 	}
-	t.Setenv("MAKO_WEBRTC_HOST_IP", "")
+	t.Setenv("REMOTEPHONE_WEBRTC_HOST_IP", "")
 	if cfg := Load(); cfg.WebRTCHostIP != "" {
 		t.Errorf("WebRTCHostIP = %q, want empty (advertise all routable IPv4)", cfg.WebRTCHostIP)
 	}
 }
 
 func TestLoadAudioDebug(t *testing.T) {
-	t.Setenv("MAKO_AUDIO_DEBUG", "1")
+	t.Setenv("REMOTEPHONE_AUDIO_DEBUG", "1")
 	if cfg := Load(); !cfg.AudioDebug {
-		t.Error("AudioDebug = false, want true for MAKO_AUDIO_DEBUG=1")
+		t.Error("AudioDebug = false, want true for REMOTEPHONE_AUDIO_DEBUG=1")
 	}
-	t.Setenv("MAKO_AUDIO_DEBUG", "0")
+	t.Setenv("REMOTEPHONE_AUDIO_DEBUG", "0")
 	if cfg := Load(); cfg.AudioDebug {
 		t.Error("AudioDebug = true, want false otherwise")
 	}
 }
 
 func TestLoadHeadless(t *testing.T) {
-	t.Setenv("MAKO_HEADLESS", "")
+	t.Setenv("REMOTEPHONE_HEADLESS", "")
 	if cfg := Load(); !cfg.Headless {
 		t.Error("Headless = false, want true by default")
 	}
-	t.Setenv("MAKO_HEADLESS", "0")
+	t.Setenv("REMOTEPHONE_HEADLESS", "0")
 	if cfg := Load(); cfg.Headless {
-		t.Error("Headless = true, want false for MAKO_HEADLESS=0")
+		t.Error("Headless = true, want false for REMOTEPHONE_HEADLESS=0")
 	}
-	t.Setenv("MAKO_HEADLESS", "nonsense")
+	t.Setenv("REMOTEPHONE_HEADLESS", "nonsense")
 	if cfg := Load(); !cfg.Headless {
-		t.Error("invalid MAKO_HEADLESS should fall back to true")
+		t.Error("invalid REMOTEPHONE_HEADLESS should fall back to true")
 	}
 }
 
 func TestLoadEmulatorAudio(t *testing.T) {
-	t.Setenv("MAKO_EMULATOR_AUDIO", "")
+	t.Setenv("REMOTEPHONE_EMULATOR_AUDIO", "")
 	if cfg := Load(); cfg.EmulatorAudio != "none" {
 		t.Errorf("EmulatorAudio = %q, want none by default", cfg.EmulatorAudio)
 	}
-	t.Setenv("MAKO_EMULATOR_AUDIO", "auto")
+	t.Setenv("REMOTEPHONE_EMULATOR_AUDIO", "auto")
 	if cfg := Load(); cfg.EmulatorAudio != "auto" {
 		t.Errorf("EmulatorAudio = %q, want auto override", cfg.EmulatorAudio)
 	}
 }
 
 func TestLoadGPUMode(t *testing.T) {
-	t.Setenv("MAKO_GPU_MODE", "")
+	t.Setenv("REMOTEPHONE_GPU_MODE", "")
 	if cfg := Load(); cfg.GPUMode != defaultGPUMode() {
 		t.Errorf("GPUMode = %q, want default %q", cfg.GPUMode, defaultGPUMode())
 	}
-	t.Setenv("MAKO_GPU_MODE", "swiftshader")
+	t.Setenv("REMOTEPHONE_GPU_MODE", "swiftshader")
 	if cfg := Load(); cfg.GPUMode != "swiftshader" {
 		t.Errorf("GPUMode = %q, want swiftshader", cfg.GPUMode)
 	}

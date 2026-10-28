@@ -25,8 +25,8 @@ func TestGetOrCreateGeneratesAndLoadsAValidCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("x509.ParseCertificate: %v", err)
 	}
-	if parsed.Subject.CommonName != "mako" {
-		t.Errorf("CommonName = %q, want mako", parsed.Subject.CommonName)
+	if parsed.Subject.CommonName != "remotephone" {
+		t.Errorf("CommonName = %q, want remotephone", parsed.Subject.CommonName)
 	}
 	if !contains(parsed.DNSNames, "localhost") {
 		t.Errorf("DNSNames = %v, want to contain localhost", parsed.DNSNames)

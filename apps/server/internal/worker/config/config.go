@@ -36,32 +36,32 @@ func Load() Config {
 	}
 
 	return Config{
-		ListenAddr:          getenv("MAKO_WORKER_LISTEN_ADDR", "127.0.0.1:7780"),
-		ListenBaseURL:       getenv("MAKO_WORKER_BASE_URL", "http://127.0.0.1:7780"),
-		WorkerID:            getenv("MAKO_WORKER_ID", "local"),
+		ListenAddr:          getenv("REMOTEPHONE_WORKER_LISTEN_ADDR", "127.0.0.1:7780"),
+		ListenBaseURL:       getenv("REMOTEPHONE_WORKER_BASE_URL", "http://127.0.0.1:7780"),
+		WorkerID:            getenv("REMOTEPHONE_WORKER_ID", "local"),
 		HomeDir:             homeDir,
-		AndroidSDKRoot:      firstNonEmpty(os.Getenv("MAKO_ANDROID_SDK_ROOT"), os.Getenv("ANDROID_SDK_ROOT"), os.Getenv("ANDROID_HOME")),
-		AndroidEmulatorPath: os.Getenv("MAKO_ANDROID_EMULATOR_PATH"),
-		FFmpegPath:          os.Getenv("MAKO_FFMPEG_PATH"),
+		AndroidSDKRoot:      firstNonEmpty(os.Getenv("REMOTEPHONE_ANDROID_SDK_ROOT"), os.Getenv("ANDROID_SDK_ROOT"), os.Getenv("ANDROID_HOME")),
+		AndroidEmulatorPath: os.Getenv("REMOTEPHONE_ANDROID_EMULATOR_PATH"),
+		FFmpegPath:          os.Getenv("REMOTEPHONE_FFMPEG_PATH"),
 		StunURL:             stunURLFromEnv(),
-		InstanceDataRoot:    getenv("MAKO_INSTANCE_DATA_ROOT", filepath.Join(homeDir, ".mako", "instance-data")),
-		BaseImageRoot:       getenv("MAKO_BASE_IMAGE_ROOT", filepath.Join(homeDir, ".mako", "base-images")),
-		StreamBitRate:       getenvInt("MAKO_STREAM_BITRATE", 2_000_000),
-		WebRTCHostIP:        os.Getenv("MAKO_WEBRTC_HOST_IP"),
-		AudioDebug:          os.Getenv("MAKO_AUDIO_DEBUG") == "1",
+		InstanceDataRoot:    getenv("REMOTEPHONE_INSTANCE_DATA_ROOT", filepath.Join(homeDir, ".remotephone", "instance-data")),
+		BaseImageRoot:       getenv("REMOTEPHONE_BASE_IMAGE_ROOT", filepath.Join(homeDir, ".remotephone", "base-images")),
+		StreamBitRate:       getenvInt("REMOTEPHONE_STREAM_BITRATE", 2_000_000),
+		WebRTCHostIP:        os.Getenv("REMOTEPHONE_WEBRTC_HOST_IP"),
+		AudioDebug:          os.Getenv("REMOTEPHONE_AUDIO_DEBUG") == "1",
 		// One worker owns one instance, so headless is the deployment default;
-		// MAKO_HEADLESS=0 is only for local debugging with a visible emulator.
-		Headless: getenvBool("MAKO_HEADLESS", true),
+		// REMOTEPHONE_HEADLESS=0 is only for local debugging with a visible emulator.
+		Headless: getenvBool("REMOTEPHONE_HEADLESS", true),
 		// Default to the emulator's "none" audio backend: the guest's audio
 		// graph still feeds gRPC streamAudio (verified 440Hz), but nothing is
-		// played on the host speakers. Use MAKO_EMULATOR_AUDIO=auto for a
+		// played on the host speakers. Use REMOTEPHONE_EMULATOR_AUDIO=auto for a
 		// local debugging session where host sound is wanted.
-		EmulatorAudio: getenv("MAKO_EMULATOR_AUDIO", "none"),
+		EmulatorAudio: getenv("REMOTEPHONE_EMULATOR_AUDIO", "none"),
 		// On Windows the emulator's persisted hardware-qemu.ini may select
 		// SwiftShader even when a capable GPU is present. Explicitly request
-		// the host GPU; MAKO_GPU_MODE=auto/swiftshader is the fallback for
+		// the host GPU; REMOTEPHONE_GPU_MODE=auto/swiftshader is the fallback for
 		// machines without usable host acceleration.
-		GPUMode: getenv("MAKO_GPU_MODE", defaultGPUMode()),
+		GPUMode: getenv("REMOTEPHONE_GPU_MODE", defaultGPUMode()),
 	}
 }
 

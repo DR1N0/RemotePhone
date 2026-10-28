@@ -47,29 +47,29 @@ Run these commands from the repository root. `npm ci` is required; do not replac
 ```bash
 # Build the Admin before launching the Control Plane. The diagnostic is absent unless
 # this build-time flag is true.
-cd apps/admin && npm ci && VITE_MAKO_ENABLE_SESSION_DIAGNOSTIC=true npm run build
+cd apps/admin && npm ci && VITE_REMOTEPHONE_ENABLE_SESSION_DIAGNOSTIC=true npm run build
 
 # Terminal 1: local Worker. The explicit SDK settings make Emulator discovery repeatable.
 cd apps/worker
-MAKO_ANDROID_SDK_ROOT="$HOME/Library/Android/sdk" \
-MAKO_ANDROID_EMULATOR_PATH="$HOME/Library/Android/sdk/emulator/emulator" \
-MAKO_WORKER_LISTEN_ADDR="127.0.0.1:7780" \
-MAKO_WORKER_BASE_URL="http://127.0.0.1:7780" \
-go run ./cmd/mako-worker
+REMOTEPHONE_ANDROID_SDK_ROOT="$HOME/Library/Android/sdk" \
+REMOTEPHONE_ANDROID_EMULATOR_PATH="$HOME/Library/Android/sdk/emulator/emulator" \
+REMOTEPHONE_WORKER_LISTEN_ADDR="127.0.0.1:7780" \
+REMOTEPHONE_WORKER_BASE_URL="http://127.0.0.1:7780" \
+go run ./cmd/remotephone-worker
 
 # Terminal 2: Control Plane. The backend diagnostic route also requires an explicit flag.
 cd apps/controlplane
-MAKO_CONTROLPLANE_PORT="3000" \
-MAKO_ADMIN_PORT="3001" \
-MAKO_ENABLE_SESSION_DIAGNOSTIC="true" \
-MAKO_WORKER_BASE_URL="http://127.0.0.1:7780" \
+REMOTEPHONE_CONTROLPLANE_PORT="3000" \
+REMOTEPHONE_ADMIN_PORT="3001" \
+REMOTEPHONE_ENABLE_SESSION_DIAGNOSTIC="true" \
+REMOTEPHONE_WORKER_BASE_URL="http://127.0.0.1:7780" \
 npm run dev
 
 # Terminal 3: verify the Worker and local management app, then open the WebUI.
 curl -fsS http://127.0.0.1:7780/healthz
 curl -fsS http://127.0.0.1:3001/healthz
 open -na "Google Chrome" --args \
-  --user-data-dir=/tmp/mako-chrome-diagnostic \
+  --user-data-dir=/tmp/remotephone-chrome-diagnostic \
   --remote-debugging-port=9222 \
   http://127.0.0.1:3001/admin
 ```
@@ -92,11 +92,11 @@ The former `/session/:id` invite redirect and query-string Attachment authority 
 The evidence below predates the `3000` client / `3001` management split. It is retained as historical transport evidence only. Any old `localhost:3000/admin`, browser invite redirect, or query-string credential reference is obsolete; follow the development diagnostic procedure above.
 
 - **2026-09-20 13:20:15 CST — AVD readiness: PASS.** Command: `"$HOME/Library/Android/sdk/emulator/emulator" -avd Medium_Phone_API_36.1 -no-snapshot -no-boot-anim`, followed by `adb devices -l`, `adb -s emulator-5554 shell getprop sys.boot_completed`, and `adb -s emulator-5554 shell dumpsys window`. Actual result: `emulator-5554` reported `device`, `sys.boot_completed=1`, and the focused activity was `com.google.android.apps.nexuslauncher/.NexusLauncherActivity` (Android home screen).
-- **2026-09-20 13:20–13:21 CST — Services and headed Chrome Admin: PASS.** The Worker `/healthz` returned `{"status":"ok","workerId":"local","hostOs":"macos","arch":"arm64","installedRuntimes":[{"runtimeClass":"android-studio-emulator","displayName":"Android Studio Emulator"}]}`. The Control Plane `/healthz` returned `{"status":"ok"}` and `GET /admin` returned `HTTP/1.1 200 OK` with `content-type: text/html; charset=utf-8`. A headed Google Chrome 152 owner profile opened `/admin`; its rendered body contained `mako admin`, `Create Instance`, and the instance table.
+- **2026-09-20 13:20–13:21 CST — Services and headed Chrome Admin: PASS.** The Worker `/healthz` returned `{"status":"ok","workerId":"local","hostOs":"macos","arch":"arm64","installedRuntimes":[{"runtimeClass":"android-studio-emulator","displayName":"Android Studio Emulator"}]}`. The Control Plane `/healthz` returned `{"status":"ok"}` and `GET /admin` returned `HTTP/1.1 200 OK` with `content-type: text/html; charset=utf-8`. A headed Google Chrome 152 owner profile opened `/admin`; its rendered body contained `remotephone admin`, `Create Instance`, and the instance table.
 - **2026-09-20 13:23:10–13:24:40 CST — Worker-managed AVD: PASS after an initial environmental conflict.** Creating the dedicated `task6-transport-20260920` instance then starting it while the manually started copy of the same AVD was running failed with `FATAL | Running multiple emulators with the same AVD is an experimental feature.Please use -read-only flag to enable this feature.` The manual AVD was stopped with `adb -s emulator-5554 emu kill`; restarting the dedicated instance then reached Control Plane `observedState:"running"`, `adb` serial `emulator-5600` in state `device`, `sys.boot_completed=1`, and the Android launcher focused.
 - **2026-09-20 13:25:xx CST — Transport ADB serial blocker: FAIL.** The instance assigned `adbPort:5601`, but the Worker transport adapter derives the serial `localhost:5601`. The exact probe `adb -s localhost:5601 get-state` returned `error: device 'localhost:5601' not found`, while the running emulator was available as `emulator-5600`. This prevents the required Worker-side touch forwarding check from succeeding in this environment.
 - **2026-09-20 13:21–13:26 CST — Chrome/session automation blocker: BLOCKED.** The initial headed Chrome Admin tab was available through remote debugging, but the remote-debugging endpoint subsequently failed with `curl: (7) Failed to connect to 127.0.0.1 port 9222 after 0 ms: Couldn't connect to server`; the Chrome main process had restarted with `--restart`. A direct session creation attempt returned HTTP 500 to the initial `curl -fsS` call; its immediate replay returned `HTTP/1.1 409 Conflict` with `{"error":"active session already exists for instance 9eff0787-290d-4c2a-a89c-76b3762c5e36"}`. The documented API exposes no session-list route, so the active attachment could not be recovered through supported public routes to complete a real owner/observer Chrome sequence. No result below is marked successful on the basis of this partial setup.
-- **2026-09-20 13:26:53 CST — Instance stop runtime cleanup: PARTIAL.** `POST /api/v1/instances/9eff0787-290d-4c2a-a89c-76b3762c5e36/stop` returned `desiredState:"stopped"`, `observedState:"stopped"`, and `runtimeHandle:null`. A subsequent `adb devices -l` was empty, and no `screenrecord`/Mako capture process was present. Because no browser attachment transport was successfully established, this does not verify removal of active adapters.
+- **2026-09-20 13:26:53 CST — Instance stop runtime cleanup: PARTIAL.** `POST /api/v1/instances/9eff0787-290d-4c2a-a89c-76b3762c5e36/stop` returned `desiredState:"stopped"`, `observedState:"stopped"`, and `runtimeHandle:null`. A subsequent `adb devices -l` was empty, and no `screenrecord`/RemotePhone capture process was present. Because no browser attachment transport was successfully established, this does not verify removal of active adapters.
 - **2026-09-20 13:18–13:20 CST — Required automated verification: PASS.** `cd apps/worker && go test ./...` passed **43 tests in 10 packages**. `cd apps/controlplane && npm ci && npm test -- --run && npm run build` passed **15 files / 76 tests** and built successfully; `npm ci` reached the configured registry without an authentication failure and reported **13 vulnerabilities (8 moderate, 4 high, 1 critical)**. `cd apps/admin && npm ci && npm test && npm run build` passed **1 file / 3 tests** and built successfully; `npm ci` reached the configured registry without an authentication failure and reported **9 vulnerabilities (6 moderate, 2 high, 1 critical)**. `make build` passed. Both Admin production builds emitted the existing Vite warning that the minified JavaScript chunk is **1,010.37 kB**, above the 500 kB warning threshold; this did not change their exit status.
 - **2026-09-20 13:27 CST — Final required checks: PASS.** `cd apps/worker && go test ./... && cd ../controlplane && npm test -- --run && cd ../admin && npm test && npm run build` passed: Worker **43 tests in 10 packages**, Control Plane **15 files / 76 tests**, and Admin **1 file / 3 tests** plus a successful build. The same existing Admin large-chunk warning and React Router future-flag warnings were emitted without failing the command.
 
@@ -112,7 +112,7 @@ These historical results were superseded by the retry below. They remain recorde
 | Demote | 2026-09-20 | Owner `Demote` action, then observer input from step 6 | Observer returns to observer role; Worker rejects its input; Android is unchanged. | Blocked because no observer attachment could be created; Worker ADB serial probe also failed. | Fail — blocked |
 | Tab close cleanup | 2026-09-20 | Close observer Chrome tab/window, inspect Worker/capture or reconnect from step 7 | Attachment adapter/capture stops, or reconnect safely replaces it. | Blocked because no observer transport was established. | Fail — blocked |
 | Reconnect | 2026-09-20 | Reopen the observer invite after closure from step 7 | A fresh safe transport supplies video without competing capture. | Blocked because no observer invite/transport was established. | Fail — blocked |
-| Instance stop cleanup | 2026-09-20 | `POST /api/v1/instances/9eff0787-290d-4c2a-a89c-76b3762c5e36/stop`; `adb devices -l`; `pgrep -alf 'screenrecord|mako-worker.*capture'` | Instance adapters are removed and no Mako screen capture process remains. | Control Plane reported `stopped` with `runtimeHandle:null`; subsequent `adb devices -l` was empty and no capture process remained. No active adapter existed to prove adapter removal. | Fail — partial |
+| Instance stop cleanup | 2026-09-20 | `POST /api/v1/instances/9eff0787-290d-4c2a-a89c-76b3762c5e36/stop`; `adb devices -l`; `pgrep -alf 'screenrecord|remotephone-worker.*capture'` | Instance adapters are removed and no RemotePhone screen capture process remains. | Control Plane reported `stopped` with `runtimeHandle:null`; subsequent `adb devices -l` was empty and no capture process remained. No active adapter existed to prove adapter removal. | Fail — partial |
 
 ## Retry after ADB-serial and atomic-session fixes
 
@@ -120,7 +120,7 @@ These historical results were superseded by the retry below. They remain recorde
 
 ### Retry execution notes
 
-- The explicit Worker command from this runbook started successfully and reported the Android Studio Emulator runtime. The initial Control Plane launch against the existing repository database terminated during reconciliation with `Error: Worker request failed with status 404` from `LocalWorkerClient.inspectInstance`; that database contained an old persisted runtime handle not present in the new Worker. The retry used an isolated local database at `/tmp/mako-task6-20260920.db`, after which `GET /healthz` returned `{"status":"ok"}`.
+- The explicit Worker command from this runbook started successfully and reported the Android Studio Emulator runtime. The initial Control Plane launch against the existing repository database terminated during reconciliation with `Error: Worker request failed with status 404` from `LocalWorkerClient.inspectInstance`; that database contained an old persisted runtime handle not present in the new Worker. The retry used an isolated local database at `/tmp/remotephone-task6-20260920.db`, after which `GET /healthz` returned `{"status":"ok"}`.
 - A new `task6-retry-20260920` instance was created and started through the headed owner Chrome Admin UI. Its runtime handle assigned console port `5600` and ADB port `5601`. `adb devices -l` reported `emulator-5600 ... device`, `adb -s emulator-5600 get-state` returned `device`, `sys.boot_completed=1`, and Android Launcher was focused. This verifies the fixed Worker serial convention (`emulator-<consolePort>`) reaches the AVD.
 - Clicking `Launch Session` in owner Chrome made `POST /api/v1/sessions` appear in that page's browser performance entries with `responseStatus:201`. The rendered session showed `owner` and `you`, confirming an owner attachment was returned rather than the former 500/409 sequence.
 - Owner and observer signaling both returned HTTP 200 and their headed Chrome pages displayed `live`; the Worker created one `adb ... screenrecord --output-format=h264` process per connected attachment. However, after waiting twelve seconds, both Chrome video elements remained `readyState:0`, `videoWidth:0`, `videoHeight:0`, `paused:true`, and had no `srcObject` tracks. No Android video was observed in either Chrome profile.
@@ -268,5 +268,5 @@ Stop the Control Plane and Worker with `Ctrl-C`. Close both Chrome profiles and 
 
 ```bash
 adb devices -l
-pgrep -alf 'mako-worker|screenrecord|emulator.*Medium_Phone_API_36.1' || true
+pgrep -alf 'remotephone-worker|screenrecord|emulator.*Medium_Phone_API_36.1' || true
 ```

@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"mako/internal/controlplane/persistence/repo"
+	"remotephone/internal/controlplane/persistence/repo"
 )
 
 var (

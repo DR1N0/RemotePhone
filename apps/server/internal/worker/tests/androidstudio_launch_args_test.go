@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"mako/internal/worker/runtime/androidstudio"
+	"remotephone/internal/worker/runtime/androidstudio"
 )
 
 func TestBuildLaunchArgs(t *testing.T) {

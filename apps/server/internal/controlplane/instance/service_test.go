@@ -11,12 +11,12 @@ import (
 	"sync"
 	"testing"
 
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/persistence"
-	"mako/internal/controlplane/persistence/repo"
-	"mako/internal/controlplane/placement"
-	workerapi "mako/internal/worker/api"
-	"mako/internal/worker/runtime"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/persistence"
+	"remotephone/internal/controlplane/persistence/repo"
+	"remotephone/internal/controlplane/placement"
+	workerapi "remotephone/internal/worker/api"
+	"remotephone/internal/worker/runtime"
 
 	_ "modernc.org/sqlite"
 )
@@ -273,7 +273,7 @@ func TestStartAndStopManagedInstanceLifecycle(t *testing.T) {
 func TestStartManagedInstancePersistsStateDataRefFromRuntimeHandle(t *testing.T) {
 	worker := &fakeWorkerClient{
 		templates:   []runtime.Template{{TemplateID: "t-1", RuntimeClass: "android-studio-emulator"}},
-		startResult: workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{PID: 42, DataDir: "/tmp/mako/instance-data/abc"}},
+		startResult: workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{PID: 42, DataDir: "/tmp/remotephone/instance-data/abc"}},
 	}
 	svc := newTestService(t, worker)
 	createTestUser(t, svc, "u-1", "registered", "active")
@@ -290,15 +290,15 @@ func TestStartManagedInstancePersistsStateDataRefFromRuntimeHandle(t *testing.T)
 	if err != nil {
 		t.Fatalf("StartManagedInstance: %v", err)
 	}
-	if started.StateDataRef == nil || *started.StateDataRef != "/tmp/mako/instance-data/abc" {
-		t.Errorf("StartManagedInstance() StateDataRef = %v, want /tmp/mako/instance-data/abc", started.StateDataRef)
+	if started.StateDataRef == nil || *started.StateDataRef != "/tmp/remotephone/instance-data/abc" {
+		t.Errorf("StartManagedInstance() StateDataRef = %v, want /tmp/remotephone/instance-data/abc", started.StateDataRef)
 	}
 
 	stopped, err := svc.StopManagedInstance(context.Background(), created.ID, "u-1", actor)
 	if err != nil {
 		t.Fatalf("StopManagedInstance: %v", err)
 	}
-	if stopped.StateDataRef == nil || *stopped.StateDataRef != "/tmp/mako/instance-data/abc" {
+	if stopped.StateDataRef == nil || *stopped.StateDataRef != "/tmp/remotephone/instance-data/abc" {
 		t.Errorf("StopManagedInstance() StateDataRef = %v, want it preserved across stop", stopped.StateDataRef)
 	}
 }
@@ -322,7 +322,7 @@ func TestStartManagedInstancePassesResolvedBaseImageArtifactPathToWorker(t *test
 		startResult: workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{PID: 42}},
 	}
 	svc := newTestService(t, worker)
-	svc.SetBaseImageResolver(&fakeBaseImageResolver{artifactPath: "/mako/base-images/img-1", ok: true})
+	svc.SetBaseImageResolver(&fakeBaseImageResolver{artifactPath: "/remotephone/base-images/img-1", ok: true})
 	createTestUser(t, svc, "u-1", "registered", "active")
 	created, err := svc.CreateManagedInstance(context.Background(), validCreateRequest(), "u-1")
 	if err != nil {
@@ -334,8 +334,8 @@ func TestStartManagedInstancePassesResolvedBaseImageArtifactPathToWorker(t *test
 		t.Fatalf("StartManagedInstance: %v", err)
 	}
 
-	if len(worker.startedCalls) != 1 || worker.startedCalls[0].BaseImageArtifactPath != "/mako/base-images/img-1" {
-		t.Errorf("worker.startedCalls = %+v, want one call with BaseImageArtifactPath=/mako/base-images/img-1", worker.startedCalls)
+	if len(worker.startedCalls) != 1 || worker.startedCalls[0].BaseImageArtifactPath != "/remotephone/base-images/img-1" {
+		t.Errorf("worker.startedCalls = %+v, want one call with BaseImageArtifactPath=/remotephone/base-images/img-1", worker.startedCalls)
 	}
 }
 
@@ -365,7 +365,7 @@ func TestStartManagedInstanceLeavesBaseImageArtifactPathEmptyWhenNoneResolved(t 
 func TestDeleteManagedInstanceCleansUpInstanceDataWhenStateDataRefIsSet(t *testing.T) {
 	worker := &fakeWorkerClient{
 		templates:   []runtime.Template{{TemplateID: "t-1", RuntimeClass: "android-studio-emulator"}},
-		startResult: workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{PID: 42, DataDir: "/tmp/mako/instance-data/abc"}},
+		startResult: workerapi.StartInstanceResponse{State: "running", Handle: runtime.InstanceHandle{PID: 42, DataDir: "/tmp/remotephone/instance-data/abc"}},
 	}
 	svc := newTestService(t, worker)
 	createTestUser(t, svc, "u-1", "registered", "active")

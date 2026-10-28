@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"mako/internal/controlplane/persistence"
+	"remotephone/internal/controlplane/persistence"
 
 	_ "modernc.org/sqlite"
 )

@@ -1,4 +1,4 @@
-package com.mako.client
+package com.remotephone.client
 
 import android.os.Build
 import android.view.View
@@ -13,7 +13,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mako/window")
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "remotephone/window")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "enterFullscreen" -> {
@@ -29,7 +29,7 @@ class MainActivity : FlutterActivity() {
             }
         EventChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            "mako/discovery/events",
+            "remotephone/discovery/events",
         ).setStreamHandler(MdnsDiscovery(this))
     }
 

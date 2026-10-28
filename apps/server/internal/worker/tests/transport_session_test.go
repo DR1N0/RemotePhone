@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"mako/internal/worker/api"
-	"mako/internal/worker/runtime"
+	"remotephone/internal/worker/api"
+	"remotephone/internal/worker/runtime"
 )
 
 type transportRuntime struct {

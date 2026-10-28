@@ -1,8 +1,8 @@
 # API surfaces
 
-Two HTTP listeners, registered in `apps/server/cmd/mako-controlplane/main.go`. Route lists below were read directly from the route-registration code (`apiserver/{adminapi,clientapi,commonauth}`), not inferred from any design doc.
+Two HTTP listeners, registered in `apps/server/cmd/remotephone-controlplane/main.go`. Route lists below were read directly from the route-registration code (`apiserver/{adminapi,clientapi,commonauth}`), not inferred from any design doc.
 
-## Owner console — `127.0.0.1:3001` (configurable with `MAKO_ADMIN_PORT`)
+## Owner console — `127.0.0.1:3001` (configurable with `REMOTEPHONE_ADMIN_PORT`)
 
 The owner console is embedded from `apps/server/adminui` and served at `/admin/` (SPA fallback). It has no login; the loopback listener is the owner boundary. `/api/v1/admin/*` accepts requests with no bearer token and attributes them to `_SYSTEM`; a bearer token is still accepted for programmatic clients. Tokenless requests require a loopback Host, a same-origin/localhost Origin (or no Origin), and JSON POST bodies.
 
@@ -41,7 +41,7 @@ Owner/admin routes:
 | GET | `/admin/` | embedded owner UI |
 | GET | `/healthz` | |
 
-## Client API — `127.0.0.1:3000` (configurable with `MAKO_CLIENT_ADDR` / `MAKO_CLIENT_PORT`) (HTTPS, self-signed — see `security-model.md`)
+## Client API — `127.0.0.1:3000` (configurable with `REMOTEPHONE_CLIENT_ADDR` / `REMOTEPHONE_CLIENT_PORT`) (HTTPS, self-signed — see `security-model.md`)
 
 Shared routes (via `commonauth.RegisterRoutes`, address-based throttling **disabled** — a proxied public-facing surface would otherwise see every client as one address and let a few failures block everyone):
 
@@ -65,7 +65,7 @@ Client-only routes:
 | GET | `/api/v1/instances` | owner-scoped list |
 | GET | `/api/v1/instances/{id}` | owner-checked |
 | GET | `/api/v1/templates` | requires account-scoped credential; lists the host's discovered AVDs (`templateId`/`displayName`/`runtimeClass`) for the client's template picker |
-| POST | `/api/v1/instances/{id}/start` | owner-checked; spawns a dedicated `mako-worker` process for this instance and calls it to boot the emulator |
+| POST | `/api/v1/instances/{id}/start` | owner-checked; spawns a dedicated `remotephone-worker` process for this instance and calls it to boot the emulator |
 | POST | `/api/v1/instances/{id}/stop` | owner-checked |
 | DELETE | `/api/v1/instances/{id}` | owner-checked |
 | POST | `/api/v1/instances/{id}/capture-candidate-image` | owner-checked; instance must be stopped and have been started at least once. Snapshots its current AVD state into a new, immutable, *inert* `base_images` row — never affects what any other instance resolves to on its own (see `/admin/images/:candidateId/promote` above) |

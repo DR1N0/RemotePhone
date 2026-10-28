@@ -3,9 +3,9 @@ package adminapi
 import (
 	"net/http"
 
-	"mako/internal/controlplane/admin"
-	"mako/internal/controlplane/apiserver/middleware"
-	"mako/internal/controlplane/auth"
+	"remotephone/internal/controlplane/admin"
+	"remotephone/internal/controlplane/apiserver/middleware"
+	"remotephone/internal/controlplane/auth"
 )
 
 // RegisterAdminAuditRoutes mounts the audit-log retrieval route, mirroring

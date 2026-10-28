@@ -16,24 +16,24 @@ import (
 	"strings"
 	"time"
 
-	"mako/adminui"
-	"mako/internal/controlplane/admin"
-	"mako/internal/controlplane/apiserver/adminapi"
-	"mako/internal/controlplane/apiserver/clientapi"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/controller"
-	"mako/internal/controlplane/image"
-	"mako/internal/controlplane/instance"
-	"mako/internal/controlplane/mdns"
-	"mako/internal/controlplane/pairing"
-	"mako/internal/controlplane/persistence"
-	"mako/internal/controlplane/placement"
-	"mako/internal/controlplane/reconcile"
-	"mako/internal/controlplane/serverinfo"
-	"mako/internal/controlplane/session"
-	"mako/internal/controlplane/tlsidentity"
-	"mako/internal/controlplane/transport"
-	"mako/internal/controlplane/workerproc"
+	"remotephone/adminui"
+	"remotephone/internal/controlplane/admin"
+	"remotephone/internal/controlplane/apiserver/adminapi"
+	"remotephone/internal/controlplane/apiserver/clientapi"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/controller"
+	"remotephone/internal/controlplane/image"
+	"remotephone/internal/controlplane/instance"
+	"remotephone/internal/controlplane/mdns"
+	"remotephone/internal/controlplane/pairing"
+	"remotephone/internal/controlplane/persistence"
+	"remotephone/internal/controlplane/placement"
+	"remotephone/internal/controlplane/reconcile"
+	"remotephone/internal/controlplane/serverinfo"
+	"remotephone/internal/controlplane/session"
+	"remotephone/internal/controlplane/tlsidentity"
+	"remotephone/internal/controlplane/transport"
+	"remotephone/internal/controlplane/workerproc"
 
 	_ "modernc.org/sqlite"
 )
@@ -85,8 +85,8 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	dbPath := envOrDefault("MAKO_DB_PATH", "mako.db")
-	bootstrapSecretPath := envOrDefault("MAKO_BOOTSTRAP_SECRET_PATH", dbPath+".bootstrap-secret")
+	dbPath := envOrDefault("REMOTEPHONE_DB_PATH", "remotephone.db")
+	bootstrapSecretPath := envOrDefault("REMOTEPHONE_BOOTSTRAP_SECRET_PATH", dbPath+".bootstrap-secret")
 
 	adminPort, err := adminPortFromEnv()
 	if err != nil {
@@ -110,21 +110,21 @@ func run() error {
 		return err
 	}
 
-	// MAKO_WORKER_BINARY_PATH defaults to the sibling path of this running
-	// binary — `go build ./cmd/...` normally drops both mako-controlplane
-	// and mako-worker into the same directory. From here on, every running
-	// instance gets its own mako-worker process, spawned on demand and
+	// REMOTEPHONE_WORKER_BINARY_PATH defaults to the sibling path of this running
+	// binary — `go build ./cmd/...` normally drops both remotephone-controlplane
+	// and remotephone-worker into the same directory. From here on, every running
+	// instance gets its own remotephone-worker process, spawned on demand and
 	// torn down with it — see docs/plans/worker-lifecycle.md. There is no
-	// single shared worker/base URL anymore (MAKO_WORKER_BASE_URL, used
+	// single shared worker/base URL anymore (REMOTEPHONE_WORKER_BASE_URL, used
 	// through Phase 3, is retired).
 	//
 	// os.Executable() (not os.Args[0]) because exec.Command requires a path
 	// containing a separator to treat it as relative/absolute rather than a
-	// $PATH lookup: launching this binary as "./mako-controlplane" makes
-	// filepath.Dir(os.Args[0]) == ".", and Join(".", "mako-worker") collapses
-	// to the bare string "mako-worker" — no separator — which exec.Command
+	// $PATH lookup: launching this binary as "./remotephone-controlplane" makes
+	// filepath.Dir(os.Args[0]) == ".", and Join(".", "remotephone-worker") collapses
+	// to the bare string "remotephone-worker" — no separator — which exec.Command
 	// then searches $PATH for instead of finding the sibling file.
-	workerBinaryPath := envOrDefault("MAKO_WORKER_BINARY_PATH", "")
+	workerBinaryPath := envOrDefault("REMOTEPHONE_WORKER_BINARY_PATH", "")
 	if workerBinaryPath == "" {
 		selfPath, err := os.Executable()
 		if err != nil {
@@ -137,9 +137,9 @@ func run() error {
 	imageSvc := image.NewService(db, placementSelector)
 	instanceSvc.SetBaseImageResolver(imageSvc)
 
-	// Matches the TS config's MAKO_OWNER_ABSENCE_TIMEOUT_MS default (5
+	// Matches the TS config's REMOTEPHONE_OWNER_ABSENCE_TIMEOUT_MS default (5
 	// minutes) — see the pre-Go TypeScript implementation's env config.
-	ownerAbsenceTimeout := envOrDefaultDuration("MAKO_OWNER_ABSENCE_TIMEOUT_MS", 5*time.Minute)
+	ownerAbsenceTimeout := envOrDefaultDuration("REMOTEPHONE_OWNER_ABSENCE_TIMEOUT_MS", 5*time.Minute)
 	// Shared with transport.Service: cross-package request-time
 	// serialization for the same attachment only works if both packages
 	// lock the same map (see session.KeyedMutex's doc comment).
@@ -161,8 +161,8 @@ func run() error {
 	ctrl := controller.New(workerLivenessProbe, ownerAbsenceProbe)
 	go ctrl.Run(ctx)
 
-	// Matches the TS config's MAKO_RECONCILE_INTERVAL_MS default (5s).
-	reconcileInterval := envOrDefaultDuration("MAKO_RECONCILE_INTERVAL_MS", 5*time.Second)
+	// Matches the TS config's REMOTEPHONE_RECONCILE_INTERVAL_MS default (5s).
+	reconcileInterval := envOrDefaultDuration("REMOTEPHONE_RECONCILE_INTERVAL_MS", 5*time.Second)
 	go runOwnerAbsenceResync(ctx, sessionSvc, ctrl, reconcileInterval)
 	go runWorkerLivenessResync(ctx, instanceSvc, ctrl, reconcileInterval)
 
@@ -174,8 +174,8 @@ func run() error {
 	// client exists to pair with. The admin surface stays plain HTTP: its
 	// loopback binding is its own, independent security barrier (see
 	// docs/architecture/security-model.md), not something TLS changes.
-	certPath := envOrDefault("MAKO_TLS_CERT_PATH", dbPath+".cert.pem")
-	keyPath := envOrDefault("MAKO_TLS_KEY_PATH", dbPath+".key.pem")
+	certPath := envOrDefault("REMOTEPHONE_TLS_CERT_PATH", dbPath+".cert.pem")
+	keyPath := envOrDefault("REMOTEPHONE_TLS_KEY_PATH", dbPath+".key.pem")
 	tlsCert, err := tlsidentity.NewIdentity(certPath, keyPath).GetOrCreate()
 	if err != nil {
 		return err
@@ -185,8 +185,8 @@ func run() error {
 		return err
 	}
 	serverInfo, err := serverinfo.LoadOrCreate(
-		envOrDefault("MAKO_SERVER_ID_PATH", dbPath+".server-id"),
-		os.Getenv("MAKO_SERVER_NAME"),
+		envOrDefault("REMOTEPHONE_SERVER_ID_PATH", dbPath+".server-id"),
+		os.Getenv("REMOTEPHONE_SERVER_NAME"),
 	)
 	if err != nil {
 		return err
@@ -207,26 +207,26 @@ func run() error {
 	}
 	log.Printf("client API: https://%s", clientAddr)
 
-	advertiser, err := mdns.Start(serverInfo, clientPort, os.Getenv("MAKO_DISABLE_MDNS") == "1")
+	advertiser, err := mdns.Start(serverInfo, clientPort, os.Getenv("REMOTEPHONE_DISABLE_MDNS") == "1")
 	if err != nil {
 		log.Printf("mDNS discovery disabled: %v", err)
 	} else if advertiser != nil {
 		defer advertiser.Shutdown()
-		log.Printf("mDNS: advertising _mako._tcp on port %d", clientPort)
+		log.Printf("mDNS: advertising _remotephone._tcp on port %d", clientPort)
 	}
 
 	errCh := make(chan error, 2)
 	go func() {
 		err := adminSrv.ListenAndServe()
 		if err != nil && err != http.ErrServerClosed {
-			err = fmt.Errorf("owner console listen on %s (set MAKO_ADMIN_PORT to a free port): %w", adminAddr, err)
+			err = fmt.Errorf("owner console listen on %s (set REMOTEPHONE_ADMIN_PORT to a free port): %w", adminAddr, err)
 		}
 		errCh <- err
 	}()
 	go func() {
 		err := clientSrv.ListenAndServeTLS("", "") // cert/key already in TLSConfig
 		if err != nil && err != http.ErrServerClosed {
-			err = fmt.Errorf("client API listen on %s (set MAKO_CLIENT_ADDR/MAKO_CLIENT_PORT): %w", clientAddr, err)
+			err = fmt.Errorf("client API listen on %s (set REMOTEPHONE_CLIENT_ADDR/REMOTEPHONE_CLIENT_PORT): %w", clientAddr, err)
 		}
 		errCh <- err
 	}()
@@ -306,31 +306,31 @@ const defaultAdminPort = 3001
 // owner-proof model. Only the port moves, which is enough to coexist with
 // unrelated software already using 3001.
 func adminPortFromEnv() (int, error) {
-	raw, ok := os.LookupEnv("MAKO_ADMIN_PORT")
+	raw, ok := os.LookupEnv("REMOTEPHONE_ADMIN_PORT")
 	if !ok || strings.TrimSpace(raw) == "" {
 		return defaultAdminPort, nil
 	}
-	return parsePortValue("MAKO_ADMIN_PORT", raw)
+	return parsePortValue("REMOTEPHONE_ADMIN_PORT", raw)
 }
 
 // clientListenAddrFromEnv resolves the HTTPS client API listener. The full
-// host:port address remains configurable through MAKO_CLIENT_ADDR; an
-// optional MAKO_CLIENT_PORT overrides only its port. Keeping the host in the
+// host:port address remains configurable through REMOTEPHONE_CLIENT_ADDR; an
+// optional REMOTEPHONE_CLIENT_PORT overrides only its port. Keeping the host in the
 // address is what lets the same binary bind loopback by default and the LAN
 // when explicitly requested.
 func clientListenAddrFromEnv() (addr string, port int, err error) {
-	rawAddr := envOrDefault("MAKO_CLIENT_ADDR", "127.0.0.1:3000")
+	rawAddr := envOrDefault("REMOTEPHONE_CLIENT_ADDR", "127.0.0.1:3000")
 	host, portText, err := net.SplitHostPort(rawAddr)
 	if err != nil {
-		return "", 0, fmt.Errorf("invalid MAKO_CLIENT_ADDR %q: must be host:port: %w", rawAddr, err)
+		return "", 0, fmt.Errorf("invalid REMOTEPHONE_CLIENT_ADDR %q: must be host:port: %w", rawAddr, err)
 	}
-	port, err = parsePortValue("MAKO_CLIENT_ADDR", portText)
+	port, err = parsePortValue("REMOTEPHONE_CLIENT_ADDR", portText)
 	if err != nil {
 		return "", 0, err
 	}
 
-	if rawPort, ok := os.LookupEnv("MAKO_CLIENT_PORT"); ok && strings.TrimSpace(rawPort) != "" {
-		port, err = parsePortValue("MAKO_CLIENT_PORT", rawPort)
+	if rawPort, ok := os.LookupEnv("REMOTEPHONE_CLIENT_PORT"); ok && strings.TrimSpace(rawPort) != "" {
+		port, err = parsePortValue("REMOTEPHONE_CLIENT_PORT", rawPort)
 		if err != nil {
 			return "", 0, err
 		}
@@ -354,14 +354,14 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
-// workerBinaryName returns the sibling mako-worker executable's filename.
+// workerBinaryName returns the sibling remotephone-worker executable's filename.
 // Windows requires the .exe suffix when resolving the default path; callers
-// that set MAKO_WORKER_BINARY_PATH explicitly are unaffected.
+// that set REMOTEPHONE_WORKER_BINARY_PATH explicitly are unaffected.
 func workerBinaryName() string {
 	if runtime.GOOS == "windows" {
-		return "mako-worker.exe"
+		return "remotephone-worker.exe"
 	}
-	return "mako-worker"
+	return "remotephone-worker"
 }
 
 // envOrDefaultDuration parses key as a positive integer count of

@@ -1,7 +1,7 @@
 package transport_test
 
 import (
-	"mako/internal/worker/transport"
+	"remotephone/internal/worker/transport"
 	"testing"
 )
 

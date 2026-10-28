@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/persistence/repo"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/persistence/repo"
 )
 
 // RemoveUser soft-deletes an account: it revokes/closes all access, clears the

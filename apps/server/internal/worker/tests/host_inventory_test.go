@@ -3,7 +3,7 @@ package tests
 import (
 	"testing"
 
-	"mako/internal/worker/host"
+	"remotephone/internal/worker/host"
 )
 
 func TestNormalizeGOOS(t *testing.T) {

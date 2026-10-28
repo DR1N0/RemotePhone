@@ -10,9 +10,9 @@ import (
 	"fmt"
 	"time"
 
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/session"
-	"mako/internal/controlplane/transport"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/session"
+	"remotephone/internal/controlplane/transport"
 
 	"github.com/google/uuid"
 )

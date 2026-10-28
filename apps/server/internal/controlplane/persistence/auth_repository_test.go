@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"mako/internal/controlplane/persistence"
-	"mako/internal/controlplane/persistence/repo"
+	"remotephone/internal/controlplane/persistence"
+	"remotephone/internal/controlplane/persistence/repo"
 
 	_ "modernc.org/sqlite"
 )

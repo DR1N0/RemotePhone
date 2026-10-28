@@ -4,9 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"mako/internal/worker/config"
-	workerruntime "mako/internal/worker/runtime"
-	"mako/internal/worker/runtime/androidstudio"
+	"remotephone/internal/worker/config"
+	workerruntime "remotephone/internal/worker/runtime"
+	"remotephone/internal/worker/runtime/androidstudio"
 )
 
 type stubRuntimeAdapter struct {

@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"mako/internal/controlplane/apiserver/clientapi"
-	"mako/internal/controlplane/instance"
+	"remotephone/internal/controlplane/apiserver/clientapi"
+	"remotephone/internal/controlplane/instance"
 )
 
 func TestTemplateRoutesListDiscoveredTemplatesForAnAccount(t *testing.T) {

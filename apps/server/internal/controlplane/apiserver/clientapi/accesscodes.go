@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"mako/internal/controlplane/apiserver/middleware"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/pairing"
-	"mako/internal/controlplane/serverinfo"
+	"remotephone/internal/controlplane/apiserver/middleware"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/pairing"
+	"remotephone/internal/controlplane/serverinfo"
 )
 
 type createAccessCodeRequest struct {
@@ -83,7 +83,7 @@ func RegisterAccessCodeRoutes(mux *http.ServeMux, authSvc *auth.Service, pairing
 			return
 		}
 		if req.DeviceLabel == "" {
-			req.DeviceLabel = "mako-client-android"
+			req.DeviceLabel = "remotephone-client-android"
 		}
 		user, token, created, err := authSvc.RedeemAccessCode(
 			r.Context(), req.Code, req.Username, req.Password, req.DeviceLabel,

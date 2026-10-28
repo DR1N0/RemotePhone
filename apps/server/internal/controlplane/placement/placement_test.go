@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"mako/internal/controlplane/workerproc"
+	"remotephone/internal/controlplane/workerproc"
 )
 
 func newTestSelector(execer workerproc.Execer) *Selector {
-	return NewSelector(execer, "fake-mako-worker")
+	return NewSelector(execer, "fake-remotephone-worker")
 }
 
 func TestSelectorValidateAcceptsLocalOnly(t *testing.T) {

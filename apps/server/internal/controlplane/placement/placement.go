@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"mako/internal/controlplane/workerproc"
+	"remotephone/internal/controlplane/workerproc"
 )
 
 // Emulator port ranges the control plane hands out before spawning a
@@ -24,7 +24,7 @@ const (
 )
 
 // workerHealthyTimeout bounds how long AcquireWorker waits for a freshly
-// spawned mako-worker process to answer /healthz before giving up.
+// spawned remotephone-worker process to answer /healthz before giving up.
 const workerHealthyTimeout = 10 * time.Second
 
 // workerKillTimeout bounds how long ReleaseWorker waits for a killed worker
@@ -45,7 +45,7 @@ type Policy struct {
 
 // Selector validates that a requested placement policy can actually be
 // honored, and (from Phase 4 on) owns spawning/releasing the one
-// mako-worker process a running instance gets. Still no pool to select
+// remotephone-worker process a running instance gets. Still no pool to select
 // among — every instance's worker is spawned fresh, 1:1 — so Validate still
 // only ever accepts "local-only", matching the TS placement-service.ts's
 // own "local-only, or reject" behavior. See docs/architecture/decisions-log.md
@@ -79,7 +79,7 @@ func (s *Selector) Validate(policy Policy) error {
 	return nil
 }
 
-// AcquireWorker allocates a free local port, spawns a fresh mako-worker
+// AcquireWorker allocates a free local port, spawns a fresh remotephone-worker
 // process for instanceID, and waits for it to answer healthy before
 // returning its base URL and PID. On any failure after a process is
 // actually spawned, it is killed before returning the error — a failed
@@ -95,10 +95,10 @@ func (s *Selector) AcquireWorker(ctx context.Context, instanceID string) (baseUR
 	}
 	// os.Environ(), not nil: workerproc.Spawn's env slice becomes the
 	// child's ENTIRE environment (exec.Cmd.Env semantics), so the control
-	// plane's own PATH/HOME/MAKO_ANDROID_SDK_ROOT/etc. must be passed
-	// through explicitly or the spawned mako-worker starts with none of
+	// plane's own PATH/HOME/REMOTEPHONE_ANDROID_SDK_ROOT/etc. must be passed
+	// through explicitly or the spawned remotephone-worker starts with none of
 	// them — e.g. unable to find the emulator binary or any AVD at all.
-	env := append(os.Environ(), "MAKO_EMULATOR_PORTS="+emulatorPorts)
+	env := append(os.Environ(), "REMOTEPHONE_EMULATOR_PORTS="+emulatorPorts)
 	proc, baseURL, err := workerproc.Spawn(ctx, s.execer, s.workerBinaryPath, instanceID, port, env)
 	if err != nil {
 		return "", 0, fmt.Errorf("spawn worker: %w", err)

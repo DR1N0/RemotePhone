@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// Minimal wordmark: white "mako" with a gold cat's-eye dot.
+/// Minimal wordmark: white "RemotePhone" with a gold cat's-eye dot.
 class BrandLockup extends StatelessWidget {
   final double size;
   final bool compact;
@@ -17,7 +17,7 @@ class BrandLockup extends StatelessWidget {
       textBaseline: TextBaseline.alphabetic,
       children: [
         Text(
-          'mako',
+          'RemotePhone',
           style: TextStyle(
             fontSize: compact ? size * 0.5 : size * 0.62,
             fontWeight: FontWeight.w800,

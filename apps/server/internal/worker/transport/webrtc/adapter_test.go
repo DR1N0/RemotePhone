@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/pion/webrtc/v3"
-	"mako/internal/worker/transport"
-	"mako/internal/worker/transport/emugrpc"
+	"remotephone/internal/worker/transport"
+	"remotephone/internal/worker/transport/emugrpc"
 )
 
 // fakeEncoderProcess satisfies encoderProcess without spawning a real

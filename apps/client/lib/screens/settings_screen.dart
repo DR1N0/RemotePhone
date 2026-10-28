@@ -124,7 +124,7 @@ class SettingsScreen extends StatelessWidget {
                   const BrandLockup(size: 40),
                   const SizedBox(height: 14),
                   Text(
-                    'mako 1.0.0',
+                    'RemotePhone 1.0.0',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 6),

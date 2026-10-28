@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/instance"
-	"mako/internal/controlplane/persistence"
-	"mako/internal/controlplane/placement"
-	"mako/internal/controlplane/session"
-	"mako/internal/controlplane/workerproc"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/instance"
+	"remotephone/internal/controlplane/persistence"
+	"remotephone/internal/controlplane/placement"
+	"remotephone/internal/controlplane/session"
+	"remotephone/internal/controlplane/workerproc"
 
 	_ "modernc.org/sqlite"
 )
@@ -38,7 +38,7 @@ func newTestServices(t *testing.T) (*Service, *auth.Service, *session.Service, *
 	// ListAllInstances (the only instance.Service method these tests
 	// exercise) is a pure DB read — the placement selector is never
 	// actually called, a fake Execer is enough.
-	placementSelector := placement.NewSelector(&workerproc.FakeExecer{}, "fake-mako-worker")
+	placementSelector := placement.NewSelector(&workerproc.FakeExecer{}, "fake-remotephone-worker")
 	instanceSvc := instance.NewService(db, placementSelector)
 	adminSvc := NewService(db, authSvc, sessionSvc, instanceSvc)
 	return adminSvc, authSvc, sessionSvc, db

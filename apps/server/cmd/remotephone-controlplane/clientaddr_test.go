@@ -28,14 +28,14 @@ func TestClientListenAddrFromEnv(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.setAddr {
-				t.Setenv("MAKO_CLIENT_ADDR", tt.addr)
+				t.Setenv("REMOTEPHONE_CLIENT_ADDR", tt.addr)
 			} else {
-				unsetEnvForTest(t, "MAKO_CLIENT_ADDR")
+				unsetEnvForTest(t, "REMOTEPHONE_CLIENT_ADDR")
 			}
 			if tt.setPort {
-				t.Setenv("MAKO_CLIENT_PORT", tt.port)
+				t.Setenv("REMOTEPHONE_CLIENT_PORT", tt.port)
 			} else {
-				unsetEnvForTest(t, "MAKO_CLIENT_PORT")
+				unsetEnvForTest(t, "REMOTEPHONE_CLIENT_PORT")
 			}
 
 			addr, port, err := clientListenAddrFromEnv()

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"mako/internal/controlplane/serverinfo"
+	"remotephone/internal/controlplane/serverinfo"
 )
 
 func TestInstanceNameIsStableAndCollisionResistant(t *testing.T) {

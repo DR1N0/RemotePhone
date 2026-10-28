@@ -1,4 +1,4 @@
-module mako
+module remotephone
 
 go 1.27.2
 

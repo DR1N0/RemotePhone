@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	emupb "mako/internal/worker/transport/emugrpc/proto"
+	emupb "remotephone/internal/worker/transport/emugrpc/proto"
 )
 
 func TestGRPCAudioSourceStreamsPCM(t *testing.T) {

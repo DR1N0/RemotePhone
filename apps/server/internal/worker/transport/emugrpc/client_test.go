@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	emupb "mako/internal/worker/transport/emugrpc/proto"
+	emupb "remotephone/internal/worker/transport/emugrpc/proto"
 )
 
 // fakeEmulatorServer streams a fixed sequence of images, then blocks until

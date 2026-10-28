@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"net/url"
 
-	workerapi "mako/internal/worker/api"
-	"mako/internal/worker/runtime"
+	workerapi "remotephone/internal/worker/api"
+	"remotephone/internal/worker/runtime"
 )
 
 // ErrWorkerRequestFailed wraps a non-2xx response from a worker, carrying
@@ -27,7 +27,7 @@ func (e *ErrWorkerRequestFailed) Error() string {
 	return fmt.Sprintf("worker request failed with status %d", e.StatusCode)
 }
 
-// WorkerClient talks to the mako-worker process serving one instance.
+// WorkerClient talks to the remotephone-worker process serving one instance.
 // Phase 2's transport package needs the transport-session/signaling methods
 // below in addition to Phase 1's template discovery and instance lifecycle —
 // added to this same interface rather than a separate client type, matching
@@ -58,7 +58,7 @@ type WorkerClient interface {
 
 // HTTPWorkerClient is the only WorkerClient implementation: a plain HTTP
 // client against one worker's base URL, matching the wire shapes the worker
-// itself already defines in mako/internal/worker/api — reused directly
+// itself already defines in remotephone/internal/worker/api — reused directly
 // rather than duplicated, since both sides live in the same Go module.
 type HTTPWorkerClient struct {
 	baseURL string

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"mako/internal/controlplane/placement"
-	"mako/internal/worker/runtime"
+	"remotephone/internal/controlplane/placement"
+	"remotephone/internal/worker/runtime"
 )
 
 // ResourceProfile is a control-plane-only request concept the worker never

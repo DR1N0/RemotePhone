@@ -45,7 +45,7 @@ export default function Overview() {
     <section>
       {contextHolder}
       <div className="page-kicker">Server</div>
-      <h1 className="page-title">{server?.serverName || "mako"}</h1>
+      <h1 className="page-title">{server?.serverName || "remotephone"}</h1>
       <p className="page-subtitle">
         Local owner console. No login is required; the loopback listener is the
         owner boundary.

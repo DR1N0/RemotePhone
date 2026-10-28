@@ -31,7 +31,7 @@ class TrustedServer {
 /// URL pin or server-pin store.
 class AuthService extends ChangeNotifier {
   static const _storage = FlutterSecureStorage();
-  static const _keyServers = 'mako_servers';
+  static const _keyServers = 'remotephone_servers';
 
   List<ServerProfile> servers = [];
   ServerProfile? activeProfile;
@@ -98,8 +98,8 @@ class AuthService extends ChangeNotifier {
     try {
       final all = await _storage.readAll();
       for (final key in all.keys) {
-        if (key.startsWith('mako_pin_') ||
-            key.startsWith('mako_server_pin_')) {
+        if (key.startsWith('remotephone_pin_') ||
+            key.startsWith('remotephone_server_pin_')) {
           await _storage.delete(key: key);
         }
       }
@@ -396,5 +396,5 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  String _deviceLabel() => 'mako-client-android';
+  String _deviceLabel() => 'remotephone-client-android';
 }

@@ -3,7 +3,7 @@ package session
 import (
 	"sort"
 
-	"mako/internal/controlplane/persistence/repo"
+	"remotephone/internal/controlplane/persistence/repo"
 )
 
 // Role order for sortAttachments: owner first, then participant, then

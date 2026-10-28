@@ -5,13 +5,13 @@ import (
 	"net/http"
 	stdruntime "runtime"
 
-	workerapi "mako/internal/worker/api"
-	"mako/internal/worker/config"
-	"mako/internal/worker/host"
-	workerruntime "mako/internal/worker/runtime"
-	"mako/internal/worker/runtime/androidstudio"
-	"mako/internal/worker/store"
-	"mako/internal/worker/transport"
+	workerapi "remotephone/internal/worker/api"
+	"remotephone/internal/worker/config"
+	"remotephone/internal/worker/host"
+	workerruntime "remotephone/internal/worker/runtime"
+	"remotephone/internal/worker/runtime/androidstudio"
+	"remotephone/internal/worker/store"
+	"remotephone/internal/worker/transport"
 )
 
 func main() {
@@ -32,7 +32,7 @@ func main() {
 		TransportStore:  transportStore,
 	})
 
-	log.Printf("mako-worker listening on %s", cfg.ListenAddr)
+	log.Printf("remotephone-worker listening on %s", cfg.ListenAddr)
 	if err := http.ListenAndServe(cfg.ListenAddr, router); err != nil {
 		log.Fatal(err)
 	}

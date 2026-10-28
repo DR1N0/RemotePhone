@@ -3,9 +3,9 @@ package clientapi
 import (
 	"net/http"
 
-	"mako/internal/controlplane/apiserver/middleware"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/instance"
+	"remotephone/internal/controlplane/apiserver/middleware"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/instance"
 )
 
 // RegisterTemplateRoutes exposes the host's discoverable runtime templates to

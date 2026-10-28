@@ -3,9 +3,9 @@ package tests
 import (
 	"testing"
 
-	"mako/internal/worker/config"
-	"mako/internal/worker/runtime"
-	"mako/internal/worker/runtime/androidstudio"
+	"remotephone/internal/worker/config"
+	"remotephone/internal/worker/runtime"
+	"remotephone/internal/worker/runtime/androidstudio"
 )
 
 func TestAndroidStudioAdapterAvailabilityChecksEmulatorBinary(t *testing.T) {

@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"mako/internal/controlplane/apiserver/clientapi"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/instance"
-	"mako/internal/controlplane/persistence"
-	"mako/internal/controlplane/session"
-	"mako/internal/controlplane/transport"
-	"mako/internal/worker/runtime"
+	"remotephone/internal/controlplane/apiserver/clientapi"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/instance"
+	"remotephone/internal/controlplane/persistence"
+	"remotephone/internal/controlplane/session"
+	"remotephone/internal/controlplane/transport"
+	"remotephone/internal/worker/runtime"
 
 	_ "modernc.org/sqlite"
 )

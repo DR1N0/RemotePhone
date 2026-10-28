@@ -7,8 +7,8 @@ import (
 	"os/exec"
 	"strconv"
 
-	"mako/internal/worker/host"
-	"mako/internal/worker/runtime"
+	"remotephone/internal/worker/host"
+	"remotephone/internal/worker/runtime"
 )
 
 type LaunchRequest struct {
@@ -60,7 +60,7 @@ func BuildLaunchArgs(req LaunchRequest) []string {
 
 func Launch(emulatorPath string, req LaunchRequest) (*exec.Cmd, error) {
 	cmd := exec.Command(emulatorPath, BuildLaunchArgs(req)...)
-	logPath, err := os.CreateTemp("", "mako-emulator-*.log")
+	logPath, err := os.CreateTemp("", "remotephone-emulator-*.log")
 	if err == nil {
 		cmd.Stdout = logPath
 		cmd.Stderr = logPath

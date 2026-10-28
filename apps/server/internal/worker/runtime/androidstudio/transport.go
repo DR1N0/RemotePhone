@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"mako/internal/worker/runtime"
-	webrtctransport "mako/internal/worker/transport/webrtc"
+	"remotephone/internal/worker/runtime"
+	webrtctransport "remotephone/internal/worker/transport/webrtc"
 )
 
 func (a *Adapter) CreateTransportSession(req runtime.TransportSessionRequest) (runtime.TransportSession, error) {

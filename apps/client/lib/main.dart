@@ -20,18 +20,18 @@ Future<void> main() async {
   runApp(
     ChangeNotifierProvider(
       create: (_) => AuthService()..restore(),
-      child: const MakoClientApp(),
+      child: const RemotePhoneClientApp(),
     ),
   );
 }
 
-class MakoClientApp extends StatelessWidget {
-  const MakoClientApp({super.key});
+class RemotePhoneClientApp extends StatelessWidget {
+  const RemotePhoneClientApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'mako',
+      title: 'RemotePhone',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       darkTheme: buildAppTheme(),

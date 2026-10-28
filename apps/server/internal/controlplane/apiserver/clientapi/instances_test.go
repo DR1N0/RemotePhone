@@ -11,20 +11,20 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mako/internal/controlplane/apiserver/clientapi"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/instance"
-	"mako/internal/controlplane/persistence"
-	"mako/internal/controlplane/placement"
-	workerapi "mako/internal/worker/api"
-	"mako/internal/worker/runtime"
+	"remotephone/internal/controlplane/apiserver/clientapi"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/instance"
+	"remotephone/internal/controlplane/persistence"
+	"remotephone/internal/controlplane/placement"
+	workerapi "remotephone/internal/worker/api"
+	"remotephone/internal/worker/runtime"
 
 	_ "modernc.org/sqlite"
 )
 
 // fakeWorkerClient backs an httptest.Server standing in for a worker's HTTP
 // API — route tests exercise the HTTP layer end to end against a real
-// instance.Service, but never shell out to a real mako-worker process.
+// instance.Service, but never shell out to a real remotephone-worker process.
 // Shared by every test file in this package via fakePlacementSelector.
 type fakeWorkerClient struct {
 	templates []runtime.Template

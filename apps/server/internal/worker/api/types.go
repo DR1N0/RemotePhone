@@ -1,6 +1,6 @@
 package api
 
-import "mako/internal/worker/runtime"
+import "remotephone/internal/worker/runtime"
 
 type HealthResponse struct {
 	Status            string                `json:"status"`

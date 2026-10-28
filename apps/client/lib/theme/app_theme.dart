@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Mako's visual language: black and white, with a restrained Sri Lankan
+/// RemotePhone's visual language: black and white, with a restrained Sri Lankan
 /// cat's-eye gold accent. No colored card backgrounds, no extra chrome.
 class AppColors {
   static const background = Color(0xFF000000);

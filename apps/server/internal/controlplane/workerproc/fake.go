@@ -9,9 +9,9 @@ import (
 )
 
 // FakeExecer is a test double for Execer: instead of starting a real
-// mako-worker binary, it starts an in-process HTTP server bound to exactly
+// remotephone-worker binary, it starts an in-process HTTP server bound to exactly
 // the address Spawn's env told it to use (parsed back out of
-// MAKO_WORKER_LISTEN_ADDR), so the rest of the Spawn/WaitHealthy flow works
+// REMOTEPHONE_WORKER_LISTEN_ADDR), so the rest of the Spawn/WaitHealthy flow works
 // completely unmodified against it. Exported (not test-only) so
 // placement's and reconcile's own tests can reuse it instead of
 // reimplementing a fake worker process — see
@@ -37,7 +37,7 @@ type FakeSpawn struct {
 }
 
 func (f *FakeExecer) Start(ctx context.Context, binaryPath string, env []string) (Process, error) {
-	addr := envValue(env, "MAKO_WORKER_LISTEN_ADDR")
+	addr := envValue(env, "REMOTEPHONE_WORKER_LISTEN_ADDR")
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err

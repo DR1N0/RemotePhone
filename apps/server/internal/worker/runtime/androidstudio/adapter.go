@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mako/internal/worker/config"
-	"mako/internal/worker/host"
-	"mako/internal/worker/runtime"
-	"mako/internal/worker/transport"
+	"remotephone/internal/worker/config"
+	"remotephone/internal/worker/host"
+	"remotephone/internal/worker/runtime"
+	"remotephone/internal/worker/transport"
 )
 
 type Adapter struct {
@@ -163,7 +163,7 @@ func (a *Adapter) Start(req runtime.StartRequest) (runtime.InstanceHandle, error
 
 	launchReq := BuildLaunchRequestFromStart(req, ports, instanceAVDName)
 	// One worker owns one instance; headless is a worker deployment policy,
-	// not something each client gets to choose. MAKO_HEADLESS=0 keeps a
+	// not something each client gets to choose. REMOTEPHONE_HEADLESS=0 keeps a
 	// visible window for local debugging.
 	launchReq.Headless = a.headless
 	launchReq.GPUMode = a.gpuMode

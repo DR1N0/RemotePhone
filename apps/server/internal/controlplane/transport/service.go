@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/instance"
-	"mako/internal/controlplane/persistence/repo"
-	"mako/internal/controlplane/session"
-	workerapi "mako/internal/worker/api"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/instance"
+	"remotephone/internal/controlplane/persistence/repo"
+	"remotephone/internal/controlplane/session"
+	workerapi "remotephone/internal/worker/api"
 )
 
 const (

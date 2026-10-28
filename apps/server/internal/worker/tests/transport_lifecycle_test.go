@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"mako/internal/worker/api"
-	"mako/internal/worker/runtime"
-	"mako/internal/worker/transport"
+	"remotephone/internal/worker/api"
+	"remotephone/internal/worker/runtime"
+	"remotephone/internal/worker/transport"
 )
 
 type recordingTransportAdapter struct {

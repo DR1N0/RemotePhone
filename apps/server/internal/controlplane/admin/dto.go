@@ -3,7 +3,7 @@ package admin
 import (
 	"database/sql"
 
-	"mako/internal/controlplane/persistence/repo"
+	"remotephone/internal/controlplane/persistence/repo"
 )
 
 // CredentialDto is the only shape a credential row may take crossing into

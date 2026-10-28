@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"mako/internal/controlplane/admin"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/image"
-	"mako/internal/controlplane/instance"
-	"mako/internal/controlplane/persistence"
-	"mako/internal/controlplane/placement"
-	"mako/internal/controlplane/session"
-	"mako/internal/controlplane/transport"
-	"mako/internal/controlplane/workerproc"
+	"remotephone/internal/controlplane/admin"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/image"
+	"remotephone/internal/controlplane/instance"
+	"remotephone/internal/controlplane/persistence"
+	"remotephone/internal/controlplane/placement"
+	"remotephone/internal/controlplane/session"
+	"remotephone/internal/controlplane/transport"
+	"remotephone/internal/controlplane/workerproc"
 
 	_ "modernc.org/sqlite"
 )
@@ -44,7 +44,7 @@ func newTestServiceForMain(t *testing.T) (*auth.Service, *instance.Service, *ses
 	if err != nil {
 		t.Fatalf("auth.NewService: %v", err)
 	}
-	placementSelector := placement.NewSelector(&workerproc.FakeExecer{}, "fake-mako-worker")
+	placementSelector := placement.NewSelector(&workerproc.FakeExecer{}, "fake-remotephone-worker")
 	instanceSvc := instance.NewService(db, placementSelector)
 	keyedMutex := &session.KeyedMutex{}
 	sessionSvc := session.NewService(db, svc, keyedMutex, 5*time.Minute)

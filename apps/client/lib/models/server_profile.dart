@@ -10,7 +10,7 @@ enum ServerAddressKind {
   lan,
 }
 
-/// One paired mako control plane remembered by this client. The server ID is
+/// One paired remotephone control plane remembered by this client. The server ID is
 /// stable across restarts; the name is configurable and may change, and the
 /// address may change when DHCP moves the host. The certificate fingerprint
 /// is what actually authenticates the server.
@@ -78,7 +78,7 @@ class ServerProfile {
     final username = json['username'] as String? ?? '';
     return ServerProfile(
       serverId: json['serverId'] as String,
-      name: json['name'] as String? ?? 'mako',
+      name: json['name'] as String? ?? 'remotephone',
       baseUrl: baseUrl,
       certSha256: json['certSha256'] as String,
       token: json['token'] as String,

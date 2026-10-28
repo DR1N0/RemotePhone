@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"mako/internal/controlplane/tlsidentity"
+	"remotephone/internal/controlplane/tlsidentity"
 )
 
 func testCert(t *testing.T) tls.Certificate {

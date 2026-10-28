@@ -1,4 +1,4 @@
-// Package transport ports mako's pre-Go TypeScript TransportService and
+// Package transport ports remotephone's pre-Go TypeScript TransportService and
 // SignalingService to Go: establishing/tearing down an attachment's
 // worker-side WebRTC transport, relaying SDP offers/ICE candidates, and —
 // the one real redesign in this phase — owning attachment role transitions

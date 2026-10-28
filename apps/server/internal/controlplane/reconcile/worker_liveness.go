@@ -7,9 +7,9 @@ import (
 	"log"
 	"time"
 
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/instance"
-	"mako/internal/controlplane/workerproc"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/instance"
+	"remotephone/internal/controlplane/workerproc"
 
 	"github.com/google/uuid"
 )

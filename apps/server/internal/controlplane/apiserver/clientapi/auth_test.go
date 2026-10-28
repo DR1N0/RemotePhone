@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mako/internal/controlplane/apiserver/clientapi"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/persistence"
+	"remotephone/internal/controlplane/apiserver/clientapi"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/persistence"
 
 	_ "modernc.org/sqlite"
 )

@@ -1,5 +1,5 @@
 // Hand-trimmed subset of the Android Emulator's EmulatorController gRPC
-// service, vendored for mako's capture and input pipelines.
+// service, vendored for remotephone's capture and input pipelines.
 //
 // Source: https://github.com/google/android-emulator-webrtc/blob/master/proto/emulator_controller.proto
 // (mirrors https://android.googlesource.com/platform/prebuilts/android-emulator/+/master/linux-x86_64/lib/emulator_controller.proto)
@@ -8,7 +8,7 @@
 //
 // The upstream file defines dozens of unrelated RPCs (phone/SMS, XR/AR
 // glasses, sensors, battery, GPS, clipboard, ...). This file keeps only the
-// RPCs mako actually calls:
+// RPCs remotephone actually calls:
 //   - streamScreenshot: video capture
 //   - streamAudio: audio capture
 //   - sendTouch: multi-touch input (replaces per-event `adb shell input`)
@@ -787,7 +787,7 @@ const file_internal_worker_transport_emugrpc_proto_emulator_controller_proto_raw
 	"\x12EmulatorController\x12`\n" +
 	"\x10streamScreenshot\x12&.android.emulation.control.ImageFormat\x1a .android.emulation.control.Image\"\x000\x01\x12a\n" +
 	"\vstreamAudio\x12&.android.emulation.control.AudioFormat\x1a&.android.emulation.control.AudioPacket\"\x000\x01\x12L\n" +
-	"\tsendTouch\x12%.android.emulation.control.TouchEvent\x1a\x16.google.protobuf.Empty\"\x00B.Z,mako/internal/worker/transport/emugrpc/protob\x06proto3"
+	"\tsendTouch\x12%.android.emulation.control.TouchEvent\x1a\x16.google.protobuf.Empty\"\x00B5Z3remotephone/internal/worker/transport/emugrpc/protob\x06proto3"
 
 var (
 	file_internal_worker_transport_emugrpc_proto_emulator_controller_proto_rawDescOnce sync.Once

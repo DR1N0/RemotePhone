@@ -1,6 +1,6 @@
-# mako client (Android)
+# remotephone client (Android)
 
-Flutter client for [mako](../..) — it logs in to a `mako-controlplane` server, lists the user's managed Android instances, and streams one over WebRTC with touch input.
+Flutter client for [remotephone](../..) — it logs in to a `remotephone-controlplane` server, lists the user's managed Android instances, and streams one over WebRTC with touch input.
 
 Android is the only supported platform (iOS distribution was deliberately ruled out for a free/open-source project).
 
@@ -9,7 +9,7 @@ Android is the only supported platform (iOS distribution was deliberately ruled 
 ```powershell
 flutter pub get
 # Optional: bake in the server URL (otherwise the add-server screen defaults to 10.0.2.2:3000)
-flutter build apk --debug --dart-define=MAKO_DEFAULT_SERVER=https://192.168.1.7:3000
+flutter build apk --debug --dart-define=REMOTEPHONE_DEFAULT_SERVER=https://192.168.1.7:3000
 adb install -r build\app\outputs\flutter-apk\app-debug.apk
 ```
 
@@ -22,7 +22,7 @@ flutter run
 ## Server URL
 
 - Android emulator client: `https://10.0.2.2:3000` (the emulator's alias for the host)
-- Real phone: `https://<host-lan-ip>:3000`, with `MAKO_CLIENT_ADDR=0.0.0.0:3000` on the control plane and the Windows firewall allowing TCP 3000
+- Real phone: `https://<host-lan-ip>:3000`, with `REMOTEPHONE_CLIENT_ADDR=0.0.0.0:3000` on the control plane and the Windows firewall allowing TCP 3000
 
 The app pins the server certificate after a successful access-code redemption or login. A known server is matched by stable server ID and certificate pin; the code field is skipped. Use it only on a trusted network for the first contact.
 

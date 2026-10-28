@@ -13,7 +13,7 @@ type Screen = "loading" | "setup" | "ready" | "error"
 function Brand() {
   return (
     <div className="admin-brand">
-      <span className="admin-brand-name">mako</span>
+      <span className="admin-brand-name">RemotePhone</span>
       <span className="admin-brand-sub">owner console</span>
     </div>
   )

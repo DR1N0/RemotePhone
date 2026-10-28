@@ -16,9 +16,9 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/pkg/media"
-	"mako/internal/worker/host"
-	"mako/internal/worker/transport"
-	"mako/internal/worker/transport/emugrpc"
+	"remotephone/internal/worker/host"
+	"remotephone/internal/worker/transport"
+	"remotephone/internal/worker/transport/emugrpc"
 )
 
 // captureFPS/captureBitRate tune the encoder for latency over quality  - see
@@ -62,7 +62,7 @@ type Adapter struct {
 
 // SetBitRate overrides the video encoder bitrate (bits/s). A non-positive
 // value leaves the default in place. Called once per adapter at creation
-// from the worker's MAKO_STREAM_BITRATE configuration.
+// from the worker's REMOTEPHONE_STREAM_BITRATE configuration.
 func (a *Adapter) SetBitRate(bitRate int) {
 	if bitRate > 0 {
 		a.bitRate = bitRate
@@ -426,7 +426,7 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 	se := webrtc.SettingEngine{}
 	// IPv4/UDP only for now. By default advertise every routable IPv4
 	// interface (LAN, Tailscale, other VPNs) and let ICE choose  - that is
-	// what ICE is for. MAKO_WEBRTC_HOST_IP is only a debugging override for
+	// what ICE is for. REMOTEPHONE_WEBRTC_HOST_IP is only a debugging override for
 	// a specific interface.
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 	if a.hostIP != "" {
@@ -469,7 +469,7 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 	// Add H264 video track.
 	videoTrack, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264},
-		"video", "mako-screen",
+		"video", "remotephone-screen",
 	)
 	if err != nil {
 		_ = pc.Close()
@@ -490,7 +490,7 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 			ClockRate: pcmuSampleRate,
 			Channels:  1,
 		},
-		"audio", "mako-audio",
+		"audio", "remotephone-audio",
 	)
 	if err != nil {
 		_ = pc.Close()

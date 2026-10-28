@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"mako/internal/controlplane/apiserver/adminapi"
+	"remotephone/internal/controlplane/apiserver/adminapi"
 )
 
 func ownerRequest(t *testing.T, mux *http.ServeMux, method, path, body, origin string) *httptest.ResponseRecorder {

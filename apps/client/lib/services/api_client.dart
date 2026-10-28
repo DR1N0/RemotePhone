@@ -33,7 +33,7 @@ class ServerInfo {
   factory ServerInfo.fromJson(Map<String, dynamic> json) {
     return ServerInfo(
       serverId: json['serverId'] as String,
-      name: json['name'] as String? ?? 'mako',
+      name: json['name'] as String? ?? 'remotephone',
       version: json['version'] as String? ?? '',
     );
   }
@@ -69,7 +69,7 @@ class AccessCode {
   });
 }
 
-/// Talks to mako-controlplane's client HTTP surface. One client per
+/// Talks to remotephone-controlplane's client HTTP surface. One client per
 /// configured server; construct a fresh one whenever the server URL or
 /// bearer token changes (see AuthService).
 class ApiClient {
@@ -266,7 +266,7 @@ class ApiClient {
         'streamProfile': 'balanced',
       },
       // One worker owns one instance; the worker enforces headless mode
-      // (MAKO_HEADLESS=0 is a debug override). This value is only the
+      // (REMOTEPHONE_HEADLESS=0 is a debug override). This value is only the
       // client's preference and is not what normally decides the launch.
       'launchConfig': {'headless': true},
     });

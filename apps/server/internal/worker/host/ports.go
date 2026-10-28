@@ -19,7 +19,7 @@ const (
 // triple. The control plane owns host-wide port assignment because every
 // worker process starting its own search at DefaultConsolePort produced a
 // bind race the moment two instances ran concurrently.
-const emulatorPortsEnv = "MAKO_EMULATOR_PORTS"
+const emulatorPortsEnv = "REMOTEPHONE_EMULATOR_PORTS"
 
 type EmulatorPorts struct {
 	Console int

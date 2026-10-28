@@ -16,7 +16,7 @@ export default function Setup({ onComplete }: { onComplete: () => void }) {
     setError(null)
     setSubmitting(true)
     try {
-      await api.setupAdmin({ ...values, deviceLabel: "mako-admin-web" })
+      await api.setupAdmin({ ...values, deviceLabel: "remotephone-admin-web" })
       onComplete()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Administrator setup failed")

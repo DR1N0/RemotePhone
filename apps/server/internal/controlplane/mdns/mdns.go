@@ -10,10 +10,10 @@ import (
 
 	"github.com/grandcat/zeroconf"
 
-	"mako/internal/controlplane/serverinfo"
+	"remotephone/internal/controlplane/serverinfo"
 )
 
-const serviceType = "_mako._tcp"
+const serviceType = "_remotephone._tcp"
 
 // Advertiser owns one registered DNS-SD service. Shutdown is idempotent.
 type Advertiser struct {
@@ -58,7 +58,7 @@ func (a *Advertiser) Shutdown() {
 func instanceName(info *serverinfo.Info) string {
 	name := strings.TrimSpace(info.Name)
 	if name == "" {
-		name = "mako"
+		name = "remotephone"
 	}
 	short := info.ServerID
 	if len(short) > 8 {

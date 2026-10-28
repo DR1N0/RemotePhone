@@ -1,4 +1,4 @@
-package com.mako.client
+package com.remotephone.client
 
 import android.content.Context
 import android.net.nsd.NsdManager
@@ -56,7 +56,7 @@ class MdnsDiscovery(context: Context) : EventChannel.StreamHandler {
             }
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                if (!serviceInfo.serviceType.contains("_mako._tcp")) return
+                if (!serviceInfo.serviceType.contains("_remotephone._tcp")) return
                 resolve(serviceInfo)
             }
 
@@ -66,7 +66,7 @@ class MdnsDiscovery(context: Context) : EventChannel.StreamHandler {
         }
         discoveryListener = listener
         try {
-            manager.discoverServices("_mako._tcp", NsdManager.PROTOCOL_DNS_SD, listener)
+            manager.discoverServices("_remotephone._tcp", NsdManager.PROTOCOL_DNS_SD, listener)
             running = true
         } catch (e: Exception) {
             discoveryListener = null

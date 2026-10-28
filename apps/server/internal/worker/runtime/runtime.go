@@ -37,7 +37,7 @@ type StartRequest struct {
 
 // InstanceHandle is what's persisted in instances.runtime_handle_json.
 // PID/ConsolePort/AdbPort/GRPCPort describe the emulator process this
-// worker launched; WorkerPID/WorkerBaseURL describe the mako-worker OS
+// worker launched; WorkerPID/WorkerBaseURL describe the remotephone-worker OS
 // process itself (control-plane-spawned, one per running instance — see
 // docs/plans/worker-lifecycle.md). The two are independent: a worker
 // process can crash and be respawned (new WorkerPID/WorkerBaseURL) while

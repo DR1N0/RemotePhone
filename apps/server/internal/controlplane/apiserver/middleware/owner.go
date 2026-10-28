@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"mako/internal/controlplane/auth"
+	"remotephone/internal/controlplane/auth"
 )
 
 // RequireOwner protects the loopback admin surface. A request without a

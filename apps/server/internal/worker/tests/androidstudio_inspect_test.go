@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"mako/internal/worker/runtime"
-	"mako/internal/worker/runtime/androidstudio"
+	"remotephone/internal/worker/runtime"
+	"remotephone/internal/worker/runtime/androidstudio"
 )
 
 func TestAndroidStudioInspectHandleRejectsForeignRuntimeOwnership(t *testing.T) {

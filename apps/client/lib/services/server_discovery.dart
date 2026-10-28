@@ -24,7 +24,7 @@ class DiscoveredServer {
 }
 
 class ServerDiscovery {
-  static const _events = EventChannel('mako/discovery/events');
+  static const _events = EventChannel('remotephone/discovery/events');
 
   final _controller = StreamController<DiscoveredServer>.broadcast();
   final _lostController = StreamController<String>.broadcast();

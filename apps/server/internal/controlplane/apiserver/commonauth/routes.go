@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"mako/internal/controlplane/apiserver/middleware"
-	"mako/internal/controlplane/auth"
+	"remotephone/internal/controlplane/apiserver/middleware"
+	"remotephone/internal/controlplane/auth"
 )
 
 // usernamePattern mirrors auth.Service's own (unexported) normalized-username

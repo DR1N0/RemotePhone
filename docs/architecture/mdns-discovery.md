@@ -8,7 +8,7 @@ model.
 
 ## Service definition
 
-- Service type: `_mako._tcp.local`
+- Service type: `_remotephone._tcp.local`
 - One service per control plane, advertised on each **LAN** interface; not on
   Tailscale, Hyper-V, or other virtual interfaces.
 - Instance name: `<display name> (<serverId first 8 chars>)` — the server ID
@@ -25,15 +25,15 @@ model.
 
 The server ID and name come from `GET /api/v1/server/info`, which is
 unauthenticated and already implemented. The ID is persisted next to the
-database (`MAKO_SERVER_ID_PATH`, default `<db>.server-id`) and survives
-restarts; `MAKO_SERVER_NAME` is the configurable display name.
+database (`REMOTEPHONE_SERVER_ID_PATH`, default `<db>.server-id`) and survives
+restarts; `REMOTEPHONE_SERVER_NAME` is the configurable display name.
 
 ## Client discovery
 
 Implemented with Android's `NsdManager` (a small Kotlin EventChannel, no
 third-party mDNS dependency). The flow:
 
-1. While the server picker is visible, browse `_mako._tcp`.
+1. While the server picker is visible, browse `_remotephone._tcp`.
 2. Resolve each result to SRV/TXT/A (or AAAA) and read `id`, `name`, `v`.
 3. Deduplicate by `id`, never by name or address.
 4. For an already-paired server, verify the advertised ID with
@@ -68,7 +68,7 @@ mDNS is unauthenticated and spoofable. It is only an address hint:
 `github.com/grandcat/zeroconf` on private IPv4 LAN interfaces only
 (Tailscale/link-local/loopback excluded). It publishes while the client API
 listener is up and sends goodbye records on graceful shutdown. The advertiser
-is disabled with `MAKO_DISABLE_MDNS=1`. A name/address change currently takes
+is disabled with `REMOTEPHONE_DISABLE_MDNS=1`. A name/address change currently takes
 effect on the next control-plane start; runtime re-announcement is future
 work.
 

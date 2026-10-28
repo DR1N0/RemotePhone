@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/persistence"
-	"mako/internal/controlplane/persistence/repo"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/persistence"
+	"remotephone/internal/controlplane/persistence/repo"
 
 	_ "modernc.org/sqlite"
 )
@@ -79,7 +79,7 @@ func newTestService(t *testing.T, worker *fakeWorker) (*Service, *sql.DB) {
 		t.Fatalf("ApplyMigrations: %v", err)
 	}
 	if worker == nil {
-		worker = &fakeWorker{artifactPath: "/mako/base-images/default"}
+		worker = &fakeWorker{artifactPath: "/remotephone/base-images/default"}
 	}
 	selector := &fakePlacementSelector{worker: worker}
 	t.Cleanup(func() {
@@ -129,20 +129,20 @@ func testActor(userID string) audit.Context {
 }
 
 func TestCaptureCandidateImageSuccess(t *testing.T) {
-	worker := &fakeWorker{artifactPath: "/mako/base-images/img-1"}
+	worker := &fakeWorker{artifactPath: "/remotephone/base-images/img-1"}
 	svc, db := newTestService(t, worker)
 	createTestUser(t, db, "owner-1", "registered", "active")
-	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/mako/instance-data/inst-1.avd"))
+	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/remotephone/instance-data/inst-1.avd"))
 
 	got, err := svc.CaptureCandidateImage(context.Background(), "inst-1", "owner-1", testActor("owner-1"))
 	if err != nil {
 		t.Fatalf("CaptureCandidateImage: %v", err)
 	}
-	if got.TemplateID != "tmpl-A" || got.SourceInstanceID != "inst-1" || got.ArtifactPath != "/mako/base-images/img-1" {
-		t.Errorf("CaptureCandidateImage() = %+v, want templateId=tmpl-A sourceInstanceId=inst-1 artifactPath=/mako/base-images/img-1", got)
+	if got.TemplateID != "tmpl-A" || got.SourceInstanceID != "inst-1" || got.ArtifactPath != "/remotephone/base-images/img-1" {
+		t.Errorf("CaptureCandidateImage() = %+v, want templateId=tmpl-A sourceInstanceId=inst-1 artifactPath=/remotephone/base-images/img-1", got)
 	}
-	if len(worker.capturedRequests) != 1 || worker.capturedRequests[0].SourceDataDir != "/mako/instance-data/inst-1.avd" {
-		t.Errorf("worker.capturedRequests = %+v, want one call with sourceDataDir=/mako/instance-data/inst-1.avd", worker.capturedRequests)
+	if len(worker.capturedRequests) != 1 || worker.capturedRequests[0].SourceDataDir != "/remotephone/instance-data/inst-1.avd" {
+		t.Errorf("worker.capturedRequests = %+v, want one call with sourceDataDir=/remotephone/instance-data/inst-1.avd", worker.capturedRequests)
 	}
 
 	// A templates row must have been lazily created.
@@ -159,7 +159,7 @@ func TestCaptureCandidateImageSuccess(t *testing.T) {
 func TestCaptureCandidateImageRejectsRunningInstance(t *testing.T) {
 	svc, db := newTestService(t, nil)
 	createTestUser(t, db, "owner-1", "registered", "active")
-	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/mako/instance-data/inst-1.avd"))
+	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/remotephone/instance-data/inst-1.avd"))
 	if _, err := db.Exec(`UPDATE instances SET desired_state = 'running' WHERE id = ?`, "inst-1"); err != nil {
 		t.Fatalf("set running: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestCaptureCandidateImageRejectsNonOwner(t *testing.T) {
 	svc, db := newTestService(t, nil)
 	createTestUser(t, db, "owner-1", "registered", "active")
 	createTestUser(t, db, "other-user", "registered", "active")
-	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/mako/instance-data/inst-1.avd"))
+	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/remotephone/instance-data/inst-1.avd"))
 
 	_, err := svc.CaptureCandidateImage(context.Background(), "inst-1", "other-user", testActor("other-user"))
 	if !errors.Is(err, ErrForbidden) {
@@ -194,10 +194,10 @@ func TestCaptureCandidateImageRejectsNonOwner(t *testing.T) {
 }
 
 func TestPromoteBaseImageUpdatesTemplateCurrentPointer(t *testing.T) {
-	svc, db := newTestService(t, &fakeWorker{artifactPath: "/mako/base-images/img-1"})
+	svc, db := newTestService(t, &fakeWorker{artifactPath: "/remotephone/base-images/img-1"})
 	createTestUser(t, db, "owner-1", "registered", "active")
 	createTestUser(t, db, "admin-1", "admin", "active")
-	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/mako/instance-data/inst-1.avd"))
+	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/remotephone/instance-data/inst-1.avd"))
 	captured, err := svc.CaptureCandidateImage(context.Background(), "inst-1", "owner-1", testActor("owner-1"))
 	if err != nil {
 		t.Fatalf("CaptureCandidateImage: %v", err)
@@ -212,15 +212,15 @@ func TestPromoteBaseImageUpdatesTemplateCurrentPointer(t *testing.T) {
 	}
 
 	path, ok, err := svc.ResolveCurrentBaseImage(context.Background(), "tmpl-A")
-	if err != nil || !ok || path != "/mako/base-images/img-1" {
-		t.Errorf("ResolveCurrentBaseImage() = (%q, %v, %v), want (/mako/base-images/img-1, true, nil)", path, ok, err)
+	if err != nil || !ok || path != "/remotephone/base-images/img-1" {
+		t.Errorf("ResolveCurrentBaseImage() = (%q, %v, %v), want (/remotephone/base-images/img-1, true, nil)", path, ok, err)
 	}
 }
 
 func TestPromoteBaseImageAllowsSystemOwner(t *testing.T) {
-	svc, db := newTestService(t, &fakeWorker{artifactPath: "/mako/base-images/img-1"})
+	svc, db := newTestService(t, &fakeWorker{artifactPath: "/remotephone/base-images/img-1"})
 	createTestUser(t, db, "owner-1", "registered", "active")
-	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/mako/instance-data/inst-1.avd"))
+	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/remotephone/instance-data/inst-1.avd"))
 	captured, err := svc.CaptureCandidateImage(context.Background(), "inst-1", "owner-1", testActor("owner-1"))
 	if err != nil {
 		t.Fatalf("CaptureCandidateImage: %v", err)
@@ -238,7 +238,7 @@ func TestPromoteBaseImageAllowsSystemOwner(t *testing.T) {
 func TestPromoteBaseImageRejectsNonAdmin(t *testing.T) {
 	svc, db := newTestService(t, nil)
 	createTestUser(t, db, "owner-1", "registered", "active")
-	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/mako/instance-data/inst-1.avd"))
+	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/remotephone/instance-data/inst-1.avd"))
 	captured, err := svc.CaptureCandidateImage(context.Background(), "inst-1", "owner-1", testActor("owner-1"))
 	if err != nil {
 		t.Fatalf("CaptureCandidateImage: %v", err)
@@ -251,10 +251,10 @@ func TestPromoteBaseImageRejectsNonAdmin(t *testing.T) {
 }
 
 func TestPromoteBaseImageRollbackIsJustPromotingAnOlderCandidate(t *testing.T) {
-	svc, db := newTestService(t, &fakeWorker{artifactPath: "/mako/base-images/img-1"})
+	svc, db := newTestService(t, &fakeWorker{artifactPath: "/remotephone/base-images/img-1"})
 	createTestUser(t, db, "owner-1", "registered", "active")
 	createTestUser(t, db, "admin-1", "admin", "active")
-	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/mako/instance-data/inst-1.avd"))
+	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/remotephone/instance-data/inst-1.avd"))
 
 	old, err := svc.CaptureCandidateImage(context.Background(), "inst-1", "owner-1", testActor("owner-1"))
 	if err != nil {
@@ -295,9 +295,9 @@ func TestResolveCurrentBaseImageNotOKWhenNeverCaptured(t *testing.T) {
 }
 
 func TestResolveCurrentBaseImageNotOKWhenCapturedButNotPromoted(t *testing.T) {
-	svc, db := newTestService(t, &fakeWorker{artifactPath: "/mako/base-images/img-1"})
+	svc, db := newTestService(t, &fakeWorker{artifactPath: "/remotephone/base-images/img-1"})
 	createTestUser(t, db, "owner-1", "registered", "active")
-	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/mako/instance-data/inst-1.avd"))
+	createTestInstance(t, db, "inst-1", "owner-1", "tmpl-A", "android-studio-emulator", strPtr("/remotephone/instance-data/inst-1.avd"))
 	if _, err := svc.CaptureCandidateImage(context.Background(), "inst-1", "owner-1", testActor("owner-1")); err != nil {
 		t.Fatalf("CaptureCandidateImage: %v", err)
 	}

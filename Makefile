@@ -11,7 +11,7 @@ BUILD_DIR=.bin
 
 .PHONY: help
 help: ## Display this help message
-	@echo "$(BLUE)Welcome to MAKO$(NC)"
+	@echo "$(BLUE)Welcome to RemotePhone$(NC)"
 	@echo ""
 	@echo "$(GREEN)Usage:$(NC)"
 	@echo "  make <target>"
@@ -37,27 +37,27 @@ vendor: ## Update and tidy dependencies
 .PHONY: run-controlplane
 run-controlplane: ## Run the Go control plane (it spawns per-instance workers)
 	@echo "Running control plane..."
-	@cd apps/server && go run ./cmd/mako-controlplane
+	@cd apps/server && go run ./cmd/remotephone-controlplane
 
 .PHONY: build-controlplane
 build-controlplane: ## Build the Go control plane
 	@echo "Building control plane..."
 	@mkdir -p $(BUILD_DIR)
-	@cd apps/server && go build -o ../../$(BUILD_DIR)/mako-controlplane ./cmd/mako-controlplane
+	@cd apps/server && go build -o ../../$(BUILD_DIR)/remotephone-controlplane ./cmd/remotephone-controlplane
 
 .PHONY: build-worker
 build-worker: ## Build the worker application
 	@echo "Building worker..."
 	@mkdir -p $(BUILD_DIR)
-	@cd apps/server && go build -o ../../$(BUILD_DIR)/mako-worker ./cmd/mako-worker
+	@cd apps/server && go build -o ../../$(BUILD_DIR)/remotephone-worker ./cmd/remotephone-worker
 
 .PHONY: run-worker
 run-worker: ## Run the worker application
-	@if [ ! -f $(BUILD_DIR)/mako-worker ]; then \
+	@if [ ! -f $(BUILD_DIR)/remotephone-worker ]; then \
 		$(MAKE) build-worker; \
 	fi
 	@echo "Running worker..."
-	@cd $(BUILD_DIR) && ./mako-worker
+	@cd $(BUILD_DIR) && ./remotephone-worker
 
 .PHONY: run
 run: run-controlplane ## Run the control plane (workers spawn per instance)
@@ -72,7 +72,7 @@ build-admin: ## Build the embedded owner console
 	@cd apps/server/adminui && npm run build
 
 .PHONY: run-admin
-run-admin: ## Run the owner console Vite dev server (proxy to :3001 or MAKO_ADMIN_PORT)
+run-admin: ## Run the owner console Vite dev server (proxy to :3001 or REMOTEPHONE_ADMIN_PORT)
 	@cd apps/server/adminui && npm run dev
 
 .PHONY: build

@@ -1,6 +1,6 @@
 package store
 
-import "mako/internal/worker/runtime"
+import "remotephone/internal/worker/runtime"
 
 type RuntimeHandles = runtime.MemoryHandleStore
 

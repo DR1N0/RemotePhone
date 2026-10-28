@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	workerapi "mako/internal/worker/api"
-	"mako/internal/worker/runtime"
+	workerapi "remotephone/internal/worker/api"
+	"remotephone/internal/worker/runtime"
 )
 
 func TestHTTPWorkerClientListTemplates(t *testing.T) {

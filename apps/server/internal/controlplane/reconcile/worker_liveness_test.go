@@ -8,13 +8,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/instance"
-	"mako/internal/controlplane/persistence"
-	"mako/internal/controlplane/placement"
-	"mako/internal/controlplane/workerproc"
-	workerapi "mako/internal/worker/api"
-	"mako/internal/worker/runtime"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/instance"
+	"remotephone/internal/controlplane/persistence"
+	"remotephone/internal/controlplane/placement"
+	"remotephone/internal/controlplane/workerproc"
+	workerapi "remotephone/internal/worker/api"
+	"remotephone/internal/worker/runtime"
 
 	_ "modernc.org/sqlite"
 )
@@ -69,7 +69,7 @@ func newTestWorkerLivenessSetup(t *testing.T) (*WorkerLivenessProbe, *instance.S
 
 	worker := &fakeWorker{}
 	execer := &workerproc.FakeExecer{Handler: worker.handler}
-	placementSelector := placement.NewSelector(execer, "fake-mako-worker")
+	placementSelector := placement.NewSelector(execer, "fake-remotephone-worker")
 	instanceSvc := instance.NewService(db, placementSelector)
 	probe := NewWorkerLivenessProbe(instanceSvc, placementSelector)
 	return probe, instanceSvc, worker, execer, db

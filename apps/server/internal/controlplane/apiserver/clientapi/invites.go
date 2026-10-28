@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"strings"
 
-	"mako/internal/controlplane/apiserver/middleware"
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/session"
+	"remotephone/internal/controlplane/apiserver/middleware"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/session"
 
 	"github.com/google/uuid"
 )

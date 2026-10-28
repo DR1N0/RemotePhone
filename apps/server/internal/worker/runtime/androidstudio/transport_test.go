@@ -4,9 +4,9 @@ import (
 	"reflect"
 	"testing"
 
-	"mako/internal/worker/config"
-	"mako/internal/worker/runtime"
-	"mako/internal/worker/transport"
+	"remotephone/internal/worker/config"
+	"remotephone/internal/worker/runtime"
+	"remotephone/internal/worker/transport"
 )
 
 func TestCreateTransportSessionUsesEmulatorConsoleSerial(t *testing.T) {

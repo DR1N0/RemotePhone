@@ -1,4 +1,4 @@
-// Package instance ports mako's pre-Go TypeScript InstanceService to Go:
+// Package instance ports remotephone's pre-Go TypeScript InstanceService to Go:
 // ownership-
 // checked instance CRUD and start/stop/delete lifecycle against one
 // configured worker. Unlike the original TS port, a user may own more than
@@ -15,11 +15,11 @@ import (
 	"errors"
 	"fmt"
 
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/persistence/repo"
-	"mako/internal/controlplane/placement"
-	workerapi "mako/internal/worker/api"
-	"mako/internal/worker/runtime"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/persistence/repo"
+	"remotephone/internal/controlplane/placement"
+	workerapi "remotephone/internal/worker/api"
+	"remotephone/internal/worker/runtime"
 
 	"github.com/google/uuid"
 )

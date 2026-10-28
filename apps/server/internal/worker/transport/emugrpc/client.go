@@ -1,6 +1,6 @@
-// Package emugrpc is mako's client for the Android Emulator's own gRPC
+// Package emugrpc is remotephone's client for the Android Emulator's own gRPC
 // EmulatorController service — specifically the streamScreenshot RPC, which
-// is mako's video-capture frame source (replacing `adb exec-out
+// is remotephone's video-capture frame source (replacing `adb exec-out
 // screenrecord`, which measured ~1.9 fps under active interaction — see
 // docs/plans' "gRPC + hardware-encoded video capture" for the full
 // rationale). The vendored, hand-trimmed service definition lives in
@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	emupb "mako/internal/worker/transport/emugrpc/proto"
+	emupb "remotephone/internal/worker/transport/emugrpc/proto"
 )
 
 // Frame is one raw RGBA8888 video frame.

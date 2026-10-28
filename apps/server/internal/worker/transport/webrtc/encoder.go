@@ -102,7 +102,7 @@ const probeTimeout = 2 * time.Second
 // — probing is real subprocess work, not free, and candidate availability
 // doesn't change between connections on the same host.
 func SelectEncoder(ctx context.Context, ffmpegPath string, width, height int) (string, error) {
-	if override := os.Getenv("MAKO_H264_ENCODER"); override != "" {
+	if override := os.Getenv("REMOTEPHONE_H264_ENCODER"); override != "" {
 		return override, nil
 	}
 	return SelectEncoderFrom(ctx, ffmpegPath, defaultEncoderCandidates(runtime.GOOS), RealEncoderProber{}, width, height)

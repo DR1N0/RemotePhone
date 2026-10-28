@@ -10,7 +10,7 @@ import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 
 const _defaultBaseUrl = String.fromEnvironment(
-  'MAKO_DEFAULT_SERVER',
+  'REMOTEPHONE_DEFAULT_SERVER',
   defaultValue: 'https://10.0.2.2:3000',
 );
 

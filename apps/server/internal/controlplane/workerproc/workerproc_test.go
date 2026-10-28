@@ -16,7 +16,7 @@ func TestSpawnAndWaitHealthySucceedsAgainstFakeWorker(t *testing.T) {
 		t.Fatalf("AllocateLocalPort: %v", err)
 	}
 
-	proc, baseURL, err := Spawn(context.Background(), execer, "fake-mako-worker", "instance-1", port, nil)
+	proc, baseURL, err := Spawn(context.Background(), execer, "fake-remotephone-worker", "instance-1", port, nil)
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -28,8 +28,8 @@ func TestSpawnAndWaitHealthySucceedsAgainstFakeWorker(t *testing.T) {
 	if len(execer.Starts) != 1 {
 		t.Fatalf("Starts = %d, want 1", len(execer.Starts))
 	}
-	if envValue(execer.Starts[0].Env, "MAKO_WORKER_ID") != "instance-1" {
-		t.Errorf("MAKO_WORKER_ID = %q, want instance-1", envValue(execer.Starts[0].Env, "MAKO_WORKER_ID"))
+	if envValue(execer.Starts[0].Env, "REMOTEPHONE_WORKER_ID") != "instance-1" {
+		t.Errorf("REMOTEPHONE_WORKER_ID = %q, want instance-1", envValue(execer.Starts[0].Env, "REMOTEPHONE_WORKER_ID"))
 	}
 }
 
@@ -39,7 +39,7 @@ func TestWaitHealthyFailsAfterKill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AllocateLocalPort: %v", err)
 	}
-	proc, baseURL, err := Spawn(context.Background(), execer, "fake-mako-worker", "instance-1", port, nil)
+	proc, baseURL, err := Spawn(context.Background(), execer, "fake-remotephone-worker", "instance-1", port, nil)
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestWaitHealthyFailsWhenHandlerReturnsNon200(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AllocateLocalPort: %v", err)
 	}
-	proc, baseURL, err := Spawn(context.Background(), execer, "fake-mako-worker", "instance-1", port, nil)
+	proc, baseURL, err := Spawn(context.Background(), execer, "fake-remotephone-worker", "instance-1", port, nil)
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}

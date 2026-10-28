@@ -12,11 +12,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"mako/internal/controlplane/admin"
-	"mako/internal/controlplane/apiserver/middleware"
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/transport"
+	"remotephone/internal/controlplane/admin"
+	"remotephone/internal/controlplane/apiserver/middleware"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/transport"
 
 	"github.com/google/uuid"
 )

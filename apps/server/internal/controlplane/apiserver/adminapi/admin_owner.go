@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"mako/internal/controlplane/apiserver/middleware"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/pairing"
-	"mako/internal/controlplane/serverinfo"
+	"remotephone/internal/controlplane/apiserver/middleware"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/pairing"
+	"remotephone/internal/controlplane/serverinfo"
 )
 
 type ownerAccessCodeRequest struct {

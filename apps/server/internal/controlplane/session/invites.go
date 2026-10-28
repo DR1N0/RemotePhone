@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/persistence/repo"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/persistence/repo"
 
 	"github.com/google/uuid"
 )

@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"net/http"
 
-	"mako/internal/controlplane/apiserver/middleware"
-	"mako/internal/controlplane/audit"
-	"mako/internal/controlplane/auth"
-	"mako/internal/controlplane/instance"
-	"mako/internal/controlplane/session"
-	"mako/internal/controlplane/transport"
+	"remotephone/internal/controlplane/apiserver/middleware"
+	"remotephone/internal/controlplane/audit"
+	"remotephone/internal/controlplane/auth"
+	"remotephone/internal/controlplane/instance"
+	"remotephone/internal/controlplane/session"
+	"remotephone/internal/controlplane/transport"
 
 	"github.com/google/uuid"
 )

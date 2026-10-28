@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	emupb "mako/internal/worker/transport/emugrpc/proto"
+	emupb "remotephone/internal/worker/transport/emugrpc/proto"
 )
 
 // TouchPoint is one contact in a TouchEvent, in physical display pixels.

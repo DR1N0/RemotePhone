@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"mako/internal/controlplane/apiserver/middleware"
+	"remotephone/internal/controlplane/apiserver/middleware"
 )
 
 // Info is the small, unauthenticated identity document used by client
@@ -26,7 +26,7 @@ type Info struct {
 
 // LoadOrCreate loads the server ID from idPath, generating and persisting a
 // UUID on first run. name is trimmed; an empty name falls back to the host's
-// hostname (and finally to "mako").
+// hostname (and finally to "remotephone").
 func LoadOrCreate(idPath, name string) (*Info, error) {
 	if strings.TrimSpace(idPath) == "" {
 		return nil, fmt.Errorf("server ID path must not be empty")
@@ -55,7 +55,7 @@ func LoadOrCreate(idPath, name string) (*Info, error) {
 		name, _ = os.Hostname()
 	}
 	if strings.TrimSpace(name) == "" {
-		name = "mako"
+		name = "remotephone"
 	}
 	return &Info{
 		ServerID: serverID,

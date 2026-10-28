@@ -8,14 +8,14 @@ function parseAdminPort(value: string | undefined): number {
 
   const port = Number(value)
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new Error(`Invalid MAKO_ADMIN_PORT: ${value}`)
+    throw new Error(`Invalid REMOTEPHONE_ADMIN_PORT: ${value}`)
   }
 
   return port
 }
 
 export function createAdminViteConfig(env: Record<string, string | undefined>) {
-  const adminPort = parseAdminPort(env.MAKO_ADMIN_PORT)
+  const adminPort = parseAdminPort(env.REMOTEPHONE_ADMIN_PORT)
 
   return {
     plugins: [react()],
