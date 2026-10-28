@@ -8,10 +8,10 @@ import '../services/auth_service.dart';
 import '../services/webrtc_session.dart';
 
 /// Full-screen remote display. The guest Android device uses three-button
-/// navigation (configured by the worker when a session starts), so Back/Home/
-/// Recents are part of the remote video and need no client-side chrome.
-/// The phone's own Back gesture leaves the stream (and disconnects); there is
-/// no floating overlay to obscure the guest's navigation bar.
+/// navigation (configured by the worker when a session starts), but games can
+/// request immersive fullscreen and hide that nav bar. A small top-left exit
+/// affordance therefore stays available on the phone; the phone's own Back
+/// gesture also leaves the stream.
 class StreamScreen extends StatefulWidget {
   final ManagedInstance instance;
 
@@ -165,18 +165,41 @@ class _StreamScreenState extends State<StreamScreen> {
     }
     // RTCVideoViewObjectFitContain preserves the video's own aspect ratio
     // (letterboxing as needed); the emulator's resolution varies per template.
-    return Listener(
-      onPointerDown: (e) => _handlePointer(e, 'down'),
-      onPointerMove: (e) => _handlePointer(e, 'move'),
-      onPointerUp: (e) => _handlePointer(e, 'up'),
-      onPointerCancel: (e) => _handlePointer(e, 'up'),
-      child: SizedBox.expand(
-        key: _videoKey,
-        child: RTCVideoView(
-          _session.remoteRenderer,
-          objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Listener(
+            onPointerDown: (e) => _handlePointer(e, 'down'),
+            onPointerMove: (e) => _handlePointer(e, 'move'),
+            onPointerUp: (e) => _handlePointer(e, 'up'),
+            onPointerCancel: (e) => _handlePointer(e, 'up'),
+            child: SizedBox.expand(
+              key: _videoKey,
+              child: RTCVideoView(
+                _session.remoteRenderer,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+              ),
+            ),
+          ),
         ),
-      ),
+        Positioned(
+          top: 8,
+          left: 8,
+          child: SafeArea(
+            child: IconButton(
+              tooltip: 'Exit stream',
+              onPressed: _leave,
+              icon: const Icon(Icons.arrow_back, size: 20),
+              style: IconButton.styleFrom(
+                foregroundColor: Colors.white,
+                backgroundColor: Colors.black54,
+                minimumSize: const Size(40, 40),
+                padding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

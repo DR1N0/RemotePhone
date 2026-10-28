@@ -18,7 +18,14 @@ class WebrtcSession extends ChangeNotifier {
   final ApiClient api;
   final String instanceId;
 
-  final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
+  // Keep one renderer for the app's lifetime. Recreating/disposing the
+  // renderer for every reconnect intermittently produced a decoded-but-black
+  // texture on Android; the third fresh renderer would work again. A shared
+  // texture is reused and only its srcObject changes.
+  static final RTCVideoRenderer _sharedRenderer = RTCVideoRenderer();
+  static bool _sharedRendererInitialized = false;
+  RTCVideoRenderer get remoteRenderer => _sharedRenderer;
+
   SessionConnectionState state = SessionConnectionState.idle;
   String? errorMessage;
 
@@ -28,7 +35,6 @@ class WebrtcSession extends ChangeNotifier {
   String? _attachmentId;
   String? _attachmentToken;
   Timer? _statsTimer;
-  bool _rendererInitialized = false;
 
   WebrtcSession({required this.api, required this.instanceId});
 
@@ -98,11 +104,11 @@ class WebrtcSession extends ChangeNotifier {
       // connection and data channel first, otherwise the old PC's callbacks
       // and the new PC race over state and the renderer.
       await _closePeerConnection();
-      if (!_rendererInitialized) {
-        await remoteRenderer.initialize();
-        _rendererInitialized = true;
+      if (!_sharedRendererInitialized) {
+        await _sharedRenderer.initialize();
+        _sharedRendererInitialized = true;
       }
-      remoteRenderer.srcObject = null;
+      _sharedRenderer.srcObject = null;
       debugPrint('[webrtc] renderer initialized');
 
       final (sessionId, attachmentId, attachmentToken) = await _openSession();
@@ -323,10 +329,7 @@ class WebrtcSession extends ChangeNotifier {
       }
     }
     await _closePeerConnection();
-    if (_rendererInitialized) {
-      await remoteRenderer.dispose();
-      _rendererInitialized = false;
-    }
+    _sharedRenderer.srcObject = null;
     state = SessionConnectionState.disconnected;
     notifyListeners();
     debugPrint('[webrtc] disconnect() done');

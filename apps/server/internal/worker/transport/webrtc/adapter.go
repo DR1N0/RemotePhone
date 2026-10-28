@@ -21,7 +21,7 @@ import (
 	"mako/internal/worker/transport/emugrpc"
 )
 
-// captureFPS/captureBitRate tune the encoder for latency over quality — see
+// captureFPS/captureBitRate tune the encoder for latency over quality  - see
 // buildFFmpegArgs's doc comment for the per-codec flags this drives.
 const (
 	captureFPS     = 30
@@ -33,9 +33,10 @@ type Adapter struct {
 	instanceID   string
 	attachmentID string
 	role         string
-	adbSerial    string // still used for input injection (input.go) — unrelated to video capture
+	adbSerial    string // still used for input injection (input.go)  - unrelated to video capture
 	screenW      int
 	screenH      int
+	rotation     int
 	stunURL      string
 	grpcAddr     string // the emulator's own gRPC server, e.g. "127.0.0.1:8554"
 	ffmpegPath   string
@@ -94,7 +95,7 @@ func (a *Adapter) SetAudioDebug(enabled bool) {
 
 // SetHostIP is an optional debugging override: when set, ICE host candidates
 // are restricted to this one address instead of the normal "all routable
-// IPv4 interfaces" policy. It is not required for LAN or Tailscale — both
+// IPv4 interfaces" policy. It is not required for LAN or Tailscale  - both
 // work by default because every routable IPv4 address is advertised.
 func (a *Adapter) SetHostIP(ip string) {
 	a.hostIP = ip
@@ -102,7 +103,7 @@ func (a *Adapter) SetHostIP(ip string) {
 
 // halveForCapture halves n and rounds down to an even number (ffmpeg's
 // rawvideo input needs even dimensions for common pixel formats), or
-// returns n unchanged if halving would produce 0 — input events still map
+// returns n unchanged if halving would produce 0  - input events still map
 // against a.screenW/H, the device's real resolution (see input.go), so
 // downscaling the video stream doesn't affect touch accuracy.
 func halveForCapture(n int) int {
@@ -115,8 +116,9 @@ func halveForCapture(n int) int {
 
 // NewAdapter creates a WebRTCAdapter. screenW/H are the emulator display
 // pixels (used for input coordinate mapping); grpcAddr is the emulator's own
-// gRPC server address (already running — see runtime/androidstudio/launch.go
-// — used as the video capture frame source); ffmpegPath is resolved via
+// gRPC server address (already running  - see runtime/androidstudio/launch.go
+//   - used as the video capture frame source); ffmpegPath is resolved via
+//
 // ResolveFFmpegBinary by the caller.
 func NewAdapter(instanceID, attachmentID, role, adbSerial string, screenW, screenH int, stunURL, grpcAddr, ffmpegPath string) *Adapter {
 	return &Adapter{
@@ -242,7 +244,7 @@ func (a *Adapter) startAudioCapture(track *webrtc.TrackLocalStaticSample) (conte
 // gRPC streamScreenshot (emugrpc.FrameSource) -> Pacer (bridges the
 // event-driven frame source into ffmpeg's fixed-rate rawvideo input) ->
 // ffmpeg hardware H264 encoder -> pipeH264 (unchanged NAL parsing into
-// videoTrack). Returns a descriptive error on any failure — there is no
+// videoTrack). Returns a descriptive error on any failure  - there is no
 // fallback to a degraded capture path; see HandleOffer's call site comment.
 func (a *Adapter) startVideoCapture(pc *webrtc.PeerConnection, videoTrack *webrtc.TrackLocalStaticSample) (*captureSession, error) {
 	captureW, captureH := halveForCapture(a.screenW), halveForCapture(a.screenH)
@@ -257,22 +259,14 @@ func (a *Adapter) startVideoCapture(pc *webrtc.PeerConnection, videoTrack *webrt
 		return nil, fmt.Errorf("video capture unavailable: emulator gRPC unreachable at %s: %w", a.grpcAddr, err)
 	}
 
-	// The emulator's screenshot scaler preserves the display's aspect ratio,
-	// so a landscape game can return a differently-shaped frame than the
-	// portrait size requested at session creation. Wait for the first frame
-	// and size the encoder (and touch mapping) from the actual frame instead
-	// of dropping every frame forever.
-	var first emugrpc.Frame
-	select {
-	case f, ok := <-frames:
-		if !ok {
-			cancel()
-			return nil, fmt.Errorf("video capture unavailable: emulator closed the screenshot stream")
-		}
-		first = f
-	case <-time.After(5 * time.Second):
+	// The emulator's screenshot stream can still have a stale frame buffered
+	// from before a reconnect (or from the pre-rotation display). Let the
+	// latest-wins channel settle briefly and encode the newest frame, not
+	// whatever happened to be first.
+	first, err := awaitSettledFrame(frames, 5*time.Second, 300*time.Millisecond)
+	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("video capture unavailable: no screenshot frame from emulator within 5s")
+		return nil, err
 	}
 	captureW, captureH = first.Width, first.Height
 	if captureW <= 0 || captureH <= 0 {
@@ -305,6 +299,7 @@ func (a *Adapter) startVideoCapture(pc *webrtc.PeerConnection, videoTrack *webrt
 	} else if rotation == 180 {
 		rotate = 180
 	}
+	a.rotation = rotation
 	a.screenW, a.screenH = screenW, screenH
 	log.Printf("capture: actual frame %dx%d, rotate=%d, encode %dx%d, input display %dx%d for instance=%s",
 		captureW, captureH, rotate, encodeW, encodeH, screenW, screenH, a.instanceID)
@@ -377,7 +372,7 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 
 	se := webrtc.SettingEngine{}
 	// IPv4/UDP only for now. By default advertise every routable IPv4
-	// interface (LAN, Tailscale, other VPNs) and let ICE choose — that is
+	// interface (LAN, Tailscale, other VPNs) and let ICE choose  - that is
 	// what ICE is for. MAKO_WEBRTC_HOST_IP is only a debugging override for
 	// a specific interface.
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
@@ -479,32 +474,61 @@ func (a *Adapter) HandleOffer(instanceID, attachmentID, sdpOffer string) (string
 		return "", fmt.Errorf("set local description: %w", err)
 	}
 
-	// Start gRPC+ffmpeg video capture (see startVideoCapture's doc comment).
-	// Deliberately no fallback to the retired adb-screenrecord path on
-	// failure here — its measured ~1.9 fps is unacceptable for the product,
-	// and silently degrading to it would hide a real operational problem
-	// (gRPC unreachable, ffmpeg missing) behind a connection that appears to
-	// succeed. The caller (clientapi/signaling.go -> transport.Service) and
-	// the Flutter client's existing "Connection failed" + Retry UI already
-	// handle this error path correctly.
-	capture, err := a.startVideoCapture(pc, videoTrack)
-	if err != nil {
-		_ = pc.Close()
-		log.Printf("capture: start failed for instance=%s: %v", a.instanceID, err)
-		return "", err
-	}
-	capture.audioCancel, capture.audioDone = a.startAudioCapture(audioTrack)
-
+	// Start gRPC+ffmpeg video capture only after ICE/DTLS is connected. The
+	// encoder's opening SPS/PPS + IDR is unrecoverable if it is emitted into
+	// the track before the peer connection is ready; that produced a
+	// reproducible "first connect is black, reconnect works" failure.
+	// HandleOffer must return the answer first so the client can connect, so
+	// this runs asynchronously and logs/tears down on failure.
 	a.mu.Lock()
 	a.pc = pc
-	a.capture = capture
 	a.mu.Unlock()
+	go a.startCaptureWhenConnected(pc, videoTrack, audioTrack)
 
 	if err := waitForGathering(webrtc.GatheringCompletePromise(pc), 10*time.Second); err != nil {
 		a.stopPeerConnection(pc)
 		return "", err
 	}
 	return pc.LocalDescription().SDP, nil
+}
+
+// startCaptureWhenConnected waits for the peer connection to become usable,
+// then starts the video and audio pipelines. The delay is deliberate: gRPC
+// capture + H264 encoding start emitting an IDR immediately, and samples
+// written before ICE/DTLS completes are lost  - a late joiner then sees
+// decoded-but-black frames until a later keyframe happens to recover.
+func (a *Adapter) startCaptureWhenConnected(pc *webrtc.PeerConnection, videoTrack *webrtc.TrackLocalStaticSample, audioTrack *webrtc.TrackLocalStaticSample) {
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		state := pc.ConnectionState()
+		if state == webrtc.PeerConnectionStateConnected {
+			break
+		}
+		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateDisconnected {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if state := pc.ConnectionState(); state != webrtc.PeerConnectionStateConnected {
+		return
+	}
+
+	capture, err := a.startVideoCapture(pc, videoTrack)
+	if err != nil {
+		log.Printf("capture: start failed for instance=%s: %v", a.instanceID, err)
+		a.stopPeerConnection(pc)
+		return
+	}
+	capture.audioCancel, capture.audioDone = a.startAudioCapture(audioTrack)
+
+	a.mu.Lock()
+	if a.pc != pc {
+		a.mu.Unlock()
+		capture.Stop()
+		return
+	}
+	a.capture = capture
+	a.mu.Unlock()
 }
 
 func (a *Adapter) handleDataChannel(dc *webrtc.DataChannel) {
@@ -536,6 +560,61 @@ func waitForGathering(gathering <-chan struct{}, timeout time.Duration) error {
 	}
 }
 
+// awaitSettledFrame returns the newest frame after a short settle window. gRPC
+// screenshot streams are latest-wins and can initially replay a stale frame
+// from before a reconnect; encoding that stale orientation makes the client
+// show black forever. Taking the latest frame after the settle window also
+// absorbs the emulator's portrait->landscape transition.
+func awaitSettledFrame(frames <-chan emugrpc.Frame, timeout, settle time.Duration) (emugrpc.Frame, error) {
+	overall := time.NewTimer(timeout)
+	defer overall.Stop()
+
+	var latest emugrpc.Frame
+	var settleTimer *time.Timer
+	var settleCh <-chan time.Time
+	for {
+		select {
+		case frame, ok := <-frames:
+			if !ok {
+				if settleTimer != nil {
+					return latest, nil
+				}
+				return emugrpc.Frame{}, fmt.Errorf("video capture unavailable: emulator closed the screenshot stream")
+			}
+			latest = frame
+			if settleTimer == nil && frameHasContent(frame.Data) {
+				settleTimer = time.NewTimer(settle)
+				settleCh = settleTimer.C
+			}
+		case <-settleCh:
+			return latest, nil
+		case <-overall.C:
+			if settleTimer != nil {
+				return latest, nil
+			}
+			return emugrpc.Frame{}, fmt.Errorf("video capture unavailable: no screenshot frame from emulator within %s", timeout)
+		}
+	}
+}
+
+// frameHasContent reports whether a raw RGBA frame has any meaningful
+// non-black pixels. A reconnect can briefly deliver an all-black buffer;
+// starting the encoder on that frame leaves the client black. Sparse
+// sampling is enough to distinguish a composited screen from black.
+func frameHasContent(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+	const step = 4 * 64 // every 64th pixel, RGBA
+	nonBlack := 0
+	for i := 0; i+3 < len(data); i += step {
+		if data[i] > 8 || data[i+1] > 8 || data[i+2] > 8 {
+			nonBlack++
+		}
+	}
+	return nonBlack > 0
+}
+
 func (a *Adapter) HandleICECandidate(candidate string) error {
 	a.mu.Lock()
 	pc := a.pc
@@ -550,6 +629,32 @@ func (a *Adapter) HandleInput(ev transport.InputEvent) error {
 	return a.handleInputEvent(ev)
 }
 
+// touchPixelCoordinates maps the client's normalized coordinates (which are
+// relative to the encoded/displayed frame) into the emulator sendTouch
+// coordinate space. That RPC expects the panel's natural-orientation pixels:
+// at ROTATION_90 a landscape display point (x,y) becomes natural (H-y, x).
+// Sending landscape coordinates directly makes points beyond natural width
+// no-ops, which was the "video works but touch does nothing" bug.
+func (a *Adapter) touchPixelCoordinates(nx, ny float64) (int32, int32) {
+	x := int(math.Round(nx * float64(a.screenW)))
+	y := int(math.Round(ny * float64(a.screenH)))
+
+	naturalW, naturalH := a.screenW, a.screenH
+	switch a.rotation {
+	case 90, 270:
+		naturalW, naturalH = a.screenH, a.screenW
+	}
+	switch a.rotation {
+	case 90:
+		x, y = naturalW-y, x
+	case 180:
+		x, y = naturalW-x, naturalH-y
+	case 270:
+		x, y = y, naturalH-x
+	}
+	return clampCoordinate(int32(x), naturalW), clampCoordinate(int32(y), naturalH)
+}
+
 func (a *Adapter) handleInputEvent(ev transport.InputEvent) error {
 	role := a.Role()
 	if ev.Type == "touch" && a.touchSender != nil && allowsInput(role) {
@@ -558,10 +663,7 @@ func (a *Adapter) handleInputEvent(ev transport.InputEvent) error {
 		case "up", "cancel":
 			pressure = 0
 		}
-		x := int32(math.Round(ev.X * float64(a.screenW)))
-		y := int32(math.Round(ev.Y * float64(a.screenH)))
-		x = clampCoordinate(x, a.screenW)
-		y = clampCoordinate(y, a.screenH)
+		x, y := a.touchPixelCoordinates(ev.X, ev.Y)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err := a.touchSender.SendTouch(ctx, []emugrpc.TouchPoint{{
@@ -662,25 +764,24 @@ func (a *Adapter) Stop() error {
 //
 // Grouping matters, it's not just tidiness: pion's TrackLocalStaticSample
 // advances its RTP timestamp by Sample.Duration on every WriteSample call,
-// so writing each NAL as its own sample gives SPS/PPS/SEI/slice — all part
-// of the SAME video frame — different RTP timestamps. A receiver can never
+// so writing each NAL as its own sample gives SPS/PPS/SEI/slice  - all part
+// of the SAME video frame  - different RTP timestamps. A receiver can never
 // reassemble those into one decodable access unit; every frame fails to
 // decode even though bytes clearly arrive. This went unnoticed with the
 // previous adb-screenrecord capture source because Android's encoder
 // rarely re-sent parameter sets per frame, so most frames really were a
-// single NAL — ffmpeg-produced H264 (confirmed via h264_videotoolbox)
+// single NAL  - ffmpeg-produced H264 (confirmed via h264_videotoolbox)
 // emits an SEI NAL alongside SPS/PPS on every keyframe, hitting this
 // constantly. pion's own H264 payloader (see emitNalus in
 // pion/rtp/codecs/h264_packet.go) is explicitly built to accept a
-// multi-NAL Annex-B buffer per Sample and split it correctly — that's the
+// multi-NAL Annex-B buffer per Sample and split it correctly  - that's the
 // API this should have been using all along.
 //
 // Multi-slice encoders add a second boundary problem: one picture can be
 // spread over many slice NALs (libx264 with -tune zerolatency emits one per
 // CPU core), and all of them must share one timestamp. See addNAL's
 // first_mb_in_slice grouping.
-// sampleWriter is the one method pipeH264 needs from a video track —
-// satisfied by *webrtc.TrackLocalStaticSample; a fake in tests captures
+// sampleWriter is the one method pipeH264 needs from a video track  - // satisfied by *webrtc.TrackLocalStaticSample; a fake in tests captures
 // WriteSample calls without a real PeerConnection.
 type sampleWriter interface {
 	WriteSample(sample media.Sample) error
@@ -716,7 +817,7 @@ func pipeH264(r io.Reader, track sampleWriter, tag string) {
 	// A slice NAL (type 1 or 5) does NOT necessarily end the access unit.
 	// ffmpeg's libx264 under -tune zerolatency emits one slice per CPU core
 	// (16 slices per picture on this machine's 9700X), and every slice of
-	// one picture must share one RTP timestamp — writing each slice as its
+	// one picture must share one RTP timestamp  - writing each slice as its
 	// own sample made pion advance the timestamp 16× faster than the real
 	// frame rate. Slice headers carry first_mb_in_slice; a slice starting at
 	// macroblock 0 begins a new picture, so only that one flushes the

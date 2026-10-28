@@ -24,6 +24,20 @@ func (f *fakeEncoderProcess) Stdout() io.ReadCloser           { return f.stdout 
 func (f *fakeEncoderProcess) Write(frame []byte) (int, error) { return len(frame), nil }
 func (f *fakeEncoderProcess) Stop()                           {}
 
+func TestTouchPixelCoordinatesRotatesLandscapeInputIntoNaturalSpace(t *testing.T) {
+	adapter := NewAdapter("instance-1", "attachment-1", "owner", "adb", 2400, 1080, "", "", "")
+	adapter.rotation = 90
+	x, y := adapter.touchPixelCoordinates(0.5, 0.5)
+	if x != 540 || y != 1200 {
+		t.Fatalf("rotated touch = (%d,%d), want (540,1200)", x, y)
+	}
+	adapter.rotation = 0
+	x, y = adapter.touchPixelCoordinates(0.5, 0.5)
+	if x != 1200 || y != 540 {
+		t.Fatalf("unrotated touch = (%d,%d), want (1200,540)", x, y)
+	}
+}
+
 func TestAdapterUsesItsCurrentRoleForInput(t *testing.T) {
 	adapter := NewAdapter("instance-1", "attachment-1", "observer", "adb", 1080, 1920, "", "", "")
 	var receivedRole string

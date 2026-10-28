@@ -8,6 +8,18 @@ Entries are reverse-chronological.
 
 ---
 
+### 2026-10-28 — Reconnect black screen was a client renderer lifecycle bug
+
+Reconnect showed decoded-but-black video only on alternating sessions. Worker logs showed fresh frames and audio, and a direct gRPC frame capture proved the emulator content was non-black. The Flutter client was disposing its `RTCVideoRenderer` on every stream exit and creating a new texture for the next screen; on Android that intermittently left the new texture black even though `framesDecoded` advanced. The client now keeps one app-lifetime renderer and only swaps its `srcObject`.
+
+Related fixes in the same pass:
+- Touch now maps the displayed landscape coordinates back into the emulator panel's natural coordinates before `sendTouch` (for ROTATION_90: `(H-y, x)`); sending display coordinates made all taps no-ops.
+- Capture starts only after ICE/DTLS is connected, waits for a non-black settled frame, and uses the latest frame, avoiding lost opening SPS/PPS+IDR samples and stale reconnect frames.
+- The stream screen keeps a small top-left exit affordance because games can request immersive fullscreen and hide the guest's Back/Home bar.
+- `MAKO_H264_ENCODER` can override encoder selection for diagnostics; default remains the platform hardware encoder.
+
+---
+
 ### 2026-10-28 — Landscape games need capture-rotation normalization
 
 The first real-client Zenless Zone Zero stream connected but rendered black. The worker log showed every frame dropped at 540x960: the emulator's gRPC screenshot stream had actually returned a 432x960 portrait buffer whose composition was rotated 90°, while the AVD metadata was portrait. Waiting for a fixed frame size therefore never matched after the game forced landscape.
